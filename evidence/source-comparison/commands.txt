@@ -1,0 +1,3 @@
+python tools/compare_source_markdown.py docs/source/milestone_1.md reviewer/project_source_m1.md --output evidence/source-comparison/m1.txt
+python tools/compare_source_markdown.py docs/source/milestone_1_2.md reviewer/project_source_m1_2.md --output evidence/source-comparison/m12.txt
+python tools/spec_check.py --project-m1 reviewer/project_source_m1.md --project-m12 reviewer/project_source_m1_2.md

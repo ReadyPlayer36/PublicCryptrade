@@ -1,0 +1,29 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  python312:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install project and development tools
+        run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
+      - name: Confirm Python baseline
+        run: python --version
+      - name: Collect all tests (must succeed even while behavior tests are red)
+        run: python -m pytest --collect-only -q
+      - name: Run spec tooling
+        run: python -m pytest tests/tools/test_spec_tooling.py -q
+      - name: Run behavior tests (expected red until implementation is approved)
+        continue-on-error: true
+        run: python -m pytest -ra
+      - name: Dependency audit
+        continue-on-error: true
+        run: pip-audit

@@ -1,0 +1,4 @@
+Reviewer approval, 2026-10-10 UTC. Stage-1 specification freeze approved for `matrix.yaml` SHA-256 `330c3570e7eb335caa59b42d24d149b0c5e93164b34fe3e56b6317861e82af78` (schema_version 2.9), `matrix_schema.json` `e99459fc1467b2cc3391a16ab711690adf9ad6bab59d405e60ecf351f1d45217`, the tools and sources listed in `evidence/freeze/stage1-tools-sha256.txt`, `stage1-source-sha256.txt` and `stage1-reviewer-source-sha256.txt`, and reviewer copies `932dc33b…fcc` and `a809ce19…c5df`. This is not an approval of Milestone 1 or of any implementation. Milestone 1 remains BLOCKED.
+
+Additional freeze-record integrity entry (not part of the approval line):
+SHA-256  tests/tools/test_spec_tooling.py  a1dd903f47194aea6626712fd7d32f396b1ef2066677f0af5d97216c9dd1a76d

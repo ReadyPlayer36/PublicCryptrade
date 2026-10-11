@@ -1,0 +1,11 @@
+STAGE-1 FREEZE CANDIDATE
+STATUS: AWAITING EXPLICIT REVIEWER APPROVAL
+APPROVAL: null
+SCHEMA VERSION: 2.9
+YAML: 330c3570e7eb335caa59b42d24d149b0c5e93164b34fe3e56b6317861e82af78
+TOOLS MANIFEST: evidence/freeze/stage1-tools-sha256.txt
+SOURCE MANIFEST: evidence/freeze/stage1-source-sha256.txt
+REVIEWER SOURCE MANIFEST: evidence/freeze/stage1-reviewer-source-sha256.txt
+REVIEWER COPIES: M1=932dc33b9223be26fe449b3e11c4f24b45a15bf7e6f44127d53fc0ae1d907fcc M1_2=a809ce198885f61a6dbf92fba09ac5e17398c5daebbdcef0379210185c95c5df
+REVIEWER-COPY MATCH TO PROJECT: confirmed by reviewer.
+NOTE: This records reviewer confirmation of the supplied copy hashes only; it is not Stage-1 approval, Milestone 1 approval, or implementation approval.
