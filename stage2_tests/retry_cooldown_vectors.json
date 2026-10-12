@@ -1,0 +1,217 @@
+{
+ "policy_from_frozen_yaml": {
+  "attempts_total": 4,
+  "backoff_base_s": 1,
+  "factor": 2,
+  "cap_s": 3,
+  "jitter_max_s": 1,
+  "budget_s": 30,
+  "retry_after_cap_s": 60
+ },
+ "formula": "sleep_k = min(cap, base*factor**k) + jitter (k=0..2); jitter injected, 0<=jitter<=jitter_max; Retry-After sleeps exactly Retry-After, no jitter",
+ "cases": [
+  {
+   "name": "500x4",
+   "responses": [
+    500,
+    500,
+    500,
+    500
+   ],
+   "expected_requests": 4,
+   "jitter_fixed_s": 0.25,
+   "expected_sleeps_s": [
+    1.25,
+    2.25,
+    3.25
+   ],
+   "expected_outcome": "BinanceClientError, no cooldown"
+  },
+  {
+   "name": "500_then_200",
+   "responses": [
+    500,
+    200
+   ],
+   "expected_requests": 2,
+   "jitter_fixed_s": 0.0,
+   "expected_sleeps_s": [
+    1
+   ],
+   "expected_outcome": "success"
+  },
+  {
+   "name": "400",
+   "responses": [
+    400
+   ],
+   "expected_requests": 1,
+   "expected_sleeps_s": [],
+   "expected_outcome": "BinanceClientError, no cooldown"
+  },
+  {
+   "name": "403",
+   "responses": [
+    403
+   ],
+   "expected_requests": 1,
+   "expected_sleeps_s": [],
+   "expected_outcome": "BinanceClientError, no cooldown"
+  },
+  {
+   "name": "418_no_retry_after",
+   "responses": [
+    418
+   ],
+   "expected_requests": 1,
+   "expected_sleeps_s": [],
+   "expected_cooldown_s": 600
+  },
+  {
+   "name": "418_retry_after_900",
+   "responses": [
+    {
+     "status": 418,
+     "retry_after": 900
+    }
+   ],
+   "expected_requests": 1,
+   "expected_sleeps_s": [],
+   "expected_cooldown_s": 900
+  },
+  {
+   "name": "429_RA10_x4",
+   "responses": [
+    {
+     "status": 429,
+     "retry_after": 10
+    },
+    {
+     "status": 429,
+     "retry_after": 10
+    },
+    {
+     "status": 429,
+     "retry_after": 10
+    },
+    {
+     "status": 429,
+     "retry_after": 10
+    }
+   ],
+   "expected_requests": 4,
+   "expected_sleeps_s": [
+    10,
+    10,
+    10
+   ],
+   "expected_cooldown_s": 300,
+   "note": "total sleep 30 == budget (not exceeded); exhausted 429 -> max(10,300)"
+  },
+  {
+   "name": "429_RA11",
+   "responses": [
+    {
+     "status": 429,
+     "retry_after": 11
+    },
+    {
+     "status": 429,
+     "retry_after": 11
+    },
+    {
+     "status": 429,
+     "retry_after": 11
+    },
+    {
+     "status": 429,
+     "retry_after": 11
+    }
+   ],
+   "expected_requests": 3,
+   "expected_sleeps_s": [
+    11,
+    11
+   ],
+   "expected_cooldown_s": 600,
+   "note": "third wait would make 33>30 -> abort before sleeping, trigger=budget exceeded -> max(11,600)"
+  },
+  {
+   "name": "429_RA61",
+   "responses": [
+    {
+     "status": 429,
+     "retry_after": 61
+    }
+   ],
+   "expected_requests": 1,
+   "expected_sleeps_s": [],
+   "expected_cooldown_s": 600
+  },
+  {
+   "name": "429_RA45",
+   "responses": [
+    {
+     "status": 429,
+     "retry_after": 45
+    }
+   ],
+   "expected_requests": 1,
+   "expected_sleeps_s": [],
+   "expected_cooldown_s": 600,
+   "note": "<=60 cap but >30 budget: abort + cooldown"
+  },
+  {
+   "name": "429_no_header_x4",
+   "responses": [
+    429,
+    429,
+    429,
+    429
+   ],
+   "expected_requests": 4,
+   "jitter_fixed_s": 0.0,
+   "expected_sleeps_s": [
+    1,
+    2,
+    3
+   ],
+   "expected_cooldown_s": 300
+  },
+  {
+   "name": "2xx_malformed_json_x4",
+   "responses": [
+    "200:not-json",
+    "200:not-json",
+    "200:not-json",
+    "200:not-json"
+   ],
+   "expected_requests": 4,
+   "jitter_fixed_s": 0.0,
+   "expected_sleeps_s": [
+    1,
+    2,
+    3
+   ],
+   "expected_outcome": "BinanceClientError (malformed), no cooldown"
+  },
+  {
+   "name": "2xx_wrong_shape",
+   "responses": [
+    "200:{\"msg\":\"x\"}"
+   ],
+   "expected_requests": 1,
+   "expected_sleeps_s": [],
+   "expected_outcome": "data/schema error, not retried"
+  },
+  {
+   "name": "3xx",
+   "responses": [
+    302
+   ],
+   "expected_requests": 1,
+   "expected_sleeps_s": [],
+   "expected_outcome": "error, redirect never followed"
+  }
+ ]
+}
