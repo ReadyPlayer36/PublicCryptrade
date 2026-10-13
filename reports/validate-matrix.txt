@@ -1,0 +1,9 @@
+PASS: YAML parsed
+PASS: JSON Schema validation
+PASS: canonical Markdown hashes verified
+PASS: source headings verified (M1 28 sections, 1.2 14 sections)
+PASS: source citations resolved (M1 §28 items 27, 1.2 §5 items 27)
+PASS: unique acceptance row IDs (104)
+PASS: labels, citations, artifact paths and evidence classes validated (104 rows)
+PASS: item bindings agree with citations/tests (58 item bindings)
+PASS: mutation killers are bound (18 killer nodeids)

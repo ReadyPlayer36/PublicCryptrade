@@ -1,0 +1,15 @@
+# Stage 2 test-design decisions (tests-only revision)
+
+This document records acceptance-test decisions only. It does not authorize production implementation or alter the frozen v2.9 matrix.
+
+- **Determinism:** constructors will accept injected `sleep`, `jitter`, `now_ms`, and `http_client`; tests will not monkeypatch global time/sleep functions.
+- **Sleep budget:** abort before sleeping when `total_slept + next_wait > 30`; exactly 30 seconds is allowed.
+- **Timeouts:** `ConnectError` and `ConnectTimeout` are connect failures and may trigger host fallback only before the first successful server-time call. `ReadTimeout`, `WriteTimeout`, and `PoolTimeout` retry on the same host.
+- **Cooldown file:** JSON shape is `{"until_ms": int, "reason": str}` and is global across allowed hosts. An active cooldown blocks all network I/O, including the time endpoint. Missing, corrupt, non-integer, or negative values fail closed.
+- **Finality:** the client sends `endTime = effective_end - 1`. If upstream still returns any candle with `close_time_ms >= B`, abort; never silently drop it. The independent vectors live under `tests/fixtures/vectors/`.
+- **Conflict comparison:** numeric `Decimal` equality for prices, base volume, and quote volume; integer equality for close time and trade count.
+- **Exception contracts:** `EmptyEffectiveRangeError` for an effective end not greater than requested start; `NaiveDatetimeError` for naive input datetimes; `NonFinalCandleError` when upstream returns a non-final candle; `CorruptCooldownError` for invalid cooldown persistence. Tests assert type and diagnostic message.
+- **Red-reason gate:** a failure is an expected red only when JUnit traceback includes `NotImplementedError` raised from `src/trading_app/`. Test-body placeholders, assertion failures, skips, collection errors, and unexpected passes are rejected. Passing tooling/CI/hygiene rows are explicitly allowlisted in `tools/red_reason_gate.py`.
+- **Provenance:** the public baseline `a88a843` has tree `408a6a42…`; the local bundle's original commit identity is `de1bd38…` and is not present in public history. The revised commit message records that gap. Any push of original history is a separate, optional branch operation.
+
+Any test expectation that conflicts with `matrix.yaml` requires a new spec version and reviewer sign-off; no frozen matrix or frozen tooling file is changed by this revision.

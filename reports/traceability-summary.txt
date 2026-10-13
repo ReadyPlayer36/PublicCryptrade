@@ -1,0 +1,6 @@
+Traceability checker raw error line count: 317
+missing ci JUnit evidence: 7
+missing live JUnit evidence: 8
+nodeid did not pass: 179
+nodeid failed: 123
+No missing markers, JUnit properties, bound tests, static skip/xfail, or vacuous-body errors were found. The frozen checker emits both “did not pass” and “failed” for failed testcases.

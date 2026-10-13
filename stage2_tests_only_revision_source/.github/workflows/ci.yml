@@ -1,0 +1,53 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  python312:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install project and development tools
+        run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
+      - name: Confirm Python and pytest baseline
+        run: python -c "import sys, pytest; print(sys.version); print('pytest', pytest.__version__); assert sys.version_info[:2] == (3, 12); assert pytest.__version__ == '9.1.1'"
+      - name: Collect all tests
+        run: python -m pytest --collect-only -q
+      - name: Check frozen specification hashes
+        run: python tools/check_freeze.py
+      - name: Validate frozen matrix
+        run: python tools/validate_matrix.py matrix.yaml --schema matrix_schema.json --m1 docs/source/milestone_1.md --m12 docs/source/milestone_1_2.md
+      - name: Run specification/source checks (blocking)
+        run: python tools/spec_check.py --project-m1 reviewer/project_source_m1.md --project-m12 reviewer/project_source_m1_2.md
+      - name: Run expected-red behavior suite and export JUnit
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set +e
+          python -m pytest -ra --junitxml=artifacts/junit-offline.xml
+          pytest_rc=$?
+          set -e
+          python tools/red_reason_gate.py artifacts/junit-offline.xml --pytest-exit-code "$pytest_rc"
+      - name: Upload offline JUnit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-offline
+          path: artifacts/junit-offline.xml
+          if-no-files-found: error
+      - name: Dependency audit (nonblocking until final gate)
+        continue-on-error: true
+        run: pip-audit
+      - name: Hash-pinned constraints evidence status
+        run: |
+          if [ -f requirements-hashed.txt ]; then
+            echo "Hash-pinned constraints file present; final verification remains required."
+          else
+            echo "BLOCKED: hash-pinned constraints evidence remains outstanding; Milestone 1 stays BLOCKED."
+          fi

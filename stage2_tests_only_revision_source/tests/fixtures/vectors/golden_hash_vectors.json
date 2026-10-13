@@ -1,0 +1,8 @@
+{
+ "spec_ref":"matrix.yaml hash block (field order, 0x1f field sep, 0x0a record sep, no trailing LF, decimals via format(d,'f'), UTF-8)",
+ "empty":{"records":[],"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+ "one_record":{"records":[{"symbol":"BTCUSDT","timeframe":"5m","open_time_ms":1767571200000,"close_time_ms":1767571499999,"open":"100.10","high":"101.00","low":"99.50","close":"100.50","volume":"12.34500000","quote_volume":"1240.00000000","trade_count":100}],"sha256":"a408b348298ece500741f89ca6eb5045c302855813863e976157a29eed1bc7bb"},
+ "two_records":{"records":[{"symbol":"BTCUSDT","timeframe":"5m","open_time_ms":1767571200000,"close_time_ms":1767571499999,"open":"100.10","high":"101.00","low":"99.50","close":"100.50","volume":"12.34500000","quote_volume":"1240.00000000","trade_count":100},{"symbol":"BTCUSDT","timeframe":"5m","open_time_ms":1767571500000,"close_time_ms":1767571799999,"open":"100.50","high":"100.90","low":"100.00","close":"100.20","volume":"0.00000000","quote_volume":"0.00000001","trade_count":0}],"sha256":"943eb5672a821dddb6c6f7400a7bde16f13a11a674da1ff02ffddb45b672d14a"},
+ "negative_control_reordered":{"note":"must differ from two_records","sha256":"28b1777cbb9378b5eab18e8a81eb5f21bf50575b2ca8302cebaa4c00c3018a33"},
+ "negative_control_scientific_notation":{"note":"hashing str(Decimal) instead of format(d,'f') changes the digest for r2 (0E-8 / 1E-8)","sha256_with_str_decimal":"8a08d76ff03a49ce1f5170091f397d44aabd9450f6bc4f412d2d2320c7fc0c2b","differs_from_correct_one_record_r2":true}
+}

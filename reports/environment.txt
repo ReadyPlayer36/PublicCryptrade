@@ -1,0 +1,6 @@
+Python: 3.13.5 (main, Jul 15 2026, 20:25:40) [GCC 14.2.0]
+Pytest: pytest 9.0.2
+Installed interpreters:
+cpython-3.13.5-linux-x86_64-gnu    /usr/bin/python3.13
+cpython-3.13.5-linux-x86_64-gnu    /usr/bin/python3 -> python3.13
+cpython-3.13.5-linux-x86_64-gnu    /usr/bin/python -> python3

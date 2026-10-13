@@ -1,0 +1,3178 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.0.2, pluggy-1.6.0
+rootdir: /mnt/data/stage2_revision_work/repo
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.13.0, ddtrace-4.4.0, Faker-40.1.2, asyncio-1.3.0, cov-7.0.0, json-report-1.5.0, metadata-3.1.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 202 items
+
+tests/ci/test_clean_install.py ..                                        [  0%]
+tests/ci/test_dependency_audit.py ..                                     [  1%]
+tests/ci/test_workflow_evidence.py .                                     [  2%]
+tests/integration/test_audit.py FF                                       [  3%]
+tests/integration/test_binance_download.py FF                            [  4%]
+tests/integration/test_cli.py FF.                                        [  5%]
+tests/integration/test_concurrency.py FFF                                [  7%]
+tests/integration/test_cooldown.py FFF                                   [  8%]
+tests/integration/test_finality.py FFFFFFFFFFF                           [ 14%]
+tests/integration/test_legacy_scan.py F                                  [ 14%]
+tests/integration/test_metadata.py F                                     [ 15%]
+tests/integration/test_repository.py FFFF                                [ 17%]
+tests/integration/test_repository_conflicts.py FFFFFF                    [ 20%]
+tests/integration/test_service.py F                                      [ 20%]
+tests/integration/test_sqlite_pragmas.py FF                              [ 21%]
+tests/integration/test_sqlite_verification.py FFFFFF                     [ 24%]
+tests/integration/test_time_snapshot.py F                                [ 25%]
+tests/integration/test_transactions.py FFF                               [ 26%]
+tests/live/test_fixed_range.py FF                                        [ 27%]
+tests/live/test_future_end.py F                                          [ 28%]
+tests/live/test_pagination_range.py F                                    [ 28%]
+tests/live/test_run_evidence.py .                                        [ 29%]
+tests/mutation/test_mutation_runner.py .                                 [ 29%]
+tests/mutation/test_required_mutants.py ..                               [ 30%]
+tests/observations/test_obs01_boundaries.py .                            [ 31%]
+tests/observations/test_obs02_finality_lag.py F                          [ 31%]
+tests/observations/test_obs03_gate.py .                                  [ 32%]
+tests/security/test_endpoint_hardening.py FFFFFFFFFFF                    [ 37%]
+tests/security/test_logging.py FF                                        [ 38%]
+tests/security/test_network_policy.py FFF                                [ 40%]
+tests/security/test_tripwire.py FFF                                      [ 41%]
+tests/tools/test_coverage_gate.py ...                                    [ 43%]
+tests/tools/test_degenerate_double.py .                                  [ 43%]
+tests/tools/test_documentation_gate.py ...                               [ 45%]
+tests/tools/test_evidence_integrity.py .                                 [ 45%]
+tests/tools/test_freeze_checker.py .......                               [ 49%]
+tests/tools/test_gate_policy.py ..                                       [ 50%]
+tests/tools/test_gate_tools.py .                                         [ 50%]
+tests/tools/test_outcome_gate.py .                                       [ 50%]
+tests/tools/test_red_reason_gate.py ....                                 [ 52%]
+tests/tools/test_spec_tooling.py .............                           [ 59%]
+tests/tools/test_traceability.py ...                                     [ 60%]
+tests/tools/test_validate_matrix.py ..                                   [ 61%]
+tests/tools/test_vector_policy_consistency.py .                          [ 62%]
+tests/tools/test_warning_policy.py .                                     [ 62%]
+tests/unit/test_binance_client.py FFFFFFFFFFFFFFFFFFFFFFFF               [ 74%]
+tests/unit/test_config.py FFFF                                           [ 76%]
+tests/unit/test_cooldown.py FFFFFFFFF                                    [ 81%]
+tests/unit/test_dependencies.py .                                        [ 81%]
+tests/unit/test_finality.py FFFFFF                                       [ 84%]
+tests/unit/test_gitignore.py .                                           [ 85%]
+tests/unit/test_hash.py F                                                [ 85%]
+tests/unit/test_hashing.py FF                                            [ 86%]
+tests/unit/test_policy.py ....                                           [ 88%]
+tests/unit/test_project_layout.py .                                      [ 89%]
+tests/unit/test_python_policy.py .                                       [ 89%]
+tests/unit/test_repository_conflicts.py FF                               [ 90%]
+tests/unit/test_retry_policy.py FFF                                      [ 92%]
+tests/unit/test_scope.py .                                               [ 92%]
+tests/unit/test_time_snapshot.py F                                       [ 93%]
+tests/unit/test_transactions.py F                                        [ 93%]
+tests/unit/test_validator.py FFFFFFFFFFF                                 [ 99%]
+tests/unit/test_verification_sql.py FF                                   [100%]
+
+=================================== FAILURES ===================================
+_________________________ test_failure_audit_contents __________________________
+
+    @pytest.mark.requirement("AUDIT-01")
+    def test_failure_audit_contents():
+        """Acceptance scenario bound to frozen matrix row(s): AUDIT-01."""
+        from trading_app.data.hashing import hash_candles
+>       hash_candles([])
+
+tests/integration/test_audit.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([],), kwargs = {}
+
+>   def hash_candles(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: hash_candles")
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: hash_candles
+
+src/trading_app/data/hashing.py:2: NotImplementedError
+___________ test_failure_audit_write_cannot_mask_original_exception ____________
+
+    @pytest.mark.requirement("AUDIT-02")
+    def test_failure_audit_write_cannot_mask_original_exception():
+        """Acceptance scenario bound to frozen matrix row(s): AUDIT-02."""
+        from trading_app.data.hashing import hash_candles
+>       hash_candles([])
+
+tests/integration/test_audit.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([],), kwargs = {}
+
+>   def hash_candles(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: hash_candles")
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: hash_candles
+
+src/trading_app/data/hashing.py:2: NotImplementedError
+_____________________________ test_kline_download ______________________________
+
+    @pytest.mark.requirement("M1-05")
+    def test_kline_download():
+        row = [1767571200000, "100.10", "101.00", "99.50", "100.50", "12.345", 1767571499999, "1240", 100, "0", "0", "0"]
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000}), FakeResponse(payload=[row])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+>       rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_binance_download.py:14: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49668e2a50>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 5, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+____________________________ test_kline_pagination _____________________________
+
+    @pytest.mark.requirement("M1-05")
+    def test_kline_pagination():
+        first = [[1767571200000, "100", "101", "99", "100", "1", 1767571499999, "100", 1, "0", "0", "0"]]
+        second = [[1767571500000, "100", "101", "99", "100", "1", 1767571799999, "100", 1, "0", "0", "0"]]
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571800000}), FakeResponse(payload=first), FakeResponse(payload=second)])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+>       rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=datetime.fromtimestamp(1767571800, timezone.utc))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_binance_download.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966794550>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 10, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+________________ test_cli_exit_codes_and_clean_expected_errors _________________
+
+    @pytest.mark.requirement("CLI-02")
+    def test_cli_exit_codes_and_clean_expected_errors():
+        from scripts.download_candles import main
+        with pytest.raises(SystemExit) as error:
+>           main(["--not-a-real-option"])
+
+tests/integration/test_cli.py:9: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+argv = ['--not-a-real-option']
+
+    def main(argv=None):
+        """Parse public-data research arguments and return a process status; not implemented."""
+>       raise NotImplementedError("Stage-2 implementation not started: download_candles CLI")
+E       NotImplementedError: Stage-2 implementation not started: download_candles CLI
+
+src/trading_app/cli.py:4: NotImplementedError
+________________ test_download_script_with_mocked_public_client ________________
+
+    @pytest.mark.requirement("CLI-01")
+    def test_download_script_with_mocked_public_client():
+        from scripts.download_candles import main
+        # The approved CLI contract will consume public-client arguments and return 0 on success.
+>       assert main(["--symbol", "BTCUSDT", "--timeframe", "5m", "--start", "2026-01-05T00:00:00Z", "--end", "2026-01-05T01:00:00Z"]) == 0
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_cli.py:16: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+argv = ['--symbol', 'BTCUSDT', '--timeframe', '5m', '--start', '2026-01-05T00:00:00Z', ...]
+
+    def main(argv=None):
+        """Parse public-data research arguments and return a process status; not implemented."""
+>       raise NotImplementedError("Stage-2 implementation not started: download_candles CLI")
+E       NotImplementedError: Stage-2 implementation not started: download_candles CLI
+
+src/trading_app/cli.py:4: NotImplementedError
+_________________ test_conflict_rolls_back_entire_transaction __________________
+
+    @pytest.mark.requirement("TX-01")
+    def test_conflict_rolls_back_entire_transaction():
+        """Acceptance scenario bound to frozen matrix row(s): TX-01."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_concurrency.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49668e2cf0>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+_____________________ test_no_duplicate_rows_after_overlap _____________________
+
+    @pytest.mark.requirement("TX-01")
+    def test_no_duplicate_rows_after_overlap():
+        """Acceptance scenario bound to frozen matrix row(s): TX-01."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_concurrency.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f4966794690>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+________________ test_two_processes_overlap_without_duplicates _________________
+
+    @pytest.mark.requirement("TX-01")
+    def test_two_processes_overlap_without_duplicates():
+        """Acceptance scenario bound to frozen matrix row(s): TX-01."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_concurrency.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49667947d0>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+________________________ test_cooldown_directory_scope _________________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_cooldown_directory_scope0')
+
+    @pytest.mark.requirement("COOLDOWN-04")
+    def test_cooldown_directory_scope(tmp_path):
+        assert cooldown_policy()["directory_scoped"] is True
+        path = tmp_path / "data" / "binance_cooldown.json"
+        path.parent.mkdir(); path.write_text('{"until_ms": "not-an-int", "reason": "test"}')
+        with pytest.raises(CorruptCooldownError, match="integer|invalid|cooldown"):
+>           read_cooldown(path)
+
+tests/integration/test_cooldown.py:16: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (PosixPath('/tmp/pytest-of-root/pytest-8/test_cooldown_directory_scope0/data/binance_cooldown.json'),)
+kwargs = {}
+
+    def read_cooldown(*args, **kwargs):
+        """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
+>       raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
+E       NotImplementedError: Stage-2 implementation not started: read_cooldown
+
+src/trading_app/data/cooldown.py:13: NotImplementedError
+_____________________ test_cooldown_is_global_across_hosts _____________________
+
+    @pytest.mark.requirement("COOLDOWN-01")
+    def test_cooldown_is_global_across_hosts():
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000})])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="time|server"):
+>           client.get_server_time()
+
+tests/integration/test_cooldown.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966794b90>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+___________________ test_cooldown_persists_across_processes ____________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_cooldown_persists_across_0')
+
+    @pytest.mark.requirement("COOLDOWN-03")
+    def test_cooldown_persists_across_processes(tmp_path):
+        path = tmp_path / "binance_cooldown.json"
+        path.write_text('{"until_ms": 1767571800000, "reason": "418"}')
+        # Reopening from disk, rather than retaining an in-memory object, is the persistence contract.
+>       assert read_cooldown(path) == {"until_ms": 1767571800000, "reason": "418"}
+               ^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_cooldown.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (PosixPath('/tmp/pytest-of-root/pytest-8/test_cooldown_persists_across_0/binance_cooldown.json'),)
+kwargs = {}
+
+    def read_cooldown(*args, **kwargs):
+        """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
+>       raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
+E       NotImplementedError: Stage-2 implementation not started: read_cooldown
+
+src/trading_app/data/cooldown.py:13: NotImplementedError
+_______________ test_client_clamps_end_time_to_finality_boundary _______________
+
+    @pytest.mark.requirement("FINAL-01")
+    def test_client_clamps_end_time_to_finality_boundary():
+        s = VECTORS["extra"]["future_end"]["S_ms"]
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+>       result = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=FUTURE)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_finality.py:19: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496678dcd0>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 8, 20, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+____________ test_future_end_reports_requested_and_effective_ranges ____________
+
+    @pytest.mark.requirement("FINAL-03")
+    def test_future_end_reports_requested_and_effective_ranges():
+        s = VECTORS["extra"]["future_end"]["S_ms"]
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+>       result = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=FUTURE)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_finality.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496678d810>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 8, 20, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+___________ test_b_not_final_vectors_shrink_to_explicit_empty_range ____________
+
+    @pytest.mark.requirement("FINAL-07")
+    def test_b_not_final_vectors_shrink_to_explicit_empty_range():
+        for case in VECTORS["cases"]:
+            if case["case"] != "B_not_final":
+                continue
+            client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient([FakeResponse(payload={"serverTime": case["S_ms"]})]))
+            with pytest.raises(EmptyEffectiveRangeError, match="effective.*range|effective_end"):
+>               client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+
+tests/integration/test_finality.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496680c050>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 5, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+__________________ test_returned_nonfinal_candle_aborts_fetch __________________
+
+    @pytest.mark.requirement("FINAL-06")
+    def test_returned_nonfinal_candle_aborts_fetch():
+        s = VECTORS["cases"][0]["S_ms"]
+        kline = [VECTORS["cases"][0]["candle_open_ms"], "100.10", "101.00", "99.50", "100.50", "12.345", VECTORS["cases"][0]["B_ms"], "1240", 100, "0", "0", "0"]
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[kline])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(NonFinalCandleError, match="non-final|finality|close"):
+>           client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+
+tests/integration/test_finality.py:50: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49667ddf20>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 5, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+____________ test_server_time_failure_aborts_without_kline_request _____________
+
+    @pytest.mark.requirement("FINAL-01")
+    def test_server_time_failure_aborts_without_kline_request():
+        http = FakeHttpClient(errors=[TimeoutError("server time down")])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="server.time|time"):
+>           client.get_server_time()
+
+tests/integration/test_finality.py:58: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49667de690>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_________________________ test_boundary_rule[lag-0ms] __________________________
+
+lag_ms = 0
+
+    @pytest.mark.requirement("FINAL-01")
+    @pytest.mark.parametrize("lag_ms", [0], ids=["lag-0ms"])
+    def test_boundary_rule(lag_ms):
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000}), FakeResponse(payload=[])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, finality_lag_ms=lag_ms)
+>       rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_finality.py:67: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49667c7150>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 5, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+_________________________ test_no_local_clock_fallback _________________________
+
+    @pytest.mark.requirement("FINAL-01")
+    def test_no_local_clock_fallback():
+        http = FakeHttpClient(errors=[TimeoutError("server time unavailable")])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="server.time|time"):
+>           client.get_server_time()
+
+tests/integration/test_finality.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49667c7750>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+______________ test_server_time_failure_aborts[invalid-timestamp] ______________
+
+failure = 'invalid-timestamp'
+
+    @pytest.mark.requirement("FINAL-01")
+    @pytest.mark.parametrize("failure", ["invalid-timestamp", "malformed-time", "server-time-failure"], ids=["invalid-timestamp", "malformed-time", "server-time-failure"])
+    def test_server_time_failure_aborts(failure):
+        if failure == "invalid-timestamp":
+            http = FakeHttpClient([FakeResponse(payload={"serverTime": -1})])
+        elif failure == "malformed-time":
+            http = FakeHttpClient([FakeResponse(payload={"serverTime": "not-an-integer"})])
+        else:
+            http = FakeHttpClient(errors=[TimeoutError("server time down")])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="time|timestamp|server"):
+>           client.get_server_time()
+
+tests/integration/test_finality.py:90: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49666c18b0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_______________ test_server_time_failure_aborts[malformed-time] ________________
+
+failure = 'malformed-time'
+
+    @pytest.mark.requirement("FINAL-01")
+    @pytest.mark.parametrize("failure", ["invalid-timestamp", "malformed-time", "server-time-failure"], ids=["invalid-timestamp", "malformed-time", "server-time-failure"])
+    def test_server_time_failure_aborts(failure):
+        if failure == "invalid-timestamp":
+            http = FakeHttpClient([FakeResponse(payload={"serverTime": -1})])
+        elif failure == "malformed-time":
+            http = FakeHttpClient([FakeResponse(payload={"serverTime": "not-an-integer"})])
+        else:
+            http = FakeHttpClient(errors=[TimeoutError("server time down")])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="time|timestamp|server"):
+>           client.get_server_time()
+
+tests/integration/test_finality.py:90: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49666c1e50>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_____________ test_server_time_failure_aborts[server-time-failure] _____________
+
+failure = 'server-time-failure'
+
+    @pytest.mark.requirement("FINAL-01")
+    @pytest.mark.parametrize("failure", ["invalid-timestamp", "malformed-time", "server-time-failure"], ids=["invalid-timestamp", "malformed-time", "server-time-failure"])
+    def test_server_time_failure_aborts(failure):
+        if failure == "invalid-timestamp":
+            http = FakeHttpClient([FakeResponse(payload={"serverTime": -1})])
+        elif failure == "malformed-time":
+            http = FakeHttpClient([FakeResponse(payload={"serverTime": "not-an-integer"})])
+        else:
+            http = FakeHttpClient(errors=[TimeoutError("server time down")])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="time|timestamp|server"):
+>           client.get_server_time()
+
+tests/integration/test_finality.py:90: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49668558d0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+________________ test_nonfinal_candle_during_pagination_aborts _________________
+
+    @pytest.mark.requirement("FINAL-02")
+    def test_nonfinal_candle_during_pagination_aborts():
+        s = 1767571500000
+        row = [1767571200000, "100", "101", "99", "100", "1", s, "100", 1, "0", "0", "0"]
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[row])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, finality_lag_ms=0)
+        from trading_app.data.finality import NonFinalCandleError
+        with pytest.raises(NonFinalCandleError, match="non-final|finality|close"):
+>           client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+
+tests/integration/test_finality.py:101: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49668566d0>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 5, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+____________________ test_legacy_scan_flags_without_repair _____________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_legacy_scan_flags_without0')
+
+    @pytest.mark.requirement("LEGACY-01")
+    def test_legacy_scan_flags_without_repair(tmp_path):
+        repository = CandleRepository(tmp_path / "legacy.db")
+>       report = repository.scan_legacy_data(repair=False)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_legacy_scan.py:9: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f496678eea0>
+args = (), kwargs = {'repair': False}
+
+    def scan_legacy_data(self, *args, **kwargs):
+        """Return legacy-data findings without modifying records; not implemented in Stage 2."""
+>       raise NotImplementedError("Stage-2 implementation not started: scan_legacy_data")
+E       NotImplementedError: Stage-2 implementation not started: scan_legacy_data
+
+src/trading_app/data/repository.py:11: NotImplementedError
+_______________________ test_data_fetch_metadata_fields ________________________
+
+    @pytest.mark.requirement("META-01")
+    def test_data_fetch_metadata_fields():
+        """Acceptance scenario bound to frozen matrix row(s): META-01."""
+        from trading_app.data.service import MarketDataService
+>       MarketDataService().download_and_store()
+
+tests/integration/test_metadata.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.service.MarketDataService object at 0x7f49668e3230>
+args = (), kwargs = {}
+
+>   def download_and_store(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: download_and_store")
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: download_and_store
+
+src/trading_app/data/service.py:4: NotImplementedError
+____________________ test_application_duplicate_prevention _____________________
+
+    @pytest.mark.requirement("M1-08")
+    def test_application_duplicate_prevention():
+        """Acceptance scenario bound to frozen matrix row(s): M1-08."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_repository.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f496678f100>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+__________________________ test_composite_uniqueness ___________________________
+
+    @pytest.mark.requirement("M1-07")
+    def test_composite_uniqueness():
+        """Acceptance scenario bound to frozen matrix row(s): M1-07."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_repository.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f496680e0f0>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+____________________ test_decimal_values_preserved_exactly _____________________
+
+    @pytest.mark.requirement("M1-13")
+    def test_decimal_values_preserved_exactly():
+        """Acceptance scenario bound to frozen matrix row(s): M1-13."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_repository.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f4966836690>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+_________________________ test_sqlalchemy_persistence __________________________
+
+    @pytest.mark.requirement("M1-07")
+    def test_sqlalchemy_persistence():
+        """Acceptance scenario bound to frozen matrix row(s): M1-07."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_repository.py:29: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f4966836cf0>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+__________________ test_conflict_compares_complete_field_set ___________________
+
+    @pytest.mark.requirement("CONFLICT-01")
+    def test_conflict_compares_complete_field_set():
+>       repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_repository_conflicts.py:9: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('sqlite:///:memory:',), kwargs = {}
+
+>   def create_engine_from_url(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: create_engine_from_url")
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+
+src/trading_app/data/repository.py:3: NotImplementedError
+________________________ test_conflict_never_overwrites ________________________
+
+    @pytest.mark.requirement("CONFLICT-01")
+    def test_conflict_never_overwrites():
+>       repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_repository_conflicts.py:19: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('sqlite:///:memory:',), kwargs = {}
+
+>   def create_engine_from_url(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: create_engine_from_url")
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+
+src/trading_app/data/repository.py:3: NotImplementedError
+_____________________ test_conflict_raises_and_rolls_back ______________________
+
+    @pytest.mark.requirement("CONFLICT-01")
+    def test_conflict_raises_and_rolls_back():
+>       repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_repository_conflicts.py:28: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('sqlite:///:memory:',), kwargs = {}
+
+>   def create_engine_from_url(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: create_engine_from_url")
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+
+src/trading_app/data/repository.py:3: NotImplementedError
+_________________________ test_conflicting_row_raises __________________________
+
+    @pytest.mark.requirement("CONFLICT-01")
+    def test_conflicting_row_raises():
+>       repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_repository_conflicts.py:40: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('sqlite:///:memory:',), kwargs = {}
+
+>   def create_engine_from_url(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: create_engine_from_url")
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+
+src/trading_app/data/repository.py:3: NotImplementedError
+________________________ test_identical_rows_idempotent ________________________
+
+    @pytest.mark.requirement("CONFLICT-01")
+    def test_identical_rows_idempotent():
+>       repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_repository_conflicts.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('sqlite:///:memory:',), kwargs = {}
+
+>   def create_engine_from_url(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: create_engine_from_url")
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+
+src/trading_app/data/repository.py:3: NotImplementedError
+______________ test_identical_rows_idempotent_and_conflicts_raise ______________
+
+    @pytest.mark.requirement("CONFLICT-01")
+    def test_identical_rows_idempotent_and_conflicts_raise():
+>       repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_repository_conflicts.py:55: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('sqlite:///:memory:',), kwargs = {}
+
+>   def create_engine_from_url(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: create_engine_from_url")
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+
+src/trading_app/data/repository.py:3: NotImplementedError
+___________________ test_repeatable_ingestion_is_idempotent ____________________
+
+    @pytest.mark.requirement("M1-14")
+    def test_repeatable_ingestion_is_idempotent():
+        """Acceptance scenario bound to frozen matrix row(s): M1-14."""
+        from trading_app.data.service import MarketDataService
+>       MarketDataService().download_and_store()
+
+tests/integration/test_service.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.service.MarketDataService object at 0x7f4966795310>
+args = (), kwargs = {}
+
+>   def download_and_store(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: download_and_store")
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: download_and_store
+
+src/trading_app/data/service.py:4: NotImplementedError
+_______________________ test_data_directory_auto_created _______________________
+
+    @pytest.mark.requirement("R5-03")
+    def test_data_directory_auto_created():
+        """Acceptance scenario bound to frozen matrix row(s): R5-03."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).create_tables()
+
+tests/integration/test_sqlite_pragmas.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f4966742f50>
+
+>   def create_tables(self): raise NotImplementedError("Stage-2 implementation not started: create_tables")
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_tables
+
+src/trading_app/data/repository.py:6: NotImplementedError
+__________________________ test_wal_and_busy_timeout ___________________________
+
+    @pytest.mark.requirement("R5-01")
+    def test_wal_and_busy_timeout():
+        """Acceptance scenario bound to frozen matrix row(s): R5-01."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).create_tables()
+
+tests/integration/test_sqlite_pragmas.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f4966743350>
+
+>   def create_tables(self): raise NotImplementedError("Stage-2 implementation not started: create_tables")
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_tables
+
+src/trading_app/data/repository.py:6: NotImplementedError
+__________________ test_direct_sqlite_verification_procedure ___________________
+
+    @pytest.mark.requirement("M1-15")
+    def test_direct_sqlite_verification_procedure():
+        """Acceptance scenario bound to frozen matrix row(s): M1-15."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).create_tables()
+
+tests/integration/test_sqlite_verification.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f4966732300>
+
+>   def create_tables(self): raise NotImplementedError("Stage-2 implementation not started: create_tables")
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_tables
+
+src/trading_app/data/repository.py:6: NotImplementedError
+__________________________ test_invalid_volume_query ___________________________
+
+    @pytest.mark.requirement("VERIFY-03")
+    def test_invalid_volume_query():
+        """Acceptance scenario bound to frozen matrix row(s): VERIFY-03."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).create_tables()
+
+tests/integration/test_sqlite_verification.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49667327b0>
+
+>   def create_tables(self): raise NotImplementedError("Stage-2 implementation not started: create_tables")
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_tables
+
+src/trading_app/data/repository.py:6: NotImplementedError
+_________________________ test_ohlc_correctness_query __________________________
+
+    @pytest.mark.requirement("VERIFY-03")
+    def test_ohlc_correctness_query():
+        """Acceptance scenario bound to frozen matrix row(s): VERIFY-03."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).create_tables()
+
+tests/integration/test_sqlite_verification.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49666f7a10>
+
+>   def create_tables(self): raise NotImplementedError("Stage-2 implementation not started: create_tables")
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_tables
+
+src/trading_app/data/repository.py:6: NotImplementedError
+____________________ test_stored_data_verification_queries _____________________
+
+    @pytest.mark.requirement("VERIFY-03")
+    def test_stored_data_verification_queries():
+        """Acceptance scenario bound to frozen matrix row(s): VERIFY-03."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).create_tables()
+
+tests/integration/test_sqlite_verification.py:29: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49665c0750>
+
+>   def create_tables(self): raise NotImplementedError("Stage-2 implementation not started: create_tables")
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_tables
+
+src/trading_app/data/repository.py:6: NotImplementedError
+__________________________ test_suspicious_data_query __________________________
+
+    @pytest.mark.requirement("VERIFY-03")
+    def test_suspicious_data_query():
+        """Acceptance scenario bound to frozen matrix row(s): VERIFY-03."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).create_tables()
+
+tests/integration/test_sqlite_verification.py:36: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49667624e0>
+
+>   def create_tables(self): raise NotImplementedError("Stage-2 implementation not started: create_tables")
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_tables
+
+src/trading_app/data/repository.py:6: NotImplementedError
+_______________________ test_timestamp_continuity_query ________________________
+
+    @pytest.mark.requirement("VERIFY-03")
+    def test_timestamp_continuity_query():
+        """Acceptance scenario bound to frozen matrix row(s): VERIFY-03."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).create_tables()
+
+tests/integration/test_sqlite_verification.py:43: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f4966769850>
+
+>   def create_tables(self): raise NotImplementedError("Stage-2 implementation not started: create_tables")
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_tables
+
+src/trading_app/data/repository.py:6: NotImplementedError
+______________ test_exactly_one_successful_server_time_per_fetch _______________
+
+    @pytest.mark.requirement("TIME-01")
+    def test_exactly_one_successful_server_time_per_fetch():
+        """Acceptance scenario bound to frozen matrix row(s): TIME-01."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_server_time()
+
+tests/integration/test_time_snapshot.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966763450>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+________________________ test_begin_immediate_captured _________________________
+
+    @pytest.mark.requirement("TX-01")
+    def test_begin_immediate_captured():
+        """Acceptance scenario bound to frozen matrix row(s): TX-01."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_transactions.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f4966769d90>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+___________________ test_begin_immediate_statement_captured ____________________
+
+    @pytest.mark.requirement("TX-02")
+    def test_begin_immediate_statement_captured():
+        """Acceptance scenario bound to frozen matrix row(s): TX-02."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_transactions.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49666df960>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+______________ test_network_and_validation_before_begin_immediate ______________
+
+    @pytest.mark.requirement("TX-09")
+    def test_network_and_validation_before_begin_immediate():
+        """Acceptance scenario bound to frozen matrix row(s): TX-09."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/integration/test_transactions.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49666dfd80>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+__________________________ test_btcusdt_5m_12_candles __________________________
+
+    @pytest.mark.requirement("LIVE-01")
+    def test_btcusdt_5m_12_candles():
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571800000}), FakeResponse(payload=[])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+>       rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/live/test_fixed_range.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496676a390>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 5, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+______________________ test_immediate_rerun_zero_new_rows ______________________
+
+    @pytest.mark.requirement("LIVE-02")
+    def test_immediate_rerun_zero_new_rows():
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571800000}), FakeResponse(payload=[])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+>       first = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/live/test_fixed_range.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496676a690>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 5, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+_____________________ test_future_end_clamp_and_strict_end _____________________
+
+    @pytest.mark.requirement("LIVE-04")
+    def test_future_end_clamp_and_strict_end():
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767574201234}), FakeResponse(payload=[])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+>       result = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=datetime.fromtimestamp(1767571200, timezone.utc), end=datetime.fromtimestamp(1767601200, timezone.utc))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/live/test_future_end.py:11: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49665e45d0>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 8, 20, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+_________________________ test_1152_candles_two_pages __________________________
+
+    @pytest.mark.requirement("LIVE-03")
+    def test_1152_candles_two_pages():
+        start = datetime.fromtimestamp(1767571200, timezone.utc)
+        end = datetime.fromtimestamp((1767571200000 + 1152*300000)/1000, timezone.utc)
+        page1 = []
+        page2 = []
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1768000000000}), FakeResponse(payload=page1), FakeResponse(payload=page2)])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+>       rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=start, end=end)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/live/test_pagination_range.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49665e4940>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 9, 0, 0, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+______________ test_time_dependent_finality_observation_protocol _______________
+
+    @pytest.mark.requirement("OBS-02")
+    def test_time_dependent_finality_observation_protocol():
+        vectors = json.loads((ROOT / "tests/fixtures/vectors/finality_vectors.json").read_text())
+        for case in vectors["cases"]:
+>           assert is_final(case["candle_close_ms"], case["S_ms"], case["L_ms"]) is case["expected_final"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/observations/test_obs02_finality_lag.py:12: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+close_time_ms = 1767571499999, server_time_ms = 1767571500000, lag_ms = 0
+
+    def is_final(close_time_ms: int, server_time_ms: int, lag_ms: int) -> bool:
+        """Return close_time_ms < server_time_ms-lag_ms; not implemented in Stage 2."""
+>       raise NotImplementedError("Stage-2 implementation not started: is_final")
+E       NotImplementedError: Stage-2 implementation not started: is_final
+
+src/trading_app/data/finality.py:19: NotImplementedError
+_______________________ test_encoded_traversal_rejected ________________________
+
+    @pytest.mark.requirement("NET-01")
+    def test_encoded_traversal_rejected():
+        """Frozen acceptance case: NET-01."""
+>       with pytest.raises(ValueError): validate_public_url("https://data-api.binance.vision/api/v3/klines/%2e%2e/order")
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('https://data-api.binance.vision/api/v3/klines/%2e%2e/order',)
+kwargs = {}
+
+    def validate_public_url(*args, **kwargs):
+>       raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+E       NotImplementedError: Stage-2 implementation not started: validate_public_url
+
+src/trading_app/data/binance_client.py:19: NotImplementedError
+_________________________ test_exact_normalized_paths __________________________
+
+    @pytest.mark.requirement("PATH-01")
+    def test_exact_normalized_paths():
+        """Frozen acceptance case: PATH-01."""
+>       assert validate_public_url("https://data-api.binance.vision/api/v3/time") is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('https://data-api.binance.vision/api/v3/time',), kwargs = {}
+
+    def validate_public_url(*args, **kwargs):
+>       raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+E       NotImplementedError: Stage-2 implementation not started: validate_public_url
+
+src/trading_app/data/binance_client.py:19: NotImplementedError
+__________________________ test_exact_path_allowlist ___________________________
+
+    @pytest.mark.requirement("NET-01")
+    def test_exact_path_allowlist():
+        """Frozen acceptance case: NET-01."""
+>       assert validate_public_url("https://data-api.binance.vision/api/v3/klines") is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('https://data-api.binance.vision/api/v3/klines',), kwargs = {}
+
+    def validate_public_url(*args, **kwargs):
+>       raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+E       NotImplementedError: Stage-2 implementation not started: validate_public_url
+
+src/trading_app/data/binance_client.py:19: NotImplementedError
+_____________________ test_exact_paths[encoded-traversal] ______________________
+
+_facet = 'encoded-traversal'
+
+    @pytest.mark.requirement("NET-01")
+    @pytest.mark.parametrize("_facet", ['encoded-traversal', 'query-trick', 'timeX', 'traversal'], ids=['encoded-traversal', 'query-trick', 'timeX', 'traversal'])
+    def test_exact_paths(_facet):
+        """Frozen acceptance case: NET-01."""
+        candidate={"encoded-traversal":"https://data-api.binance.vision/api/v3/klines/%2e%2e/order", "query-trick":"https://data-api.binance.vision/api/v3/time?path=/api/v3/order", "timeX":"https://data-api.binance.vision/api/v3/timeX", "traversal":"https://data-api.binance.vision/api/v3/klines/../order"}[_facet]
+>       with pytest.raises(ValueError): validate_public_url(candidate)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('https://data-api.binance.vision/api/v3/klines/%2e%2e/order',)
+kwargs = {}
+
+    def validate_public_url(*args, **kwargs):
+>       raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+E       NotImplementedError: Stage-2 implementation not started: validate_public_url
+
+src/trading_app/data/binance_client.py:19: NotImplementedError
+________________________ test_exact_paths[query-trick] _________________________
+
+_facet = 'query-trick'
+
+    @pytest.mark.requirement("NET-01")
+    @pytest.mark.parametrize("_facet", ['encoded-traversal', 'query-trick', 'timeX', 'traversal'], ids=['encoded-traversal', 'query-trick', 'timeX', 'traversal'])
+    def test_exact_paths(_facet):
+        """Frozen acceptance case: NET-01."""
+        candidate={"encoded-traversal":"https://data-api.binance.vision/api/v3/klines/%2e%2e/order", "query-trick":"https://data-api.binance.vision/api/v3/time?path=/api/v3/order", "timeX":"https://data-api.binance.vision/api/v3/timeX", "traversal":"https://data-api.binance.vision/api/v3/klines/../order"}[_facet]
+>       with pytest.raises(ValueError): validate_public_url(candidate)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('https://data-api.binance.vision/api/v3/time?path=/api/v3/order',)
+kwargs = {}
+
+    def validate_public_url(*args, **kwargs):
+>       raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+E       NotImplementedError: Stage-2 implementation not started: validate_public_url
+
+src/trading_app/data/binance_client.py:19: NotImplementedError
+___________________________ test_exact_paths[timeX] ____________________________
+
+_facet = 'timeX'
+
+    @pytest.mark.requirement("NET-01")
+    @pytest.mark.parametrize("_facet", ['encoded-traversal', 'query-trick', 'timeX', 'traversal'], ids=['encoded-traversal', 'query-trick', 'timeX', 'traversal'])
+    def test_exact_paths(_facet):
+        """Frozen acceptance case: NET-01."""
+        candidate={"encoded-traversal":"https://data-api.binance.vision/api/v3/klines/%2e%2e/order", "query-trick":"https://data-api.binance.vision/api/v3/time?path=/api/v3/order", "timeX":"https://data-api.binance.vision/api/v3/timeX", "traversal":"https://data-api.binance.vision/api/v3/klines/../order"}[_facet]
+>       with pytest.raises(ValueError): validate_public_url(candidate)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('https://data-api.binance.vision/api/v3/timeX',), kwargs = {}
+
+    def validate_public_url(*args, **kwargs):
+>       raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+E       NotImplementedError: Stage-2 implementation not started: validate_public_url
+
+src/trading_app/data/binance_client.py:19: NotImplementedError
+_________________________ test_exact_paths[traversal] __________________________
+
+_facet = 'traversal'
+
+    @pytest.mark.requirement("NET-01")
+    @pytest.mark.parametrize("_facet", ['encoded-traversal', 'query-trick', 'timeX', 'traversal'], ids=['encoded-traversal', 'query-trick', 'timeX', 'traversal'])
+    def test_exact_paths(_facet):
+        """Frozen acceptance case: NET-01."""
+        candidate={"encoded-traversal":"https://data-api.binance.vision/api/v3/klines/%2e%2e/order", "query-trick":"https://data-api.binance.vision/api/v3/time?path=/api/v3/order", "timeX":"https://data-api.binance.vision/api/v3/timeX", "traversal":"https://data-api.binance.vision/api/v3/klines/../order"}[_facet]
+>       with pytest.raises(ValueError): validate_public_url(candidate)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('https://data-api.binance.vision/api/v3/klines/../order',), kwargs = {}
+
+    def validate_public_url(*args, **kwargs):
+>       raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+E       NotImplementedError: Stage-2 implementation not started: validate_public_url
+
+src/trading_app/data/binance_client.py:19: NotImplementedError
+_____________________________ test_frozen_host_set _____________________________
+
+    @pytest.mark.requirement("HOST-01")
+    def test_frozen_host_set():
+        """Only the frozen public hosts are accepted; testnet is excluded."""
+>       assert validate_public_url("https://data-api.binance.vision/api/v3/time") is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:37: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('https://data-api.binance.vision/api/v3/time',), kwargs = {}
+
+    def validate_public_url(*args, **kwargs):
+>       raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+E       NotImplementedError: Stage-2 implementation not started: validate_public_url
+
+src/trading_app/data/binance_client.py:19: NotImplementedError
+___________________________ test_redirects_disabled ____________________________
+
+    @pytest.mark.requirement("NET-01")
+    def test_redirects_disabled():
+        """Frozen acceptance case: NET-01."""
+        client=BinanceMarketDataClient(base_url="https://data-api.binance.vision")
+>       with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:46: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49665e9a90>
+args = ()
+kwargs = {'end': datetime.datetime(2024, 1, 2, 0, 0, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2024, 1, 1, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+___________________ test_redirects_disabled_and_3xx_rejected ___________________
+
+    @pytest.mark.requirement("REDIRECT-01")
+    def test_redirects_disabled_and_3xx_rejected():
+        """Frozen acceptance case: REDIRECT-01."""
+        client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient([FakeResponse(status_code=302, headers={"Location":"https://example.com"})]))
+>       with pytest.raises(BinanceClientError): client.get_server_time()
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49665eb430>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_________________________ test_untrusted_host_rejected _________________________
+
+    @pytest.mark.requirement("NET-01")
+    def test_untrusted_host_rejected():
+        """Frozen acceptance case: NET-01."""
+>       with pytest.raises(ValueError): validate_public_url("https://evil.example/api/v3/time")
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_endpoint_hardening.py:57: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('https://evil.example/api/v3/time',), kwargs = {}
+
+    def validate_public_url(*args, **kwargs):
+>       raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+E       NotImplementedError: Stage-2 implementation not started: validate_public_url
+
+src/trading_app/data/binance_client.py:19: NotImplementedError
+__ test_http_error_logging_excludes_raise_for_status_url_userinfo_and_secrets __
+
+    @pytest.mark.requirement("LOG-02")
+    def test_http_error_logging_excludes_raise_for_status_url_userinfo_and_secrets():
+        """Acceptance scenario bound to frozen matrix row(s): LOG-02."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+
+tests/security/test_logging.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966609b50>
+args = (), kwargs = {}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+____________ test_logs_exclude_urls_headers_keys_tokens_and_secrets ____________
+
+    @pytest.mark.requirement("LOG-01")
+    def test_logs_exclude_urls_headers_keys_tokens_and_secrets():
+        """Acceptance scenario bound to frozen matrix row(s): LOG-01."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+
+tests/security/test_logging.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496685d2d0>
+args = (), kwargs = {}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+_______________________________ test_no_api_keys _______________________________
+
+    @pytest.mark.requirement("M1-04")
+    def test_no_api_keys():
+        """Acceptance scenario bound to frozen matrix row(s): M1-04."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+
+tests/security/test_network_policy.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496685df50>
+args = (), kwargs = {}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+__________________________ test_no_private_endpoints ___________________________
+
+    @pytest.mark.requirement("M1-04")
+    def test_no_private_endpoints():
+        """Acceptance scenario bound to frozen matrix row(s): M1-04."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+
+tests/security/test_network_policy.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966809b00>
+args = (), kwargs = {}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+______________________ test_public_spot_market_data_only _______________________
+
+    @pytest.mark.requirement("M1-04")
+    def test_public_spot_market_data_only():
+        """Acceptance scenario bound to frozen matrix row(s): M1-04."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+
+tests/security/test_network_policy.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496680ab30>
+args = (), kwargs = {}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+___________________ test_no_trading_code_or_order_submission ___________________
+
+    @pytest.mark.requirement("M1-16")
+    def test_no_trading_code_or_order_submission():
+        """Acceptance scenario bound to frozen matrix row(s): M1-16."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+
+tests/security/test_tripwire.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966605490>
+args = (), kwargs = {}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+______________________ test_tripwire_forbidden_http_calls ______________________
+
+    @pytest.mark.requirement("TRIP-01")
+    def test_tripwire_forbidden_http_calls():
+        """Acceptance scenario bound to frozen matrix row(s): TRIP-01."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+
+tests/security/test_tripwire.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966605b50>
+args = (), kwargs = {}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+_____________ test_tripwire_scanned_file_count_and_tests_exemption _____________
+
+    @pytest.mark.requirement("TRIP-02")
+    def test_tripwire_scanned_file_count_and_tests_exemption():
+        """Acceptance scenario bound to frozen matrix row(s): TRIP-02."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+
+tests/security/test_tripwire.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496662b3e0>
+args = (), kwargs = {}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+______________________________ test_retry_policy _______________________________
+
+    @pytest.mark.requirement("M1-06")
+    def test_retry_policy():
+        http = FakeHttpClient([FakeResponse(status_code=500) for _ in range(4)])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
+        with pytest.raises(BinanceClientError, match="500|retry|request"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:19: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496661bcf0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+______________________ test_binance_responses_are_mocked _______________________
+
+    @pytest.mark.requirement("M1-12")
+    def test_binance_responses_are_mocked():
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 123})])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+>       result = client.get_server_time()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_binance_client.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496661b840>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+__________________ test_429_without_retry_after_uses_backoff ___________________
+
+    @pytest.mark.requirement("RETRY-06")
+    def test_429_without_retry_after_uses_backoff():
+        http = FakeHttpClient([FakeResponse(status_code=429) for _ in range(4)])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
+        with pytest.raises(BinanceClientError, match="429|rate limit|retry"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:38: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496661b160>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_________________________ test_backoff_cap_and_jitter __________________________
+
+    @pytest.mark.requirement("RETRY-04")
+    def test_backoff_cap_and_jitter():
+        http = FakeHttpClient([FakeResponse(status_code=500) for _ in range(4)])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.25)
+        with pytest.raises(BinanceClientError, match="500|retry|request"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:48: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496661b660>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_____________________ test_fetch_sleep_budget_and_cooldown _____________________
+
+    @pytest.mark.requirement("RETRY-05")
+    def test_fetch_sleep_budget_and_cooldown():
+        http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": "11"}) for _ in range(4)])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
+        with pytest.raises(BinanceClientError, match="429|budget|cooldown|retry"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:58: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496661acb0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+__________________________ test_malformed_json_retry ___________________________
+
+    @pytest.mark.requirement("RETRY-01")
+    def test_malformed_json_retry():
+        http = FakeHttpClient([FakeResponse(status_code=200, json_error=ValueError("bad json")) for _ in range(4)])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
+        with pytest.raises(BinanceClientError, match="JSON|malformed|response"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:69: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966618320>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+__________________________ test_no_retry_status[400] ___________________________
+
+status = 400
+
+    @pytest.mark.requirement("RETRY-01")
+    @pytest.mark.parametrize("status", [400, 403, 418], ids=["400", "403", "418"])
+    def test_no_retry_status(status):
+        http = FakeHttpClient([FakeResponse(status_code=status)])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match=str(status)):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966618910>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+__________________________ test_no_retry_status[403] ___________________________
+
+status = 403
+
+    @pytest.mark.requirement("RETRY-01")
+    @pytest.mark.parametrize("status", [400, 403, 418], ids=["400", "403", "418"])
+    def test_no_retry_status(status):
+        http = FakeHttpClient([FakeResponse(status_code=status)])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match=str(status)):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496661ab20>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+__________________________ test_no_retry_status[418] ___________________________
+
+status = 418
+
+    @pytest.mark.requirement("RETRY-01")
+    @pytest.mark.parametrize("status", [400, 403, 418], ids=["400", "403", "418"])
+    def test_no_retry_status(status):
+        http = FakeHttpClient([FakeResponse(status_code=status)])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match=str(status)):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f496661b9d0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_____________________ test_only_retry_configured_statuses ______________________
+
+    @pytest.mark.requirement("RETRY-03")
+    def test_only_retry_configured_statuses():
+        for status, expected_requests in ((400, 1), (403, 1), (418, 1), (500, 4), (502, 4), (503, 4), (504, 4), (429, 4)):
+            http = FakeHttpClient([FakeResponse(status_code=status) for _ in range(4)])
+            client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
+            with pytest.raises(BinanceClientError, match=str(status)):
+>               client.get_server_time()
+
+tests/unit/test_binance_client.py:88: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49665415e0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+___________________________ test_read_timeout_retry ____________________________
+
+    @pytest.mark.requirement("RETRY-01")
+    def test_read_timeout_retry():
+        http = FakeHttpClient(errors=[TimeoutError("read timeout") for _ in range(4)])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
+        with pytest.raises(BinanceClientError, match="timeout|request"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:97: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966541590>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_____________________ test_repeated_429_persists_cooldown ______________________
+
+    @pytest.mark.requirement("RETRY-01")
+    def test_repeated_429_persists_cooldown():
+        http = FakeHttpClient([FakeResponse(status_code=429) for _ in range(4)])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="429|cooldown|rate limit"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:106: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966541180>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+___________________ test_retry_after_cap_and_no_jitter[429] ____________________
+
+retry_after = 10
+
+    @pytest.mark.requirement("RETRY-01")
+    @pytest.mark.parametrize("retry_after", [10, 45, 61], ids=["429", "over-budget", "over-cap"])
+    def test_retry_after_cap_and_no_jitter(retry_after):
+        policy = retry_policy()["retry_after"]
+        assert policy["sleep_jitter"] is False
+        assert policy["max_seconds"] == 60
+        http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": str(retry_after)})])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.75)
+        with pytest.raises(BinanceClientError, match="429|retry|cooldown|budget"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:119: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49665417c0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_______________ test_retry_after_cap_and_no_jitter[over-budget] ________________
+
+retry_after = 45
+
+    @pytest.mark.requirement("RETRY-01")
+    @pytest.mark.parametrize("retry_after", [10, 45, 61], ids=["429", "over-budget", "over-cap"])
+    def test_retry_after_cap_and_no_jitter(retry_after):
+        policy = retry_policy()["retry_after"]
+        assert policy["sleep_jitter"] is False
+        assert policy["max_seconds"] == 60
+        http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": str(retry_after)})])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.75)
+        with pytest.raises(BinanceClientError, match="429|retry|cooldown|budget"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:119: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966540870>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_________________ test_retry_after_cap_and_no_jitter[over-cap] _________________
+
+retry_after = 61
+
+    @pytest.mark.requirement("RETRY-01")
+    @pytest.mark.parametrize("retry_after", [10, 45, 61], ids=["429", "over-budget", "over-cap"])
+    def test_retry_after_cap_and_no_jitter(retry_after):
+        policy = retry_policy()["retry_after"]
+        assert policy["sleep_jitter"] is False
+        assert policy["max_seconds"] == 60
+        http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": str(retry_after)})])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.75)
+        with pytest.raises(BinanceClientError, match="429|retry|cooldown|budget"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:119: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49665406e0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+____________________________ test_retry_status[429] ____________________________
+
+status = 429
+
+    @pytest.mark.requirement("RETRY-01")
+    @pytest.mark.parametrize("status", [429, 500], ids=["429", "500"])
+    def test_retry_status(status):
+        http = FakeHttpClient([FakeResponse(status_code=status) for _ in range(4)])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
+        with pytest.raises(BinanceClientError, match=str(status)):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966540cd0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+____________________________ test_retry_status[500] ____________________________
+
+status = 500
+
+    @pytest.mark.requirement("RETRY-01")
+    @pytest.mark.parametrize("status", [429, 500], ids=["429", "500"])
+    def test_retry_status(status):
+        http = FakeHttpClient([FakeResponse(status_code=status) for _ in range(4)])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
+        with pytest.raises(BinanceClientError, match=str(status)):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49665408c0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+___________________ test_timeout_retry_and_connect_fallback ____________________
+
+    @pytest.mark.requirement("RETRY-02")
+    def test_timeout_retry_and_connect_fallback():
+        policy = retry_policy()
+        assert "read_timeout" in policy["retry_errors"]
+        assert policy["connect_dns"] == "fallback_only_before_first_successful_server_time"
+        http = FakeHttpClient(errors=[TimeoutError("timeout") for _ in range(4)])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
+        with pytest.raises(BinanceClientError, match="timeout|request"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:140: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966540230>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_______ test_read_write_and_pool_timeouts_retry_same_host[read-timeout] ________
+
+timeout_type = 'read'
+
+    @pytest.mark.requirement("RETRY-02")
+    @pytest.mark.parametrize("timeout_type", ["read", "write", "pool"], ids=["read-timeout", "write-timeout", "pool-timeout"])
+    def test_read_write_and_pool_timeouts_retry_same_host(timeout_type):
+        import httpx
+        from tests.fixtures.fakes import SequenceFakeHttpClient
+        exc = {"read": httpx.ReadTimeout, "write": httpx.WriteTimeout, "pool": httpx.PoolTimeout}[timeout_type]("timeout")
+        http = SequenceFakeHttpClient([exc, exc, exc, exc])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 1767571500000)
+        with pytest.raises(BinanceClientError, match="timeout|request"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966542490>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_______ test_read_write_and_pool_timeouts_retry_same_host[write-timeout] _______
+
+timeout_type = 'write'
+
+    @pytest.mark.requirement("RETRY-02")
+    @pytest.mark.parametrize("timeout_type", ["read", "write", "pool"], ids=["read-timeout", "write-timeout", "pool-timeout"])
+    def test_read_write_and_pool_timeouts_retry_same_host(timeout_type):
+        import httpx
+        from tests.fixtures.fakes import SequenceFakeHttpClient
+        exc = {"read": httpx.ReadTimeout, "write": httpx.WriteTimeout, "pool": httpx.PoolTimeout}[timeout_type]("timeout")
+        http = SequenceFakeHttpClient([exc, exc, exc, exc])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 1767571500000)
+        with pytest.raises(BinanceClientError, match="timeout|request"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49661e2030>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_______ test_read_write_and_pool_timeouts_retry_same_host[pool-timeout] ________
+
+timeout_type = 'pool'
+
+    @pytest.mark.requirement("RETRY-02")
+    @pytest.mark.parametrize("timeout_type", ["read", "write", "pool"], ids=["read-timeout", "write-timeout", "pool-timeout"])
+    def test_read_write_and_pool_timeouts_retry_same_host(timeout_type):
+        import httpx
+        from tests.fixtures.fakes import SequenceFakeHttpClient
+        exc = {"read": httpx.ReadTimeout, "write": httpx.WriteTimeout, "pool": httpx.PoolTimeout}[timeout_type]("timeout")
+        http = SequenceFakeHttpClient([exc, exc, exc, exc])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 1767571500000)
+        with pytest.raises(BinanceClientError, match="timeout|request"):
+>           client.get_server_time()
+
+tests/unit/test_binance_client.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49661e1ea0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_ test_connect_failures_fallback_only_before_first_successful_time_call[connect-error] _
+
+error_type = 'connect-error'
+
+    @pytest.mark.requirement("RETRY-02")
+    @pytest.mark.parametrize("error_type", ["connect-error", "connect-timeout"], ids=["connect-error", "connect-timeout"])
+    def test_connect_failures_fallback_only_before_first_successful_time_call(error_type):
+        import httpx
+        from tests.fixtures.fakes import SequenceFakeHttpClient
+        exc = httpx.ConnectError("connect failed") if error_type == "connect-error" else httpx.ConnectTimeout("connect timed out")
+        http = SequenceFakeHttpClient([exc, FakeResponse(payload={"serverTime": 1767571500000})])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 1767571500000)
+>       assert client.get_server_time() == 1767571500000
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_binance_client.py:164: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49661e19a0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_ test_connect_failures_fallback_only_before_first_successful_time_call[connect-timeout] _
+
+error_type = 'connect-timeout'
+
+    @pytest.mark.requirement("RETRY-02")
+    @pytest.mark.parametrize("error_type", ["connect-error", "connect-timeout"], ids=["connect-error", "connect-timeout"])
+    def test_connect_failures_fallback_only_before_first_successful_time_call(error_type):
+        import httpx
+        from tests.fixtures.fakes import SequenceFakeHttpClient
+        exc = httpx.ConnectError("connect failed") if error_type == "connect-error" else httpx.ConnectTimeout("connect timed out")
+        http = SequenceFakeHttpClient([exc, FakeResponse(payload={"serverTime": 1767571500000})])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 1767571500000)
+>       assert client.get_server_time() == 1767571500000
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_binance_client.py:164: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49661e1270>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_____________ test_connect_failure_after_success_does_not_fallback _____________
+
+    @pytest.mark.requirement("RETRY-02")
+    def test_connect_failure_after_success_does_not_fallback():
+        import httpx
+        from tests.fixtures.fakes import SequenceFakeHttpClient
+        http = SequenceFakeHttpClient([
+            FakeResponse(payload={"serverTime": 1767571500000}),
+            httpx.ConnectError("later connection failure"),
+            httpx.ConnectError("later connection failure"),
+            httpx.ConnectError("later connection failure"),
+            httpx.ConnectError("later connection failure"),
+        ])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 1767571500000)
+>       assert client.get_server_time() == 1767571500000
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_binance_client.py:180: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966542df0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+____________________ test_configured_symbols_and_timeframes ____________________
+
+    @pytest.mark.requirement("M1-03")
+    def test_configured_symbols_and_timeframes():
+        """Acceptance scenario bound to frozen matrix row(s): M1-03."""
+        from trading_app.config import get_settings
+>       get_settings()
+
+tests/unit/test_config.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def get_settings():
+>       raise NotImplementedError("Stage-2 implementation not started: get_settings")
+E       NotImplementedError: Stage-2 implementation not started: get_settings
+
+src/trading_app/config.py:7: NotImplementedError
+__________________ test_pydantic_config_has_no_secret_fields ___________________
+
+    @pytest.mark.requirement("M1-02")
+    def test_pydantic_config_has_no_secret_fields():
+        """Acceptance scenario bound to frozen matrix row(s): M1-02."""
+        from trading_app.config import get_settings
+>       get_settings()
+
+tests/unit/test_config.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def get_settings():
+>       raise NotImplementedError("Stage-2 implementation not started: get_settings")
+E       NotImplementedError: Stage-2 implementation not started: get_settings
+
+src/trading_app/config.py:7: NotImplementedError
+____________________________ test_symbol_allowlist _____________________________
+
+    @pytest.mark.requirement("M1-03")
+    def test_symbol_allowlist():
+        """Acceptance scenario bound to frozen matrix row(s): M1-03."""
+        from trading_app.config import get_settings
+>       get_settings()
+
+tests/unit/test_config.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def get_settings():
+>       raise NotImplementedError("Stage-2 implementation not started: get_settings")
+E       NotImplementedError: Stage-2 implementation not started: get_settings
+
+src/trading_app/config.py:7: NotImplementedError
+_____________________ test_symbol_and_timeframe_allowlist ______________________
+
+    @pytest.mark.requirement("M1-03")
+    def test_symbol_and_timeframe_allowlist():
+        """Acceptance scenario bound to frozen matrix row(s): M1-03."""
+        from trading_app.config import get_settings
+>       get_settings()
+
+tests/unit/test_config.py:29: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def get_settings():
+>       raise NotImplementedError("Stage-2 implementation not started: get_settings")
+E       NotImplementedError: Stage-2 implementation not started: get_settings
+
+src/trading_app/config.py:7: NotImplementedError
+_______________________ test_cooldown_atomic_persistence _______________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_cooldown_atomic_persisten0')
+
+    @pytest.mark.requirement("COOLDOWN-03")
+    def test_cooldown_atomic_persistence(tmp_path):
+        path = tmp_path / "binance_cooldown.json"
+        payload = {"until_ms": 1767571800000, "reason": "429_exhausted"}
+>       write_cooldown(path, payload)
+
+tests/unit/test_cooldown.py:14: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (PosixPath('/tmp/pytest-of-root/pytest-8/test_cooldown_atomic_persisten0/binance_cooldown.json'), {'reason': '429_exhausted', 'until_ms': 1767571800000})
+kwargs = {}
+
+    def write_cooldown(*args, **kwargs):
+        """Atomically persist cooldown JSON; not implemented in Stage 2 scaffold."""
+>       raise NotImplementedError("Stage-2 implementation not started: write_cooldown")
+E       NotImplementedError: Stage-2 implementation not started: write_cooldown
+
+src/trading_app/data/cooldown.py:17: NotImplementedError
+________________ test_cooldown_trigger_minimums_and_retry_after ________________
+
+    @pytest.mark.requirement("COOLDOWN-02")
+    def test_cooldown_trigger_minimums_and_retry_after():
+        durations = cooldown_policy()["durations"]
+        assert durations["418"] == "max(supplied_retry_after,600)"
+        assert durations["429_exhausted"] == "max(supplied_retry_after,300)"
+        assert durations["429_retry_after_over_60"] == "max(supplied_retry_after,600)"
+        http = FakeHttpClient([FakeResponse(status_code=418, headers={"Retry-After": "900"})])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="418|cooldown|rate"):
+>           client.get_server_time()
+
+tests/unit/test_cooldown.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49661e31b0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+______________________ test_corrupt_cooldown_fails_closed ______________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_corrupt_cooldown_fails_cl0')
+
+    @pytest.mark.requirement("COOLDOWN-05")
+    def test_corrupt_cooldown_fails_closed(tmp_path):
+        path = tmp_path / "cooldown.json"
+        path.write_text('{"until_ms": -1, "reason": "bad"}')
+        with pytest.raises(CorruptCooldownError, match="negative|invalid|cooldown"):
+>           read_cooldown(path)
+
+tests/unit/test_cooldown.py:35: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (PosixPath('/tmp/pytest-of-root/pytest-8/test_corrupt_cooldown_fails_cl0/cooldown.json'),)
+kwargs = {}
+
+    def read_cooldown(*args, **kwargs):
+        """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
+>       raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
+E       NotImplementedError: Stage-2 implementation not started: read_cooldown
+
+src/trading_app/data/cooldown.py:13: NotImplementedError
+______________ test_invalid_cooldown_state_fails_closed[missing] _______________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa0')
+contents = None
+
+    @pytest.mark.requirement("COOLDOWN-05")
+    @pytest.mark.parametrize("contents", [None, "not-json", "{}", '{"until_ms": "x", "reason": "bad"}', '{"until_ms": -1, "reason": "bad"}'], ids=["missing", "corrupt-json", "missing-fields", "non-integer", "negative"])
+    def test_invalid_cooldown_state_fails_closed(tmp_path, contents):
+        path = tmp_path / "cooldown.json"
+        if contents is not None:
+            path.write_text(contents)
+        with pytest.raises(CorruptCooldownError, match="cooldown|invalid|missing|integer|negative|JSON"):
+>           read_cooldown(path)
+
+tests/unit/test_cooldown.py:44: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa0/cooldown.json'),)
+kwargs = {}
+
+    def read_cooldown(*args, **kwargs):
+        """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
+>       raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
+E       NotImplementedError: Stage-2 implementation not started: read_cooldown
+
+src/trading_app/data/cooldown.py:13: NotImplementedError
+____________ test_invalid_cooldown_state_fails_closed[corrupt-json] ____________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa1')
+contents = 'not-json'
+
+    @pytest.mark.requirement("COOLDOWN-05")
+    @pytest.mark.parametrize("contents", [None, "not-json", "{}", '{"until_ms": "x", "reason": "bad"}', '{"until_ms": -1, "reason": "bad"}'], ids=["missing", "corrupt-json", "missing-fields", "non-integer", "negative"])
+    def test_invalid_cooldown_state_fails_closed(tmp_path, contents):
+        path = tmp_path / "cooldown.json"
+        if contents is not None:
+            path.write_text(contents)
+        with pytest.raises(CorruptCooldownError, match="cooldown|invalid|missing|integer|negative|JSON"):
+>           read_cooldown(path)
+
+tests/unit/test_cooldown.py:44: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa1/cooldown.json'),)
+kwargs = {}
+
+    def read_cooldown(*args, **kwargs):
+        """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
+>       raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
+E       NotImplementedError: Stage-2 implementation not started: read_cooldown
+
+src/trading_app/data/cooldown.py:13: NotImplementedError
+___________ test_invalid_cooldown_state_fails_closed[missing-fields] ___________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa2')
+contents = '{}'
+
+    @pytest.mark.requirement("COOLDOWN-05")
+    @pytest.mark.parametrize("contents", [None, "not-json", "{}", '{"until_ms": "x", "reason": "bad"}', '{"until_ms": -1, "reason": "bad"}'], ids=["missing", "corrupt-json", "missing-fields", "non-integer", "negative"])
+    def test_invalid_cooldown_state_fails_closed(tmp_path, contents):
+        path = tmp_path / "cooldown.json"
+        if contents is not None:
+            path.write_text(contents)
+        with pytest.raises(CorruptCooldownError, match="cooldown|invalid|missing|integer|negative|JSON"):
+>           read_cooldown(path)
+
+tests/unit/test_cooldown.py:44: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa2/cooldown.json'),)
+kwargs = {}
+
+    def read_cooldown(*args, **kwargs):
+        """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
+>       raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
+E       NotImplementedError: Stage-2 implementation not started: read_cooldown
+
+src/trading_app/data/cooldown.py:13: NotImplementedError
+____________ test_invalid_cooldown_state_fails_closed[non-integer] _____________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa3')
+contents = '{"until_ms": "x", "reason": "bad"}'
+
+    @pytest.mark.requirement("COOLDOWN-05")
+    @pytest.mark.parametrize("contents", [None, "not-json", "{}", '{"until_ms": "x", "reason": "bad"}', '{"until_ms": -1, "reason": "bad"}'], ids=["missing", "corrupt-json", "missing-fields", "non-integer", "negative"])
+    def test_invalid_cooldown_state_fails_closed(tmp_path, contents):
+        path = tmp_path / "cooldown.json"
+        if contents is not None:
+            path.write_text(contents)
+        with pytest.raises(CorruptCooldownError, match="cooldown|invalid|missing|integer|negative|JSON"):
+>           read_cooldown(path)
+
+tests/unit/test_cooldown.py:44: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa3/cooldown.json'),)
+kwargs = {}
+
+    def read_cooldown(*args, **kwargs):
+        """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
+>       raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
+E       NotImplementedError: Stage-2 implementation not started: read_cooldown
+
+src/trading_app/data/cooldown.py:13: NotImplementedError
+______________ test_invalid_cooldown_state_fails_closed[negative] ______________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa4')
+contents = '{"until_ms": -1, "reason": "bad"}'
+
+    @pytest.mark.requirement("COOLDOWN-05")
+    @pytest.mark.parametrize("contents", [None, "not-json", "{}", '{"until_ms": "x", "reason": "bad"}', '{"until_ms": -1, "reason": "bad"}'], ids=["missing", "corrupt-json", "missing-fields", "non-integer", "negative"])
+    def test_invalid_cooldown_state_fails_closed(tmp_path, contents):
+        path = tmp_path / "cooldown.json"
+        if contents is not None:
+            path.write_text(contents)
+        with pytest.raises(CorruptCooldownError, match="cooldown|invalid|missing|integer|negative|JSON"):
+>           read_cooldown(path)
+
+tests/unit/test_cooldown.py:44: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (PosixPath('/tmp/pytest-of-root/pytest-8/test_invalid_cooldown_state_fa4/cooldown.json'),)
+kwargs = {}
+
+    def read_cooldown(*args, **kwargs):
+        """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
+>       raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
+E       NotImplementedError: Stage-2 implementation not started: read_cooldown
+
+src/trading_app/data/cooldown.py:13: NotImplementedError
+______________ test_active_cooldown_blocks_server_time_network_io ______________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-8/test_active_cooldown_blocks_se0')
+
+    @pytest.mark.requirement("COOLDOWN-01")
+    def test_active_cooldown_blocks_server_time_network_io(tmp_path):
+        path = tmp_path / "binance_cooldown.json"
+        path.write_text('{"until_ms": 1767571800000, "reason": "418"}')
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000})])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, cooldown_path=path, now_ms=lambda: 1767571500000)
+        with pytest.raises(BinanceClientError, match="cooldown|until"):
+>           client.get_server_time()
+
+tests/unit/test_cooldown.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49661fe710>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_________________________ test_boundary_rule[lag-0ms] __________________________
+
+lag_ms = 0
+
+    @pytest.mark.requirement("FINAL-01")
+    @pytest.mark.requirement("FINAL-04")
+    @pytest.mark.requirement("FINAL-08")
+    @pytest.mark.parametrize("lag_ms", [0, 60000], ids=["lag-0ms", "lag-positive"])
+    def test_boundary_rule(lag_ms):
+        cases = [case for case in VECTORS["cases"] if case["L_ms"] == lag_ms]
+        assert len(cases) == 3
+        for case in cases:
+>           assert is_final(case["candle_close_ms"], case["S_ms"], case["L_ms"]) is case["expected_final"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_finality.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+close_time_ms = 1767571499999, server_time_ms = 1767571500000, lag_ms = 0
+
+    def is_final(close_time_ms: int, server_time_ms: int, lag_ms: int) -> bool:
+        """Return close_time_ms < server_time_ms-lag_ms; not implemented in Stage 2."""
+>       raise NotImplementedError("Stage-2 implementation not started: is_final")
+E       NotImplementedError: Stage-2 implementation not started: is_final
+
+src/trading_app/data/finality.py:19: NotImplementedError
+_______________________ test_boundary_rule[lag-positive] _______________________
+
+lag_ms = 60000
+
+    @pytest.mark.requirement("FINAL-01")
+    @pytest.mark.requirement("FINAL-04")
+    @pytest.mark.requirement("FINAL-08")
+    @pytest.mark.parametrize("lag_ms", [0, 60000], ids=["lag-0ms", "lag-positive"])
+    def test_boundary_rule(lag_ms):
+        cases = [case for case in VECTORS["cases"] if case["L_ms"] == lag_ms]
+        assert len(cases) == 3
+        for case in cases:
+>           assert is_final(case["candle_close_ms"], case["S_ms"], case["L_ms"]) is case["expected_final"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_finality.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+close_time_ms = 1767571499999, server_time_ms = 1767571560000, lag_ms = 60000
+
+    def is_final(close_time_ms: int, server_time_ms: int, lag_ms: int) -> bool:
+        """Return close_time_ms < server_time_ms-lag_ms; not implemented in Stage 2."""
+>       raise NotImplementedError("Stage-2 implementation not started: is_final")
+E       NotImplementedError: Stage-2 implementation not started: is_final
+
+src/trading_app/data/finality.py:19: NotImplementedError
+__________________________ test_effective_end_formula __________________________
+
+    @pytest.mark.requirement("FINAL-05")
+    def test_effective_end_formula():
+        for case in VECTORS["cases"]:
+>           assert effective_end_ms(case["requested_end_ms"], case["S_ms"], case["L_ms"], VECTORS["interval_ms"]) == case["expected_effective_end_ms"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_finality.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+requested_end_ms = 1767571500000, server_time_ms = 1767571500000, lag_ms = 0
+interval_ms = 300000
+
+    def effective_end_ms(requested_end_ms: int, server_time_ms: int, lag_ms: int, interval_ms: int) -> int:
+        """Return min(requested_end_ms, floor((S-L)/I)*I); not implemented in Stage 2."""
+>       raise NotImplementedError("Stage-2 implementation not started: effective_end_ms")
+E       NotImplementedError: Stage-2 implementation not started: effective_end_ms
+
+src/trading_app/data/finality.py:23: NotImplementedError
+_______________ test_empty_effective_range_and_input_validation ________________
+
+    @pytest.mark.requirement("FINAL-07")
+    def test_empty_effective_range_and_input_validation():
+        end = VECTORS["extra"]["empty_effective_range"]
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient([FakeResponse(payload={"serverTime": end["S_ms"]})]))
+        with pytest.raises(EmptyEffectiveRangeError, match="effective.*range|effective_end"):
+>           client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=datetime.fromtimestamp(end["requested_start_ms"]/1000, timezone.utc), end=datetime.fromtimestamp(end["requested_end_ms"]/1000, timezone.utc))
+
+tests/unit/test_finality.py:36: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49661ff480>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 10, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 5, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+_______________________ test_finality_lag_has_no_default _______________________
+
+    @pytest.mark.requirement("LAG-01")
+    def test_finality_lag_has_no_default():
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000})])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="lag|configuration|finality"):
+>           client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=datetime.fromtimestamp(1767571500, timezone.utc))
+
+tests/unit/test_finality.py:45: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966220460>
+args = ()
+kwargs = {'end': datetime.datetime(2026, 1, 5, 0, 5, tzinfo=datetime.timezone.utc), 'start': datetime.datetime(2026, 1, 5, 0, 0, tzinfo=datetime.timezone.utc), 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+    def get_historical_klines(self, *args, **kwargs):
+        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
+        or NonFinalCandleError for their respective input/range/upstream failure classes.
+        Constructor dependencies include sleep, jitter, now_ms, and http_client.
+        """
+>       raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+E       NotImplementedError: Stage-2 implementation not started: get_historical_klines
+
+src/trading_app/data/binance_client.py:16: NotImplementedError
+_________________________ test_no_local_clock_fallback _________________________
+
+    @pytest.mark.requirement("FINAL-01")
+    def test_no_local_clock_fallback():
+        http = FakeHttpClient(errors=[TimeoutError("server time unavailable")])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        with pytest.raises(BinanceClientError, match="server time|time"):
+>           client.get_server_time()
+
+tests/unit/test_finality.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966220a00>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+________________________ test_decimal_format_f_is_exact ________________________
+
+    @pytest.mark.requirement("HASH-01")
+    def test_decimal_format_f_is_exact():
+        # Empty hash is independently fixed as SHA-256 of zero bytes; no production-derived expectation.
+>       assert hash_candles(VECTORS["empty"]["records"]) == VECTORS["empty"]["sha256"]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_hash.py:11: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([],), kwargs = {}
+
+>   def hash_candles(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: hash_candles")
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: hash_candles
+
+src/trading_app/data/hashing.py:2: NotImplementedError
+__________________ test_golden_hash_vectors[empty-one-multi] ___________________
+
+_facet = 'empty-one-multi'
+
+    @pytest.mark.requirement("HASH-02")
+    @pytest.mark.parametrize("_facet", ["empty-one-multi"], ids=["empty-one-multi"])
+    def test_golden_hash_vectors(_facet):
+        for key in ("empty", "one_record", "two_records"):
+            vector = VECTORS[key]
+>           assert hash_candles(vector["records"]) == vector["sha256"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_hashing.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([],), kwargs = {}
+
+>   def hash_candles(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: hash_candles")
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: hash_candles
+
+src/trading_app/data/hashing.py:2: NotImplementedError
+__________________ test_hash_serialization_order_and_encoding __________________
+
+    @pytest.mark.requirement("HASH-01")
+    def test_hash_serialization_order_and_encoding():
+>       result = hash_candles(VECTORS["two_records"]["records"])
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_hashing.py:17: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([{'close': '100.50', 'close_time_ms': 1767571499999, 'high': '101.00', 'low': '99.50', ...}, {'close': '100.20', 'close_time_ms': 1767571799999, 'high': '100.90', 'low': '100.00', ...}],)
+kwargs = {}
+
+>   def hash_candles(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: hash_candles")
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: hash_candles
+
+src/trading_app/data/hashing.py:2: NotImplementedError
+____________ test_conflict_compares_all_fields_and_never_overwrites ____________
+
+    @pytest.mark.requirement("CONFLICT-03")
+    def test_conflict_compares_all_fields_and_never_overwrites():
+>       engine = create_engine_from_url("sqlite:///:memory:")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_repository_conflicts.py:9: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('sqlite:///:memory:',), kwargs = {}
+
+>   def create_engine_from_url(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: create_engine_from_url")
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+
+src/trading_app/data/repository.py:3: NotImplementedError
+____________ test_decimal_numeric_equality_and_created_at_exclusion ____________
+
+    @pytest.mark.requirement("CONFLICT-02")
+    def test_decimal_numeric_equality_and_created_at_exclusion():
+>       engine = create_engine_from_url("sqlite:///:memory:")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_repository_conflicts.py:28: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('sqlite:///:memory:',), kwargs = {}
+
+>   def create_engine_from_url(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: create_engine_from_url")
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+
+src/trading_app/data/repository.py:3: NotImplementedError
+_______________________ test_403_and_418_are_not_retried _______________________
+
+    @pytest.mark.requirement("M1-06")
+    @pytest.mark.requirement("RETRY-01")
+    def test_403_and_418_are_not_retried():
+        for status in (403, 418):
+            http = FakeHttpClient([FakeResponse(status_code=status)])
+            client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+            with pytest.raises(BinanceClientError, match=str(status)):
+>               client.get_server_time()
+
+tests/unit/test_retry_policy.py:14: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966222760>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+__________________________ test_429_does_not_fallback __________________________
+
+    @pytest.mark.requirement("RETRY-01")
+    def test_429_does_not_fallback():
+        http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": "45"})])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.5)
+        with pytest.raises(BinanceClientError, match="429|budget|cooldown|retry"):
+>           client.get_server_time()
+
+tests/unit/test_retry_policy.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f49662227b0>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_________________ test_retry_after_is_not_jittered_or_reduced __________________
+
+    @pytest.mark.requirement("RETRY-02")
+    @pytest.mark.requirement("RETRY-01")
+    def test_retry_after_is_not_jittered_or_reduced():
+        policy = retry_policy()["retry_after"]
+        assert policy["sleep_jitter"] is False
+        assert policy["max_seconds"] == 60
+        http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": "10"}) for _ in range(4)])
+        sleeps = []
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.9)
+        with pytest.raises(BinanceClientError, match="429|rate|retry"):
+>           client.get_server_time()
+
+tests/unit/test_retry_policy.py:36: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966223700>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+_________________________ test_no_local_clock_fallback _________________________
+
+    @pytest.mark.requirement("FINAL-01")
+    def test_no_local_clock_fallback():
+        """Acceptance scenario bound to frozen matrix row(s): FINAL-01."""
+        from trading_app.data.binance_client import BinanceMarketDataClient
+>       BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_server_time()
+
+tests/unit/test_time_snapshot.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.binance_client.BinanceMarketDataClient object at 0x7f4966223840>
+
+    def get_server_time(self):
+        """Return Binance public server time; fail closed on time errors and active cooldown."""
+>       raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+E       NotImplementedError: Stage-2 implementation not started: get_server_time
+
+src/trading_app/data/binance_client.py:10: NotImplementedError
+____________________________ test_max_candles_limit ____________________________
+
+    @pytest.mark.requirement("TX-03")
+    def test_max_candles_limit():
+        """Acceptance scenario bound to frozen matrix row(s): TX-03."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).insert_candles([])
+
+tests/unit/test_transactions.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49660ad130>
+args = ([],), kwargs = {}
+
+>   def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: insert_candles
+
+src/trading_app/data/repository.py:7: NotImplementedError
+_____________________________ test_candle_duration _____________________________
+
+    @pytest.mark.requirement("M1-09")
+    def test_candle_duration():
+>       assert timeframe_to_ms("5m") == INTERVAL
+               ^^^^^^^^^^^^^^^^^^^^^
+
+tests/unit/test_validator.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ('5m',), kwargs = {}
+
+>   def timeframe_to_ms(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: timeframe_to_ms")
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: timeframe_to_ms
+
+src/trading_app/data/validator.py:4: NotImplementedError
+____________________________ test_duplicate_candles ____________________________
+
+    @pytest.mark.requirement("M1-10")
+    def test_duplicate_candles():
+        with pytest.raises(DataValidationError, match="DUPLICATE_CANDLE"):
+>           assert_valid_klines([kline(START), kline(START)], symbol="BTCUSDT", timeframe="5m")
+
+tests/unit/test_validator.py:19: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225600000, '100', '101', '99', '100.5', '10', ...], [1767225600000, '100', '101', '99', '100.5', '10', ...]],)
+kwargs = {'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+_______________ test_duplicate_price_volume_and_ohlc_validation ________________
+
+    @pytest.mark.requirement("M1-10")
+    def test_duplicate_price_volume_and_ohlc_validation():
+        bad = kline(START, high="90", low="80", open_price="100", close="95")
+        with pytest.raises(DataValidationError, match="INVALID_OHLC"):
+>           assert_valid_klines([bad], symbol="BTCUSDT", timeframe="5m")
+
+tests/unit/test_validator.py:25: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225600000, '100', '90', '80', '95', '10', ...]],)
+kwargs = {'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+_____________________________ test_invalid_prices ______________________________
+
+    @pytest.mark.requirement("M1-10")
+    def test_invalid_prices():
+        row = kline(START); row[1] = "0"
+        with pytest.raises(DataValidationError, match="INVALID_PRICE"):
+>           assert_valid_klines([row], symbol="BTCUSDT", timeframe="5m")
+
+tests/unit/test_validator.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225600000, '0', '101', '99', '100.5', '10', ...]],)
+kwargs = {'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+_____________________________ test_invalid_volumes _____________________________
+
+    @pytest.mark.requirement("M1-10")
+    def test_invalid_volumes():
+        row = kline(START); row[5] = "-1"
+        with pytest.raises(DataValidationError, match="INVALID_VOLUME"):
+>           assert_valid_klines([row], symbol="BTCUSDT", timeframe="5m")
+
+tests/unit/test_validator.py:37: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225600000, '100', '101', '99', '100.5', '-1', ...]],)
+kwargs = {'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+_____________________________ test_missing_candles _____________________________
+
+    @pytest.mark.requirement("M1-09")
+    def test_missing_candles():
+        with pytest.raises(DataValidationError, match="MISSING_CANDLES"):
+>           assert_valid_klines([kline(START), kline(START + 2*INTERVAL)], symbol="BTCUSDT", timeframe="5m")
+
+tests/unit/test_validator.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225600000, '100', '101', '99', '100.5', '10', ...], [1767226200000, '100', '101', '99', '100.5', '10', ...]],)
+kwargs = {'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+__________________________ test_monotonic_timestamps ___________________________
+
+    @pytest.mark.requirement("M1-09")
+    def test_monotonic_timestamps():
+        with pytest.raises(DataValidationError, match="NON_MONOTONIC_TIMESTAMP"):
+>           assert_valid_klines([kline(START + INTERVAL), kline(START)], symbol="BTCUSDT", timeframe="5m")
+
+tests/unit/test_validator.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225900000, '100', '101', '99', '100.5', '10', ...], [1767225600000, '100', '101', '99', '100.5', '10', ...]],)
+kwargs = {'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+____________________________ test_ohlc_consistency _____________________________
+
+    @pytest.mark.requirement("M1-10")
+    def test_ohlc_consistency():
+        row = kline(START, open_price="100", high="99", low="90", close="95")
+        with pytest.raises(DataValidationError, match="INVALID_OHLC"):
+>           assert_valid_klines([row], symbol="BTCUSDT", timeframe="5m")
+
+tests/unit/test_validator.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225600000, '100', '99', '90', '95', '10', ...]],)
+kwargs = {'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+_______________ test_suspicious_data_is_reported_without_repair ________________
+
+    @pytest.mark.requirement("M1-11")
+    def test_suspicious_data_is_reported_without_repair():
+        row = kline(START, volume="-1")
+        original = list(row)
+        with pytest.raises(DataValidationError, match="INVALID_VOLUME"):
+>           assert_valid_klines([row], symbol="BTCUSDT", timeframe="5m")
+
+tests/unit/test_validator.py:60: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225600000, '100', '101', '99', '100.5', '-1', ...]],)
+kwargs = {'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+___________________________ test_timestamp_alignment ___________________________
+
+    @pytest.mark.requirement("M1-09")
+    def test_timestamp_alignment():
+        with pytest.raises(DataValidationError, match="MISALIGNED_TIMESTAMP"):
+>           assert_valid_klines([kline(START + 1)], symbol="BTCUSDT", timeframe="5m")
+
+tests/unit/test_validator.py:66: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225600001, '100', '101', '99', '100.5', '10', ...]],)
+kwargs = {'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+______ test_timestamp_alignment_duration_monotonicity_and_missing_candles ______
+
+    @pytest.mark.requirement("M1-09")
+    def test_timestamp_alignment_duration_monotonicity_and_missing_candles():
+        rows = [kline(START), kline(START + INTERVAL), kline(START + 2*INTERVAL)]
+>       assert_valid_klines(rows, symbol="BTCUSDT", timeframe="5m", expected_start_ms=START, expected_end_ms_exclusive=START + 3*INTERVAL)
+
+tests/unit/test_validator.py:71: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ([[1767225600000, '100', '101', '99', '100.5', '10', ...], [1767225900000, '100', '101', '99', '100.5', '10', ...], [1767226200000, '100', '101', '99', '100.5', '10', ...]],)
+kwargs = {'expected_end_ms_exclusive': 1767226500000, 'expected_start_ms': 1767225600000, 'symbol': 'BTCUSDT', 'timeframe': '5m'}
+
+>   def assert_valid_klines(*args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: assert_valid_klines")
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+
+src/trading_app/data/validator.py:7: NotImplementedError
+_____________________ test_decimal_string_safe_comparisons _____________________
+
+    @pytest.mark.requirement("VERIFY-01")
+    @pytest.mark.requirement("VERIFY-02")
+    def test_decimal_string_safe_comparisons():
+        """Acceptance scenario bound to frozen matrix row(s): VERIFY-01, VERIFY-02."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).get_candles()
+
+tests/unit/test_verification_sql.py:9: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49660aedf0>
+args = (), kwargs = {}
+
+>   def get_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: get_candles")
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: get_candles
+
+src/trading_app/data/repository.py:8: NotImplementedError
+_____________________________ test_no_cast_as_real _____________________________
+
+    @pytest.mark.requirement("VERIFY-02")
+    def test_no_cast_as_real():
+        """Acceptance scenario bound to frozen matrix row(s): VERIFY-02."""
+        from trading_app.data.repository import CandleRepository
+>       CandleRepository(None).get_candles()
+
+tests/unit/test_verification_sql.py:16: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <trading_app.data.repository.CandleRepository object at 0x7f49661f2b10>
+args = (), kwargs = {}
+
+>   def get_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: get_candles")
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   NotImplementedError: Stage-2 implementation not started: get_candles
+
+src/trading_app/data/repository.py:8: NotImplementedError
+- generated xml file: /mnt/data/stage2_revision_work/reports/junit-offline.xml -
+=========================== short test summary info ============================
+FAILED tests/integration/test_audit.py::test_failure_audit_contents - NotImplementedError: Stage-2 implementation not started: hash_candles
+FAILED tests/integration/test_audit.py::test_failure_audit_write_cannot_mask_original_exception - NotImplementedError: Stage-2 implementation not started: hash_candles
+FAILED tests/integration/test_binance_download.py::test_kline_download - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/integration/test_binance_download.py::test_kline_pagination - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/integration/test_cli.py::test_cli_exit_codes_and_clean_expected_errors - NotImplementedError: Stage-2 implementation not started: download_candles CLI
+FAILED tests/integration/test_cli.py::test_download_script_with_mocked_public_client - NotImplementedError: Stage-2 implementation not started: download_candles CLI
+FAILED tests/integration/test_concurrency.py::test_conflict_rolls_back_entire_transaction - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/integration/test_concurrency.py::test_no_duplicate_rows_after_overlap - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/integration/test_concurrency.py::test_two_processes_overlap_without_duplicates - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/integration/test_cooldown.py::test_cooldown_directory_scope - NotImplementedError: Stage-2 implementation not started: read_cooldown
+FAILED tests/integration/test_cooldown.py::test_cooldown_is_global_across_hosts - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/integration/test_cooldown.py::test_cooldown_persists_across_processes - NotImplementedError: Stage-2 implementation not started: read_cooldown
+FAILED tests/integration/test_finality.py::test_client_clamps_end_time_to_finality_boundary - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/integration/test_finality.py::test_future_end_reports_requested_and_effective_ranges - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/integration/test_finality.py::test_b_not_final_vectors_shrink_to_explicit_empty_range - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/integration/test_finality.py::test_returned_nonfinal_candle_aborts_fetch - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/integration/test_finality.py::test_server_time_failure_aborts_without_kline_request - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/integration/test_finality.py::test_boundary_rule[lag-0ms] - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/integration/test_finality.py::test_no_local_clock_fallback - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/integration/test_finality.py::test_server_time_failure_aborts[invalid-timestamp] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/integration/test_finality.py::test_server_time_failure_aborts[malformed-time] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/integration/test_finality.py::test_server_time_failure_aborts[server-time-failure] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/integration/test_finality.py::test_nonfinal_candle_during_pagination_aborts - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/integration/test_legacy_scan.py::test_legacy_scan_flags_without_repair - NotImplementedError: Stage-2 implementation not started: scan_legacy_data
+FAILED tests/integration/test_metadata.py::test_data_fetch_metadata_fields - NotImplementedError: Stage-2 implementation not started: download_and_store
+FAILED tests/integration/test_repository.py::test_application_duplicate_prevention - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/integration/test_repository.py::test_composite_uniqueness - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/integration/test_repository.py::test_decimal_values_preserved_exactly - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/integration/test_repository.py::test_sqlalchemy_persistence - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/integration/test_repository_conflicts.py::test_conflict_compares_complete_field_set - NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+FAILED tests/integration/test_repository_conflicts.py::test_conflict_never_overwrites - NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+FAILED tests/integration/test_repository_conflicts.py::test_conflict_raises_and_rolls_back - NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+FAILED tests/integration/test_repository_conflicts.py::test_conflicting_row_raises - NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+FAILED tests/integration/test_repository_conflicts.py::test_identical_rows_idempotent - NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+FAILED tests/integration/test_repository_conflicts.py::test_identical_rows_idempotent_and_conflicts_raise - NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+FAILED tests/integration/test_service.py::test_repeatable_ingestion_is_idempotent - NotImplementedError: Stage-2 implementation not started: download_and_store
+FAILED tests/integration/test_sqlite_pragmas.py::test_data_directory_auto_created - NotImplementedError: Stage-2 implementation not started: create_tables
+FAILED tests/integration/test_sqlite_pragmas.py::test_wal_and_busy_timeout - NotImplementedError: Stage-2 implementation not started: create_tables
+FAILED tests/integration/test_sqlite_verification.py::test_direct_sqlite_verification_procedure - NotImplementedError: Stage-2 implementation not started: create_tables
+FAILED tests/integration/test_sqlite_verification.py::test_invalid_volume_query - NotImplementedError: Stage-2 implementation not started: create_tables
+FAILED tests/integration/test_sqlite_verification.py::test_ohlc_correctness_query - NotImplementedError: Stage-2 implementation not started: create_tables
+FAILED tests/integration/test_sqlite_verification.py::test_stored_data_verification_queries - NotImplementedError: Stage-2 implementation not started: create_tables
+FAILED tests/integration/test_sqlite_verification.py::test_suspicious_data_query - NotImplementedError: Stage-2 implementation not started: create_tables
+FAILED tests/integration/test_sqlite_verification.py::test_timestamp_continuity_query - NotImplementedError: Stage-2 implementation not started: create_tables
+FAILED tests/integration/test_time_snapshot.py::test_exactly_one_successful_server_time_per_fetch - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/integration/test_transactions.py::test_begin_immediate_captured - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/integration/test_transactions.py::test_begin_immediate_statement_captured - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/integration/test_transactions.py::test_network_and_validation_before_begin_immediate - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/live/test_fixed_range.py::test_btcusdt_5m_12_candles - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/live/test_fixed_range.py::test_immediate_rerun_zero_new_rows - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/live/test_future_end.py::test_future_end_clamp_and_strict_end - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/live/test_pagination_range.py::test_1152_candles_two_pages - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/observations/test_obs02_finality_lag.py::test_time_dependent_finality_observation_protocol - NotImplementedError: Stage-2 implementation not started: is_final
+FAILED tests/security/test_endpoint_hardening.py::test_encoded_traversal_rejected - NotImplementedError: Stage-2 implementation not started: validate_public_url
+FAILED tests/security/test_endpoint_hardening.py::test_exact_normalized_paths - NotImplementedError: Stage-2 implementation not started: validate_public_url
+FAILED tests/security/test_endpoint_hardening.py::test_exact_path_allowlist - NotImplementedError: Stage-2 implementation not started: validate_public_url
+FAILED tests/security/test_endpoint_hardening.py::test_exact_paths[encoded-traversal] - NotImplementedError: Stage-2 implementation not started: validate_public_url
+FAILED tests/security/test_endpoint_hardening.py::test_exact_paths[query-trick] - NotImplementedError: Stage-2 implementation not started: validate_public_url
+FAILED tests/security/test_endpoint_hardening.py::test_exact_paths[timeX] - NotImplementedError: Stage-2 implementation not started: validate_public_url
+FAILED tests/security/test_endpoint_hardening.py::test_exact_paths[traversal] - NotImplementedError: Stage-2 implementation not started: validate_public_url
+FAILED tests/security/test_endpoint_hardening.py::test_frozen_host_set - NotImplementedError: Stage-2 implementation not started: validate_public_url
+FAILED tests/security/test_endpoint_hardening.py::test_redirects_disabled - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/security/test_endpoint_hardening.py::test_redirects_disabled_and_3xx_rejected - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/security/test_endpoint_hardening.py::test_untrusted_host_rejected - NotImplementedError: Stage-2 implementation not started: validate_public_url
+FAILED tests/security/test_logging.py::test_http_error_logging_excludes_raise_for_status_url_userinfo_and_secrets - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/security/test_logging.py::test_logs_exclude_urls_headers_keys_tokens_and_secrets - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/security/test_network_policy.py::test_no_api_keys - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/security/test_network_policy.py::test_no_private_endpoints - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/security/test_network_policy.py::test_public_spot_market_data_only - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/security/test_tripwire.py::test_no_trading_code_or_order_submission - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/security/test_tripwire.py::test_tripwire_forbidden_http_calls - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/security/test_tripwire.py::test_tripwire_scanned_file_count_and_tests_exemption - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/unit/test_binance_client.py::test_retry_policy - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_binance_responses_are_mocked - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_429_without_retry_after_uses_backoff - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_backoff_cap_and_jitter - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_fetch_sleep_budget_and_cooldown - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_malformed_json_retry - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_no_retry_status[400] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_no_retry_status[403] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_no_retry_status[418] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_only_retry_configured_statuses - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_read_timeout_retry - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_repeated_429_persists_cooldown - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_retry_after_cap_and_no_jitter[429] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_retry_after_cap_and_no_jitter[over-budget] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_retry_after_cap_and_no_jitter[over-cap] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_retry_status[429] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_retry_status[500] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_timeout_retry_and_connect_fallback - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_read_write_and_pool_timeouts_retry_same_host[read-timeout] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_read_write_and_pool_timeouts_retry_same_host[write-timeout] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_read_write_and_pool_timeouts_retry_same_host[pool-timeout] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_connect_failures_fallback_only_before_first_successful_time_call[connect-error] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_connect_failures_fallback_only_before_first_successful_time_call[connect-timeout] - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_binance_client.py::test_connect_failure_after_success_does_not_fallback - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_config.py::test_configured_symbols_and_timeframes - NotImplementedError: Stage-2 implementation not started: get_settings
+FAILED tests/unit/test_config.py::test_pydantic_config_has_no_secret_fields - NotImplementedError: Stage-2 implementation not started: get_settings
+FAILED tests/unit/test_config.py::test_symbol_allowlist - NotImplementedError: Stage-2 implementation not started: get_settings
+FAILED tests/unit/test_config.py::test_symbol_and_timeframe_allowlist - NotImplementedError: Stage-2 implementation not started: get_settings
+FAILED tests/unit/test_cooldown.py::test_cooldown_atomic_persistence - NotImplementedError: Stage-2 implementation not started: write_cooldown
+FAILED tests/unit/test_cooldown.py::test_cooldown_trigger_minimums_and_retry_after - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_cooldown.py::test_corrupt_cooldown_fails_closed - NotImplementedError: Stage-2 implementation not started: read_cooldown
+FAILED tests/unit/test_cooldown.py::test_invalid_cooldown_state_fails_closed[missing] - NotImplementedError: Stage-2 implementation not started: read_cooldown
+FAILED tests/unit/test_cooldown.py::test_invalid_cooldown_state_fails_closed[corrupt-json] - NotImplementedError: Stage-2 implementation not started: read_cooldown
+FAILED tests/unit/test_cooldown.py::test_invalid_cooldown_state_fails_closed[missing-fields] - NotImplementedError: Stage-2 implementation not started: read_cooldown
+FAILED tests/unit/test_cooldown.py::test_invalid_cooldown_state_fails_closed[non-integer] - NotImplementedError: Stage-2 implementation not started: read_cooldown
+FAILED tests/unit/test_cooldown.py::test_invalid_cooldown_state_fails_closed[negative] - NotImplementedError: Stage-2 implementation not started: read_cooldown
+FAILED tests/unit/test_cooldown.py::test_active_cooldown_blocks_server_time_network_io - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_finality.py::test_boundary_rule[lag-0ms] - NotImplementedError: Stage-2 implementation not started: is_final
+FAILED tests/unit/test_finality.py::test_boundary_rule[lag-positive] - NotImplementedError: Stage-2 implementation not started: is_final
+FAILED tests/unit/test_finality.py::test_effective_end_formula - NotImplementedError: Stage-2 implementation not started: effective_end_ms
+FAILED tests/unit/test_finality.py::test_empty_effective_range_and_input_validation - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/unit/test_finality.py::test_finality_lag_has_no_default - NotImplementedError: Stage-2 implementation not started: get_historical_klines
+FAILED tests/unit/test_finality.py::test_no_local_clock_fallback - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_hash.py::test_decimal_format_f_is_exact - NotImplementedError: Stage-2 implementation not started: hash_candles
+FAILED tests/unit/test_hashing.py::test_golden_hash_vectors[empty-one-multi] - NotImplementedError: Stage-2 implementation not started: hash_candles
+FAILED tests/unit/test_hashing.py::test_hash_serialization_order_and_encoding - NotImplementedError: Stage-2 implementation not started: hash_candles
+FAILED tests/unit/test_repository_conflicts.py::test_conflict_compares_all_fields_and_never_overwrites - NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+FAILED tests/unit/test_repository_conflicts.py::test_decimal_numeric_equality_and_created_at_exclusion - NotImplementedError: Stage-2 implementation not started: create_engine_from_url
+FAILED tests/unit/test_retry_policy.py::test_403_and_418_are_not_retried - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_retry_policy.py::test_429_does_not_fallback - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_retry_policy.py::test_retry_after_is_not_jittered_or_reduced - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_time_snapshot.py::test_no_local_clock_fallback - NotImplementedError: Stage-2 implementation not started: get_server_time
+FAILED tests/unit/test_transactions.py::test_max_candles_limit - NotImplementedError: Stage-2 implementation not started: insert_candles
+FAILED tests/unit/test_validator.py::test_candle_duration - NotImplementedError: Stage-2 implementation not started: timeframe_to_ms
+FAILED tests/unit/test_validator.py::test_duplicate_candles - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_validator.py::test_duplicate_price_volume_and_ohlc_validation - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_validator.py::test_invalid_prices - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_validator.py::test_invalid_volumes - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_validator.py::test_missing_candles - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_validator.py::test_monotonic_timestamps - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_validator.py::test_ohlc_consistency - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_validator.py::test_suspicious_data_is_reported_without_repair - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_validator.py::test_timestamp_alignment - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_validator.py::test_timestamp_alignment_duration_monotonicity_and_missing_candles - NotImplementedError: Stage-2 implementation not started: assert_valid_klines
+FAILED tests/unit/test_verification_sql.py::test_decimal_string_safe_comparisons - NotImplementedError: Stage-2 implementation not started: get_candles
+FAILED tests/unit/test_verification_sql.py::test_no_cast_as_real - NotImplementedError: Stage-2 implementation not started: get_candles
+======================= 138 failed, 64 passed in 30.91s ========================
