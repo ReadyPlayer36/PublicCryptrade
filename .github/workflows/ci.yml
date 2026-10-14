@@ -34,8 +34,7 @@ jobs:
           pytest_rc=$?
           set -e
           python tools/red_reason_gate.py artifacts/junit-offline.xml --pytest-exit-code "$pytest_rc"
-      - name: Traceability audit (diagnostic; acceptance remains BLOCKED)
-        continue-on-error: true
+      - name: Traceability audit (fails only on structural errors; acceptance remains BLOCKED)
         shell: bash
         run: |
           mkdir -p artifacts
@@ -44,13 +43,23 @@ jobs:
           traceability_rc=$?
           set -e
           cat artifacts/check-traceability.txt
+          set +e
+          python tools/summarize_traceability.py artifacts/check-traceability.txt > artifacts/traceability-classes.txt
+          structural_rc=$?
+          set -e
+          cat artifacts/traceability-classes.txt
           if [ "$traceability_rc" -eq 0 ]; then
             echo "### Traceability audit: PASS" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "### Traceability audit: BLOCKED" >> "$GITHUB_STEP_SUMMARY"
+            { echo '```'; cat artifacts/traceability-classes.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            if [ "$structural_rc" -ne 0 ]; then
+              echo "STRUCTURAL traceability errors present (markers/properties/bindings): this is a defect, not expected red." >> "$GITHUB_STEP_SUMMARY"
+              exit 2
+            fi
             echo "The full traceability gate is not satisfied. Review the traceability-audit artifact; expected-red production stubs and outstanding CI/live evidence may contribute. This diagnostic does not authorize implementation or acceptance." >> "$GITHUB_STEP_SUMMARY"
           fi
-          exit "$traceability_rc"
+          exit 0
       - name: Upload offline JUnit evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -63,7 +72,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: traceability-audit
-          path: artifacts/check-traceability.txt
+          path: |
+            artifacts/check-traceability.txt
+            artifacts/traceability-classes.txt
           if-no-files-found: warn
       - name: Dependency audit (nonblocking until final gate)
         continue-on-error: true

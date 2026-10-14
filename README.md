@@ -18,6 +18,10 @@ This commit is **not an implementation** and does not authorize production imple
 - The expected-red suite exports JUnit and must pass the red-reason gate; JUnit is uploaded as a CI artifact. `pip-audit` remains nonblocking until the final gate.
 - Offline tests never call Binance. No credentials, private endpoints, orders, or live requests are included. OBS-01/OBS-02, finality-lag approval, and actual live/CI evidence remain outstanding.
 
+## Leftover review scaffolding
+
+`reports/`, `commit-object.txt` and `stage2_tests_only_revision.patch` are historical evidence of earlier review rounds. They are not inputs to any test or gate and may be removed in a later cleanup.
+
 ## Provenance and review boundary
 
 The public baseline commit is `a88a843f7c79354b193234fc3cdbfad9b661d098`, with tree `408a6a4263528d846a5277fab9f75f0ff036dd74`. The local source bundle's original commit identity was `de1bd38e73d7b6cdd0ab2d2bc0c42d105ae470a2`; its tree matches the public baseline, but that original history is not present in the public repository. The revised commit message records this provenance gap. Pushing original bundle history, if desired, is a separate operation on a separate branch.

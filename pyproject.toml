@@ -21,6 +21,7 @@ dev = [
   "pytest-cov>=5,<7",
   "coverage[toml]>=7.5,<8",
   "pip-audit>=2.7,<3",
+  "jsonschema>=4.20,<5",
 ]
 
 [tool.setuptools.packages.find]
