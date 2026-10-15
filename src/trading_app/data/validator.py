@@ -48,9 +48,22 @@ def parse_decimal(value: Any, *, field_name: str, index: int) -> Decimal:
 
 
 def _to_int(value: Any) -> int:
+    """Strict integer conversion: no bools, no truncation, no non-finite values."""
     if isinstance(value, bool):
-        raise ValueError("bool is not a timestamp")
-    return int(value)
+        raise ValueError("bool is not an integer field")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text.lstrip("+-").isascii() or not text.lstrip("+-").isdigit():
+            raise ValueError(f"not an integer string: {value!r}")
+        return int(text)
+    if isinstance(value, (float, Decimal)):
+        number = Decimal(value) if isinstance(value, float) else value
+        if not number.is_finite() or number != number.to_integral_value():
+            raise ValueError(f"not a finite integral number: {value!r}")
+        return int(number)
+    raise TypeError(f"unsupported integer type: {type(value).__name__}")
 
 
 def validate_klines(
@@ -67,6 +80,10 @@ def validate_klines(
 
     def add(code: str, message: str, index: int | None, open_ms: int | None = None) -> None:
         issues.append(ValidationIssue(code=code, message=message, index=index, open_time_ms=open_ms))
+
+    for name, bound in (("expected_start_ms", expected_start_ms), ("expected_end_ms_exclusive", expected_end_ms_exclusive)):
+        if bound is not None and bound % interval_ms != 0:
+            add("INVALID_EXPECTED_RANGE", f"{name} {bound} is not aligned to {timeframe}.", None)
 
     seen: set[int] = set()
     previous_open: int | None = None
@@ -139,7 +156,8 @@ def validate_klines(
                 add("NON_MONOTONIC_TIMESTAMP", f"Row {index}: timestamp {open_ms} is earlier than previous timestamp {previous_open}.", index, open_ms)
             elif open_ms > expected_next:
                 missing = (open_ms - expected_next) // interval_ms
-                add("MISSING_CANDLES", f"Missing {missing} candle(s) between {previous_open} and {open_ms}.", index, open_ms)
+                if missing > 0:  # sub-interval offsets are reported as MISALIGNED_TIMESTAMP only
+                    add("MISSING_CANDLES", f"Missing {missing} candle(s) between {previous_open} and {open_ms}.", index, open_ms)
         previous_open = open_ms
 
     if not rows and (expected_start_ms is not None or expected_end_ms_exclusive is not None):

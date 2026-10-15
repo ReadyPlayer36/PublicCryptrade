@@ -16,11 +16,15 @@ class NonFinalCandleError(RuntimeError):
 
 def is_final(close_time_ms: int, server_time_ms: int, lag_ms: int) -> bool:
     """Return True iff close_time_ms < B, where B = server_time_ms - lag_ms."""
+    if lag_ms < 0:
+        raise ValueError("lag_ms must be >= 0")
     return close_time_ms < server_time_ms - lag_ms
 
 
 def effective_end_ms(requested_end_ms: int, server_time_ms: int, lag_ms: int, interval_ms: int) -> int:
     """Return min(requested_end_ms, floor((S - L) / I) * I); end is exclusive."""
+    if lag_ms < 0:
+        raise ValueError("lag_ms must be >= 0")
     if interval_ms <= 0:
         raise ValueError("interval_ms must be positive")
     return min(requested_end_ms, ((server_time_ms - lag_ms) // interval_ms) * interval_ms)
