@@ -167,14 +167,16 @@ class BinanceMarketDataClient:
     def _check_cooldown(self) -> None:
         until, reason = self._cooldown_until_ms, "in-memory"
         if self._cooldown_path is not None:
+            corrupt = False
             try:
                 state = read_cooldown(self._cooldown_path)
-            except CorruptCooldownError as exc:
-                if self._cooldown_path.exists():
-                    raise BinanceClientError(f"cooldown state unreadable; failing closed: {exc}") from exc
+            except CorruptCooldownError:
+                corrupt = self._cooldown_path.exists()
             else:
                 if state["until_ms"] > until:
                     until, reason = state["until_ms"], state["reason"]
+            if corrupt:   # raised outside the except block: no cause/context carries file content
+                raise BinanceClientError("cooldown state unreadable or invalid; failing closed")
         if until > self._now_ms():
             raise BinanceClientError(f"cooldown active until {until} ms ({reason}); no request sent")
 
@@ -189,7 +191,8 @@ class BinanceMarketDataClient:
         try:
             in_force = extend_cooldown(self._cooldown_path, {"until_ms": until, "reason": trigger})
         except OSError as exc:
-            return f"cooldown set in memory until {until} ms ({trigger}) but could not be persisted: {exc}"
+            logger.error("binance cooldown could not be persisted error_type=%s", type(exc).__name__)
+            return f"cooldown set in memory until {until} ms ({trigger}) but could not be persisted ({type(exc).__name__})"
         if in_force["until_ms"] > until:
             return f"cooldown already active until {in_force['until_ms']} ms"
         return f"cooldown persisted until {until} ms ({trigger})"
@@ -292,8 +295,7 @@ class BinanceMarketDataClient:
 
         One server-time snapshot S per fetch; B = S - lag; only candles with
         close_time_ms < B are accepted. A non-final row aborts the fetch. An empty
-        result means Binance had no candles in the effective range; callers must treat
-        zero rows as an explicit condition, never as success of a non-empty request.
+        response for a non-empty effective range raises DataValidationError (EMPTY_RESULT).
         """
         if not isinstance(symbol, str) or not _SYMBOL.fullmatch(symbol):
             raise ValueError(f"invalid symbol: {symbol!r}")
@@ -343,14 +345,15 @@ class BinanceMarketDataClient:
             rows.extend(page)
             cursor = last_open + interval_ms
 
-        if rows:
-            issues = validate_klines(rows, symbol=symbol, timeframe=timeframe,
-                                     expected_start_ms=start_ms, expected_end_ms_exclusive=end_effective)
-            if issues:
-                raise DataValidationError(
-                    f"Market-data validation failed for {symbol} {timeframe}:\n"
-                    + "\n".join(f"[{i.code}] {i.message}" for i in issues)
-                )
+        # Always validate, including an empty result: an empty response for a non-empty
+        # effective range is rejected (EMPTY_RESULT), never silently returned.
+        issues = validate_klines(rows, symbol=symbol, timeframe=timeframe,
+                                 expected_start_ms=start_ms, expected_end_ms_exclusive=end_effective)
+        if issues:
+            raise DataValidationError(
+                f"Market-data validation failed for {symbol} {timeframe}:\n"
+                + "\n".join(f"[{i.code}] {i.message}" for i in issues)
+            )
         return rows
 
     @staticmethod

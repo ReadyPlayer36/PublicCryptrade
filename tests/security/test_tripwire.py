@@ -52,3 +52,29 @@ def test_tripwire_scanned_file_count_and_tests_exemption(tmp_path, capsys):
     real = scan(ROOT)
     assert len(real.scanned_files) == len([p for d in ("src", "scripts") for p in (ROOT / d).rglob("*.py")])
     assert len(real.scanned_files) >= 10
+
+
+@pytest.mark.requirement("TRIP-01")
+@pytest.mark.parametrize("name,code,kind", [
+    ("alias_import", "from httpx import post as send_request\nsend_request('https://x')\n", "http-import"),
+    ("alias_call", "from requests import delete as remove\nremove('https://x')\n", "http-method"),
+    ("plain_import", "from httpx import post\n", "http-import"),
+    ("attr_reference", "f = client.post\nf('https://x')\n", "http-method"),
+    ("map_reference", "list(map(client.put, urls))\n", "http-method"),
+    ("getattr_string", "getattr(client, 'delete')('https://x')\n", "http-method"),
+    ("papi_path", "U = 'https://data-api.binance.vision/papi/v1/um/order'\n", "forbidden-string"),
+    ("papi_host", "H = 'papi.binance.com'\n", "forbidden-string"),
+    ("urlopen", "from urllib.request import urlopen\n", "http-import"),
+])
+def test_tripwire_detects_alias_and_bypass_forms(tmp_path, name, code, kind):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / f"{name}.py").write_text(code)
+    report = scan(tmp_path)
+    assert kind in {f.kind for f in report.findings}, report.findings
+
+
+@pytest.mark.requirement("TRIP-01")
+def test_tripwire_does_not_flag_plain_get_usage(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "ok.py").write_text("import httpx\nfrom httpx import Client, get\nc = Client()\nc.get('https://data-api.binance.vision/api/v3/time')\n")
+    assert scan(tmp_path).findings == ()

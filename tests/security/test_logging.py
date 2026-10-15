@@ -60,3 +60,42 @@ def test_unretried_transport_error_leaves_no_cause_or_context():
     with pytest.raises(BinanceClientError) as err:
         make(http).get_server_time()
     assert err.value.__cause__ is None and err.value.__context__ is None
+
+
+@pytest.mark.requirement("LOG-02")
+@pytest.mark.parametrize("status", [400, 403, 429, 500, 503])
+def test_injected_http_status_error_from_the_http_client_never_leaks(caplog, status):
+    request = httpx.Request("GET", "https://data-api.binance.vision/api/v3/time")
+    error = httpx.HTTPStatusError(f"Server error '{status}' for url '{POISON}'", request=request, response=httpx.Response(status, request=request))
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(BinanceClientError) as failed:
+        make(SequenceFakeHttpClient([error])).get_server_time()
+    assert not FORBIDDEN.search(str(failed.value)), str(failed.value)
+    assert failed.value.__cause__ is None and failed.value.__context__ is None
+    assert not FORBIDDEN.search(everything_logged(caplog))
+    assert all(r.exc_info is None for r in caplog.records)
+
+
+@pytest.mark.requirement("LOG-02")
+def test_cooldown_persistence_failure_text_is_not_exposed(caplog, monkeypatch, tmp_path):
+    from trading_app.data import binance_client as bc
+
+    def explode(*args, **kwargs):
+        raise OSError(POISON)
+
+    monkeypatch.setattr(bc, "extend_cooldown", explode)
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(BinanceClientError) as failed:
+        make(FakeHttpClient([FakeResponse(status_code=418)]), cooldown_path=tmp_path / "c.json").get_server_time()
+    assert "could not be persisted (OSError)" in str(failed.value)
+    assert not FORBIDDEN.search(str(failed.value)) and failed.value.__cause__ is None and failed.value.__context__ is None
+    assert not FORBIDDEN.search(everything_logged(caplog))
+
+
+@pytest.mark.requirement("LOG-02")
+def test_corrupt_cooldown_file_error_carries_no_file_content(tmp_path):
+    path = tmp_path / "c.json"
+    path.write_text('{"until_ms": "SECRETKEY", "reason": "hunter2"')
+    with pytest.raises(BinanceClientError) as failed:
+        make(FakeHttpClient([]), cooldown_path=path).get_server_time()
+    assert not FORBIDDEN.search(str(failed.value)) and failed.value.__cause__ is None and failed.value.__context__ is None

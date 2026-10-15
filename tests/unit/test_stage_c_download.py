@@ -183,10 +183,12 @@ def test_wrong_shape_kline_pages_abort_without_retry(payload):
     assert len(http.calls) == 2
 
 
-@pytest.mark.requirement("M1-05")
-def test_empty_first_page_returns_an_empty_list():
-    client, _ = client_for([time_resp(S0 + 10 * I), FakeResponse(payload=[])])
-    assert fetch(client) == []
+@pytest.mark.requirement("M1-09")
+def test_empty_response_for_a_nonempty_effective_range_is_rejected():
+    client, http = client_for([time_resp(S0 + 10 * I), FakeResponse(payload=[])])
+    with pytest.raises(DataValidationError, match="EMPTY_RESULT"):
+        fetch(client)
+    assert len(http.calls) == 2
 
 
 @pytest.mark.requirement("COOLDOWN-01")

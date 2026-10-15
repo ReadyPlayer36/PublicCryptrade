@@ -13,11 +13,12 @@ from pathlib import Path
 SCANNED_DIRS = ("src", "scripts")
 EXEMPT_DIRS = ("tests",)
 FORBIDDEN_HTTP_METHODS = {"post", "put", "delete", "patch", "request", "send", "stream"}
+HTTP_MODULES = {"httpx", "requests", "urllib", "urllib.request", "urllib3", "http.client", "aiohttp", "socket", "websockets"}
 FORBIDDEN_STRINGS = (
     "/api/v3/order", "/api/v3/account", "/api/v3/myTrades", "/sapi/", "/fapi/", "/dapi/", "/eapi/", "/wapi/",
     "userDataStream", "listenKey", "withdraw", "newOrder", "X-MBX-APIKEY", "apiKey", "api_key", "api-key",
     "signature", "leverage", "marginType", "testnet", "demo-api", "api1.binance", "api2.binance", "api3.binance",
-    "api4.binance", "api-gcp.binance",
+    "api4.binance", "api-gcp.binance", "/papi/", "papi.binance",
 )
 
 
@@ -44,9 +45,23 @@ class TripwireReport:
 def _scan_file(path: Path, rel: str) -> list[Finding]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
     findings: list[Finding] = []
+    aliases: set[str] = set()                      # local names bound to forbidden functions
+    for node in ast.walk(tree):                    # pass 1: `from httpx import post as send`
+        if isinstance(node, ast.ImportFrom) and (node.module or "") in HTTP_MODULES:
+            for item in node.names:
+                if item.name in FORBIDDEN_HTTP_METHODS or item.name in ("urlopen", "urlretrieve", "create_connection"):
+                    aliases.add(item.asname or item.name)
+                    findings.append(Finding(rel, node.lineno, "http-import", f"from {node.module} import {item.name}"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in FORBIDDEN_HTTP_METHODS:
-            findings.append(Finding(rel, node.lineno, "http-method", f".{node.func.attr}(...)"))
+        if isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_HTTP_METHODS:
+            # any reference, called or not: `c.post(...)`, `f = c.post`, `map(c.post, ...)`
+            findings.append(Finding(rel, node.lineno, "http-method", f".{node.attr}"))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in aliases:
+                findings.append(Finding(rel, node.lineno, "http-method", f"{node.func.id}(...) [aliased]"))
+            elif node.func.id == "getattr" and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) \
+                    and isinstance(node.args[1].value, str) and node.args[1].value.lower() in FORBIDDEN_HTTP_METHODS:
+                findings.append(Finding(rel, node.lineno, "http-method", f"getattr(..., {node.args[1].value!r})"))
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             lowered = node.value.lower()
             for token in FORBIDDEN_STRINGS:
