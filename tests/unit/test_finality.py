@@ -31,7 +31,7 @@ def test_effective_end_formula():
 @pytest.mark.requirement("FINAL-07")
 def test_empty_effective_range_and_input_validation():
     end = VECTORS["extra"]["empty_effective_range"]
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient([FakeResponse(payload={"serverTime": end["S_ms"]})]))
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", finality_lag_ms=0, http_client=FakeHttpClient([FakeResponse(payload={"serverTime": end["S_ms"]})]))
     with pytest.raises(EmptyEffectiveRangeError, match="effective.*range|effective_end"):
         client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=datetime.fromtimestamp(end["requested_start_ms"]/1000, timezone.utc), end=datetime.fromtimestamp(end["requested_end_ms"]/1000, timezone.utc))
     with pytest.raises(NaiveDatetimeError, match="naive|timezone"):

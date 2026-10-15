@@ -15,7 +15,7 @@ FUTURE = datetime.fromtimestamp(1767601200000/1000, timezone.utc)
 def test_client_clamps_end_time_to_finality_boundary():
     s = VECTORS["extra"]["future_end"]["S_ms"]
     http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[])])
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", finality_lag_ms=0, http_client=http)
     result = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=FUTURE)
     kline_calls = [params for url, params in http.calls if url.endswith("/api/v3/klines")]
     assert result == []
@@ -26,7 +26,7 @@ def test_client_clamps_end_time_to_finality_boundary():
 def test_future_end_reports_requested_and_effective_ranges():
     s = VECTORS["extra"]["future_end"]["S_ms"]
     http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[])])
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", finality_lag_ms=0, http_client=http)
     result = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=FUTURE)
     assert result == []
     assert http.calls[1][1]["endTime"] == VECTORS["extra"]["future_end"]["expected_effective_end_ms"] - 1
@@ -36,7 +36,7 @@ def test_b_not_final_vectors_shrink_to_explicit_empty_range():
     for case in VECTORS["cases"]:
         if case["case"] != "B_not_final":
             continue
-        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient([FakeResponse(payload={"serverTime": case["S_ms"]})]))
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", finality_lag_ms=case["L_ms"], http_client=FakeHttpClient([FakeResponse(payload={"serverTime": case["S_ms"]})]))
         with pytest.raises(EmptyEffectiveRangeError, match="effective.*range|effective_end"):
             client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
 
@@ -45,7 +45,7 @@ def test_returned_nonfinal_candle_aborts_fetch():
     s = VECTORS["cases"][0]["S_ms"]
     kline = [VECTORS["cases"][0]["candle_open_ms"], "100.10", "101.00", "99.50", "100.50", "12.345", VECTORS["cases"][0]["B_ms"], "1240", 100, "0", "0", "0"]
     http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[kline])])
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", finality_lag_ms=0, http_client=http)
     with pytest.raises(NonFinalCandleError, match="non-final|finality|close"):
         client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
     assert len(http.calls) == 2
@@ -100,3 +100,14 @@ def test_nonfinal_candle_during_pagination_aborts():
     with pytest.raises(NonFinalCandleError, match="non-final|finality|close"):
         client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
     assert len(http.calls) == 2
+
+
+@pytest.mark.requirement("FINAL-01")
+def test_boundary_vectors_with_positive_lag_clamp_the_request():
+    for case in VECTORS["cases"]:
+        if case["case"] != "B-1_is_final":
+            continue
+        http = FakeHttpClient([FakeResponse(payload={"serverTime": case["S_ms"]}), FakeResponse(payload=[])])
+        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, finality_lag_ms=case["L_ms"])
+        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+        assert http.calls[1][1]["endTime"] == case["expected_effective_end_ms"] - 1
