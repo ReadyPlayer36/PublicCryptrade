@@ -50,6 +50,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("junit", type=Path)
     ap.add_argument("--pytest-exit-code", type=int, required=True)
+    ap.add_argument("--implementation-stage", action="store_true",
+                    help="allow passing behavioral tests (code is being implemented); "
+                         "every failure must still be a NotImplementedError from an unimplemented src stub")
     args = ap.parse_args()
     if not args.junit.is_file():
         print(f"RED-REASON GATE FAIL: JUnit file missing: {args.junit}")
@@ -84,17 +87,18 @@ def main() -> int:
                 expected_red += 1
             else:
                 errors.append(f"failure is not a production NotImplementedError stub: {n}")
-        elif not allowlisted(n):
+        elif not args.implementation_stage and not allowlisted(n):
             errors.append(f"behavioral test passed against stubs and is not allowlisted: {n}")
     if args.pytest_exit_code not in (0, 1):
         errors.append(f"pytest exit code {args.pytest_exit_code} indicates collection/internal failure")
-    if expected_red == 0:
+    if expected_red == 0 and not args.implementation_stage:
         errors.append("no expected production-stub failures were observed")
     if errors:
         print(f"RED-REASON GATE FAIL: {len(errors)} issue(s); expected production-stub failures={expected_red}")
         for e in errors: print(" -", e)
         return 1
-    print(f"RED-REASON GATE PASS: {expected_red} failure(s) are NotImplementedError from src/trading_app; all passes are allowlisted; pytest exit={args.pytest_exit_code}")
+    mode = "implementation stage: passes allowed" if args.implementation_stage else "all passes are allowlisted"
+    print(f"RED-REASON GATE PASS: {expected_red} failure(s) are NotImplementedError from src/trading_app; {mode}; pytest exit={args.pytest_exit_code}")
     return 0
 if __name__ == "__main__":
     raise SystemExit(main())

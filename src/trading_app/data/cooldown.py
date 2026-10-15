@@ -1,17 +1,81 @@
-"""Cooldown persistence contract stubs; implementation is intentionally deferred.
+"""Global rate-limit cooldown state: {"until_ms": int, "reason": str}, atomic writes."""
+from __future__ import annotations
 
-Persist JSON exactly as {"until_ms": int, "reason": str}. The state is global
-across allowed hosts and an active cooldown prevents all HTTP calls, including
-server-time calls. Missing, corrupt, non-integer, and negative fields raise
-CorruptCooldownError with a diagnostic message; no network call may occur first.
-"""
+import json
+import os
+import tempfile
+from pathlib import Path
+from typing import Any
+
+# Frozen minimums in seconds (matrix.yaml `cooldown.durations`); a test pins these to the YAML.
+COOLDOWN_MINIMUM_S: dict[str, int] = {
+    "418": 600,
+    "429_exhausted": 300,
+    "429_retry_after_over_60": 600,
+    "429_retry_after_exceeds_sleep_budget": 600,
+}
+
+
 class CorruptCooldownError(ValueError):
     """Raised when cooldown state is missing, corrupt, non-integer, or negative."""
 
-def read_cooldown(*args, **kwargs):
-    """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
-    raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
 
-def write_cooldown(*args, **kwargs):
-    """Atomically persist cooldown JSON; not implemented in Stage 2 scaffold."""
-    raise NotImplementedError("Stage-2 implementation not started: write_cooldown")
+def cooldown_duration_s(trigger: str, retry_after_s: float | None) -> int:
+    """max(supplied Retry-After, trigger minimum), rounded up to whole seconds."""
+    try:
+        minimum = COOLDOWN_MINIMUM_S[trigger]
+    except KeyError as exc:
+        raise ValueError(f"unknown cooldown trigger: {trigger!r}") from exc
+    supplied = 0 if retry_after_s is None else retry_after_s
+    if supplied < 0:
+        raise ValueError("retry_after_s must be >= 0")
+    return int(max(-(-supplied // 1), minimum))
+
+
+def _validate(state: Any) -> dict[str, Any]:
+    if not isinstance(state, dict) or set(state) != {"until_ms", "reason"}:
+        raise CorruptCooldownError("invalid cooldown state: expected exactly until_ms and reason")
+    until, reason = state["until_ms"], state["reason"]
+    if isinstance(until, bool) or not isinstance(until, int):
+        raise CorruptCooldownError("invalid cooldown state: until_ms must be an integer")
+    if until < 0:
+        raise CorruptCooldownError("invalid cooldown state: until_ms is negative")
+    if not isinstance(reason, str) or not reason:
+        raise CorruptCooldownError("invalid cooldown state: reason must be a non-empty string")
+    return {"until_ms": until, "reason": reason}
+
+
+def read_cooldown(path: str | Path) -> dict[str, Any]:
+    """Load and validate cooldown state; any problem (including a missing file) raises."""
+    target = Path(path)
+    try:
+        text = target.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise CorruptCooldownError(f"cooldown file missing: {target}") from exc
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CorruptCooldownError(f"cooldown file unreadable: {target}") from exc
+    try:
+        state = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CorruptCooldownError(f"invalid cooldown JSON in {target}") from exc
+    return _validate(state)
+
+
+def write_cooldown(path: str | Path, state: dict[str, Any]) -> None:
+    """Atomically persist validated state (temp file in same directory, fsync, replace)."""
+    clean = _validate(state)
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=target.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(clean, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, target)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
