@@ -109,3 +109,10 @@ def test_invalid_state_is_rejected_on_write_and_read(tmp_path, state):
     path.write_text(json.dumps(state))
     with pytest.raises(cd.CorruptCooldownError):
         cd.read_cooldown(path)
+
+
+@pytest.mark.requirement("COOLDOWN-02")
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -0.5, True, "10"])
+def test_non_finite_or_non_numeric_retry_after_is_rejected_deliberately(bad):
+    with pytest.raises(ValueError, match="retry_after_s"):
+        cd.cooldown_duration_s("418", bad)

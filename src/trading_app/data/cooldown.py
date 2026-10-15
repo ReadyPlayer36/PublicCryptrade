@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -27,8 +28,10 @@ def cooldown_duration_s(trigger: str, retry_after_s: float | None) -> int:
     except KeyError as exc:
         raise ValueError(f"unknown cooldown trigger: {trigger!r}") from exc
     supplied = 0 if retry_after_s is None else retry_after_s
-    if supplied < 0:
-        raise ValueError("retry_after_s must be >= 0")
+    if isinstance(supplied, bool) or not isinstance(supplied, (int, float)):
+        raise ValueError("retry_after_s must be a number or None")
+    if not math.isfinite(supplied) or supplied < 0:
+        raise ValueError("retry_after_s must be finite and >= 0")
     return int(max(-(-supplied // 1), minimum))
 
 
