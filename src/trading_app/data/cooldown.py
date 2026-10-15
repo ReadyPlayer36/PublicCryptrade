@@ -5,6 +5,7 @@ import json
 import math
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -82,3 +83,47 @@ def write_cooldown(path: str | Path, state: dict[str, Any]) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+@contextmanager
+def _exclusive_lock(path: Path):
+    """Cross-process exclusive lock on a sidecar file (POSIX flock / Windows msvcrt)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(path.name + ".lock")
+    with open(lock_path, "a+b") as handle:
+        try:
+            import fcntl
+        except ImportError:  # Windows
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def extend_cooldown(path: str | Path, state: dict[str, Any]) -> dict[str, Any]:
+    """Race-safe 'keep the longest deadline': lock, read, compare, atomically replace.
+
+    Returns the state that is in force afterwards. A corrupt existing file is replaced
+    by the new valid state. The whole read-compare-write runs under one exclusive lock.
+    """
+    clean = _validate(state)
+    target = Path(path)
+    with _exclusive_lock(target):
+        try:
+            existing = read_cooldown(target)
+        except CorruptCooldownError:
+            existing = None
+        if existing is not None and existing["until_ms"] >= clean["until_ms"]:
+            return existing
+        write_cooldown(target, clean)
+        return clean

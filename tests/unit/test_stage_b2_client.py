@@ -342,3 +342,66 @@ def test_every_request_url_is_validated_before_sending():
     http = FakeHttpClient([FakeResponse(payload=OK)])
     make(http).get_server_time()
     assert all(validate_public_url(u) for u, _ in http.calls)
+
+
+# ---- reviewer findings on B2: cooldown re-check and race safety -------------------------
+import subprocess
+import sys
+import threading
+import time
+
+from trading_app.data import cooldown as cd
+
+
+@pytest.mark.requirement("COOLDOWN-01")
+@pytest.mark.parametrize("first", [FakeResponse(status_code=500), FakeResponse(status_code=429, headers={"Retry-After": "5"})], ids=["backoff", "retry-after"])
+def test_cooldown_set_by_another_process_during_sleep_stops_the_next_request(tmp_path, first):
+    path = tmp_path / "c.json"
+    http = FakeHttpClient([first, FakeResponse(payload=OK)])
+
+    def other_process_trips_cooldown(_seconds):
+        cd.write_cooldown(path, {"until_ms": NOW + 600_000, "reason": "418"})
+
+    client = make(http, cooldown_path=path, sleep=other_process_trips_cooldown)
+    with pytest.raises(BinanceClientError, match="cooldown active"):
+        client.get_server_time()
+    assert len(http.calls) == 1
+
+
+@pytest.mark.requirement("COOLDOWN-03")
+def test_concurrent_updates_keep_the_longest_deadline(tmp_path, monkeypatch):
+    path = tmp_path / "c.json"
+    real_read = cd.read_cooldown
+
+    def slow_read(p):                        # widen the race window inside read-compare-write
+        state = real_read(p)
+        time.sleep(0.02)
+        return state
+
+    monkeypatch.setattr(cd, "read_cooldown", slow_read)
+    cd.write_cooldown(path, {"until_ms": 1, "reason": "seed"})
+    deadlines = [500, 100, 900, 300, 700, 200, 800, 400]
+    threads = [threading.Thread(target=cd.extend_cooldown, args=(path, {"until_ms": d, "reason": f"t{d}"})) for d in deadlines]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    monkeypatch.undo()
+    assert cd.read_cooldown(path) == {"until_ms": 900, "reason": "t900"}
+
+
+@pytest.mark.requirement("COOLDOWN-03")
+def test_concurrent_processes_keep_the_longest_deadline(tmp_path):
+    path = tmp_path / "c.json"
+    code = ("import sys; from trading_app.data.cooldown import extend_cooldown; "
+            "extend_cooldown(sys.argv[1], {'until_ms': int(sys.argv[2]), 'reason': 'p' + sys.argv[2]})")
+    procs = [subprocess.Popen([sys.executable, "-c", code, str(path), str(d)]) for d in (300, 900, 100, 600, 800, 200)]
+    assert [p.wait(timeout=60) for p in procs] == [0] * 6
+    assert cd.read_cooldown(path) == {"until_ms": 900, "reason": "p900"}
+
+
+@pytest.mark.requirement("COOLDOWN-03")
+def test_extend_cooldown_replaces_corrupt_state_and_keeps_longer_existing(tmp_path):
+    path = tmp_path / "c.json"
+    path.write_text("garbage")
+    assert cd.extend_cooldown(path, {"until_ms": 5, "reason": "a"}) == {"until_ms": 5, "reason": "a"}
+    assert cd.extend_cooldown(path, {"until_ms": 3, "reason": "b"}) == {"until_ms": 5, "reason": "a"}
+    assert cd.read_cooldown(path)["until_ms"] == 5

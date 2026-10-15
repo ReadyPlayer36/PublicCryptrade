@@ -23,8 +23,8 @@ import httpx
 from trading_app.data.cooldown import (
     CorruptCooldownError,
     cooldown_duration_s,
+    extend_cooldown,
     read_cooldown,
-    write_cooldown,
 )
 
 PRIMARY_HOST = "data-api.binance.vision"
@@ -171,15 +171,11 @@ class BinanceMarketDataClient:
         if self._cooldown_path is None:
             return f"cooldown set until {until} ms ({trigger})"
         try:
-            try:
-                existing = read_cooldown(self._cooldown_path)
-                if existing["until_ms"] > until:
-                    return f"cooldown already active until {existing['until_ms']} ms"
-            except CorruptCooldownError:
-                pass
-            write_cooldown(self._cooldown_path, {"until_ms": until, "reason": trigger})
+            in_force = extend_cooldown(self._cooldown_path, {"until_ms": until, "reason": trigger})
         except OSError as exc:
             return f"cooldown set in memory until {until} ms ({trigger}) but could not be persisted: {exc}"
+        if in_force["until_ms"] > until:
+            return f"cooldown already active until {in_force['until_ms']} ms"
         return f"cooldown persisted until {until} ms ({trigger})"
 
     # ---- request engine --------------------------------------------------
@@ -198,8 +194,8 @@ class BinanceMarketDataClient:
         self._sleep(seconds)
 
     def _request_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        self._check_cooldown()
         for attempt in range(ATTEMPTS_TOTAL):
+            self._check_cooldown()  # before EVERY attempt, including retries after a sleep
             last = attempt == ATTEMPTS_TOTAL - 1
             url = f"https://{self._host}{path}"
             validate_public_url(url)
