@@ -33,7 +33,7 @@ jobs:
           python -m pytest -ra --junitxml=artifacts/junit-offline.xml
           pytest_rc=$?
           set -e
-          python tools/red_reason_gate.py artifacts/junit-offline.xml --pytest-exit-code "$pytest_rc"
+          python tools/red_reason_gate.py artifacts/junit-offline.xml --pytest-exit-code "$pytest_rc" --implementation-stage
       - name: Traceability audit (fails only on structural errors; acceptance remains BLOCKED)
         shell: bash
         run: |
