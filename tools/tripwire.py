@@ -13,6 +13,8 @@ from pathlib import Path
 SCANNED_DIRS = ("src", "scripts")
 EXEMPT_DIRS = ("tests",)
 FORBIDDEN_HTTP_METHODS = {"post", "put", "delete", "patch", "request", "send", "stream"}
+DIRECT_NETWORK_APIS = {"urlopen", "urlretrieve", "create_connection", "create_server", "HTTPConnection", "HTTPSConnection",
+                       "getaddrinfo", "gethostbyname", "open_connection", "start_server"}
 HTTP_MODULES = {"httpx", "requests", "urllib", "urllib.request", "urllib3", "http.client", "aiohttp", "socket", "websockets"}
 FORBIDDEN_STRINGS = (
     "/api/v3/order", "/api/v3/account", "/api/v3/myTrades", "/sapi/", "/fapi/", "/dapi/", "/eapi/", "/wapi/",
@@ -49,13 +51,17 @@ def _scan_file(path: Path, rel: str) -> list[Finding]:
     for node in ast.walk(tree):                    # pass 1: `from httpx import post as send`
         if isinstance(node, ast.ImportFrom) and (node.module or "") in HTTP_MODULES:
             for item in node.names:
-                if item.name in FORBIDDEN_HTTP_METHODS or item.name in ("urlopen", "urlretrieve", "create_connection"):
+                if item.name in FORBIDDEN_HTTP_METHODS or item.name in DIRECT_NETWORK_APIS:
                     aliases.add(item.asname or item.name)
                     findings.append(Finding(rel, node.lineno, "http-import", f"from {node.module} import {item.name}"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_HTTP_METHODS:
-            # any reference, called or not: `c.post(...)`, `f = c.post`, `map(c.post, ...)`
+        if isinstance(node, ast.ImportFrom) and node.module == "socket" and any(i.name == "socket" for i in node.names):
+            findings.append(Finding(rel, node.lineno, "http-import", "from socket import socket"))
+        if isinstance(node, ast.Attribute) and (node.attr in FORBIDDEN_HTTP_METHODS or node.attr in DIRECT_NETWORK_APIS):
+            # any reference, called or not: `c.post(...)`, `f = c.post`, `socket.create_connection(...)`
             findings.append(Finding(rel, node.lineno, "http-method", f".{node.attr}"))
+        elif isinstance(node, ast.Attribute) and node.attr == "socket" and isinstance(node.value, ast.Name) and node.value.id == "socket":
+            findings.append(Finding(rel, node.lineno, "http-method", "socket.socket"))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in aliases:
                 findings.append(Finding(rel, node.lineno, "http-method", f"{node.func.id}(...) [aliased]"))

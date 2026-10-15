@@ -65,6 +65,15 @@ def test_tripwire_scanned_file_count_and_tests_exemption(tmp_path, capsys):
     ("papi_path", "U = 'https://data-api.binance.vision/papi/v1/um/order'\n", "forbidden-string"),
     ("papi_host", "H = 'papi.binance.com'\n", "forbidden-string"),
     ("urlopen", "from urllib.request import urlopen\n", "http-import"),
+    ("direct_urlopen", "import urllib.request\nurllib.request.urlopen('https://x')\n", "http-method"),
+    ("aliased_module_urlretrieve", "import urllib.request as ur\nur.urlretrieve('https://x', 'f')\n", "http-method"),
+    ("direct_create_connection", "import socket\nsocket.create_connection(('x', 443))\n", "http-method"),
+    ("from_create_connection", "from socket import create_connection as dial\ndial(('x', 443))\n", "http-import"),
+    ("raw_socket", "import socket\ns = socket.socket()\n", "http-method"),
+    ("from_socket_socket", "from socket import socket\n", "http-import"),
+    ("http_client_connection", "import http.client\nhttp.client.HTTPSConnection('x')\n", "http-method"),
+    ("asyncio_connection", "import asyncio\nasyncio.open_connection('x', 443)\n", "http-method"),
+    ("dns_lookup", "import socket\nsocket.getaddrinfo('x', 443)\n", "http-method"),
 ])
 def test_tripwire_detects_alias_and_bypass_forms(tmp_path, name, code, kind):
     (tmp_path / "src").mkdir()
@@ -77,4 +86,11 @@ def test_tripwire_detects_alias_and_bypass_forms(tmp_path, name, code, kind):
 def test_tripwire_does_not_flag_plain_get_usage(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "ok.py").write_text("import httpx\nfrom httpx import Client, get\nc = Client()\nc.get('https://data-api.binance.vision/api/v3/time')\n")
+    assert scan(tmp_path).findings == ()
+
+
+@pytest.mark.requirement("TRIP-01")
+def test_tripwire_stays_quiet_on_the_allowed_client_and_sqlite_usage(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "ok.py").write_text("import sqlite3, httpx\nconn = sqlite3.connect('x.db')\nc = httpx.Client(timeout=5)\nc.get('https://data-api.binance.vision/api/v3/time')\nsocket_count = 1\n")
     assert scan(tmp_path).findings == ()
