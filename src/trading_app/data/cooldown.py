@@ -30,7 +30,7 @@ def cooldown_duration_s(trigger: str, retry_after_s: float | None) -> int:
     supplied = 0 if retry_after_s is None else retry_after_s
     if isinstance(supplied, bool) or not isinstance(supplied, (int, float)):
         raise ValueError("retry_after_s must be a number or None")
-    if not math.isfinite(supplied) or supplied < 0:
+    if (isinstance(supplied, float) and not math.isfinite(supplied)) or supplied < 0:
         raise ValueError("retry_after_s must be finite and >= 0")
     return int(max(-(-supplied // 1), minimum))
 

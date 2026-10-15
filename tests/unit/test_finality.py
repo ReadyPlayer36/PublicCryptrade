@@ -47,8 +47,10 @@ def test_finality_lag_has_no_default():
 
 @pytest.mark.requirement("FINAL-01")
 def test_no_local_clock_fallback():
-    http = FakeHttpClient(errors=[TimeoutError("server time unavailable")])
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
-    with pytest.raises(BinanceClientError, match="server time|time"):
+    # Timeouts are retried per the frozen policy (4 attempts); the fetch then fails closed.
+    http = FakeHttpClient(errors=[TimeoutError("server time unavailable") for _ in range(4)])
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http,
+                                     sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 999_999_999_999_999)
+    with pytest.raises(BinanceClientError, match="timeout"):
         client.get_server_time()
-    assert len(http.calls) == 1
+    assert len(http.calls) == 4

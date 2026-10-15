@@ -112,7 +112,7 @@ def test_retry_after_cap_and_no_jitter(retry_after):
     policy = retry_policy()["retry_after"]
     assert policy["sleep_jitter"] is False
     assert policy["max_seconds"] == 60
-    http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": str(retry_after)})])
+    http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": str(retry_after)}) for _ in range(4 if retry_after == 10 else 1)])
     sleeps = []
     client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.75)
     with pytest.raises(BinanceClientError, match="429|retry|cooldown|budget"):

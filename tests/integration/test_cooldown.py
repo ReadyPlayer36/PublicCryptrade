@@ -16,12 +16,16 @@ def test_cooldown_directory_scope(tmp_path):
         read_cooldown(path)
 
 @pytest.mark.requirement("COOLDOWN-01")
-def test_cooldown_is_global_across_hosts():
-    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000})])
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
-    with pytest.raises(BinanceClientError, match="time|server"):
-        client.get_server_time()
-    assert len(http.calls) == 1
+def test_cooldown_is_global_across_hosts(tmp_path):
+    path = tmp_path / "binance_cooldown.json"
+    primary = FakeHttpClient([FakeResponse(status_code=418)])
+    with pytest.raises(BinanceClientError, match="418"):
+        BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=primary, cooldown_path=path).get_server_time()
+    fallback = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000})])
+    other = BinanceMarketDataClient(base_url="https://api.binance.com", http_client=fallback, cooldown_path=path)
+    with pytest.raises(BinanceClientError, match="cooldown"):
+        other.get_server_time()
+    assert fallback.calls == []
     assert cooldown_policy()["scope"] == "global_across_allowed_hosts"
 
 @pytest.mark.requirement("COOLDOWN-03")

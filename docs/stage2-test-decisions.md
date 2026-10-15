@@ -13,3 +13,14 @@ This document records acceptance-test decisions only. It does not authorize prod
 - **Provenance:** the public baseline `a88a843` has tree `408a6a42…`; the local bundle's original commit identity is `de1bd38…` and is not present in public history. The revised commit message records that gap. Any push of original history is a separate, optional branch operation.
 
 Any test expectation that conflicts with `matrix.yaml` requires a new spec version and reviewer sign-off; no frozen matrix or frozen tooling file is changed by this revision.
+
+## Stage B2 decisions (client request engine)
+- `cooldown_path=None` keeps cooldown in memory per client; production wiring must pass `data/binance_cooldown.json` so cooldown is global across processes.
+- `now_ms` is used only for cooldown timestamps; finality never reads the local clock (server time or abort).
+- Sleep budget (30s) and host lock are per fetch; the fetch owner calls `begin_fetch()`. `get_server_time` alone does not reset them.
+- Connect/DNS failure before the first successful `/api/v3/time` switches once to the fallback host (counts as an attempt, no sleep). Afterwards connect failures are ordinary retryable transient errors on the locked host.
+- Unparsable or non-integer `Retry-After` is treated as absent (exponential backoff). Only integer seconds are honored.
+- A 429 whose backoff (no `Retry-After`) would exceed the sleep budget trips the budget cooldown (600s minimum). Non-429 retryable errors that would exceed the budget abort without cooldown.
+- Out-of-range injected jitter is a programming error (`ValueError`), never silently clamped.
+- Unknown transport errors (e.g. `ReadError`) are not retried.
+- Two Stage-2 tests were defective and corrected in Stage B2: `test_retry_after_cap_and_no_jitter[429]` supplied one response while expecting four requests; `tests/unit/test_time_snapshot.py::test_no_local_clock_fallback` called the real network with no assertion (now hermetic). `tests/integration/test_time_snapshot.py` has the same real-network defect and is fixed in Stage C.

@@ -52,11 +52,11 @@ def test_returned_nonfinal_candle_aborts_fetch():
 
 @pytest.mark.requirement("FINAL-01")
 def test_server_time_failure_aborts_without_kline_request():
-    http = FakeHttpClient(errors=[TimeoutError("server time down")])
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
-    with pytest.raises(BinanceClientError, match="server.time|time"):
+    http = FakeHttpClient(errors=[TimeoutError("server time down") for _ in range(4)])
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
+    with pytest.raises(BinanceClientError, match="timeout"):
         client.get_server_time()
-    assert len(http.calls) == 1
+    assert len(http.calls) == 4
 
 
 @pytest.mark.requirement("FINAL-01")
@@ -70,11 +70,11 @@ def test_boundary_rule(lag_ms):
 
 @pytest.mark.requirement("FINAL-01")
 def test_no_local_clock_fallback():
-    http = FakeHttpClient(errors=[TimeoutError("server time unavailable")])
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
-    with pytest.raises(BinanceClientError, match="server.time|time"):
+    http = FakeHttpClient(errors=[TimeoutError("server time unavailable") for _ in range(4)])
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 999_999_999_999_999)
+    with pytest.raises(BinanceClientError, match="timeout"):
         client.get_server_time()
-    assert len(http.calls) == 1
+    assert len(http.calls) == 4
 
 @pytest.mark.requirement("FINAL-01")
 @pytest.mark.parametrize("failure", ["invalid-timestamp", "malformed-time", "server-time-failure"], ids=["invalid-timestamp", "malformed-time", "server-time-failure"])
@@ -84,11 +84,11 @@ def test_server_time_failure_aborts(failure):
     elif failure == "malformed-time":
         http = FakeHttpClient([FakeResponse(payload={"serverTime": "not-an-integer"})])
     else:
-        http = FakeHttpClient(errors=[TimeoutError("server time down")])
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+        http = FakeHttpClient(errors=[TimeoutError("server time down") for _ in range(4)])
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
     with pytest.raises(BinanceClientError, match="time|timestamp|server"):
         client.get_server_time()
-    assert len(http.calls) == 1
+    assert len(http.calls) == (4 if failure == "server-time-failure" else 1)
 
 @pytest.mark.requirement("FINAL-02")
 def test_nonfinal_candle_during_pagination_aborts():
