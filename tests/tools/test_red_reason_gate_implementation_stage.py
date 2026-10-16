@@ -39,3 +39,16 @@ def test_collection_errors_and_skips_still_fail_in_implementation_stage(tmp_path
 def test_fully_implemented_suite_passes_in_implementation_stage(tmp_path):
     xml = '<testsuite tests="1"><testcase classname="tests.unit.test_a" name="test_b"/></testsuite>'
     assert run(tmp_path, xml, 0, "--implementation-stage").returncode == 0
+
+
+@pytest.mark.requirement("TOOLS-04")
+def test_known_hollow_placeholders_are_tolerated_only_when_listed(tmp_path):
+    xml = '<testsuite tests="1"><testcase classname="tests.integration.test_h" name="test_hollow"><failure message="AttributeError">AttributeError: NoneType</failure></testcase></testsuite>'
+    listed = tmp_path / "hollow.txt"
+    listed.write_text("# comment\ntests/integration/test_h.py::test_hollow\n")
+    ok = run(tmp_path, xml, 1, "--implementation-stage", "--hollow-allowlist", str(listed))
+    assert ok.returncode == 0 and "KNOWN HOLLOW placeholders failing=1" in ok.stdout
+    other = tmp_path / "other.txt"
+    other.write_text("tests/integration/test_other.py::test_x\n")
+    assert run(tmp_path, xml, 1, "--implementation-stage", "--hollow-allowlist", str(other)).returncode != 0
+    assert run(tmp_path, xml, 1, "--hollow-allowlist", str(listed)).returncode != 0    # not honoured outside implementation stage

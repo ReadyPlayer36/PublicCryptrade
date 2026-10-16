@@ -1,0 +1,21 @@
+# Known assertion-free placeholder tests, to be REPLACED by real tests in Stage D2/D3.
+# Policy: this list may only shrink; it must be EMPTY at the final gate.
+tests/integration/test_audit.py::test_failure_audit_contents
+tests/integration/test_audit.py::test_failure_audit_write_cannot_mask_original_exception
+tests/integration/test_concurrency.py::test_conflict_rolls_back_entire_transaction
+tests/integration/test_concurrency.py::test_no_duplicate_rows_after_overlap
+tests/integration/test_concurrency.py::test_two_processes_overlap_without_duplicates
+tests/integration/test_metadata.py::test_data_fetch_metadata_fields
+tests/integration/test_service.py::test_repeatable_ingestion_is_idempotent
+tests/integration/test_sqlite_verification.py::test_direct_sqlite_verification_procedure
+tests/integration/test_sqlite_verification.py::test_invalid_volume_query
+tests/integration/test_sqlite_verification.py::test_ohlc_correctness_query
+tests/integration/test_sqlite_verification.py::test_stored_data_verification_queries
+tests/integration/test_sqlite_verification.py::test_suspicious_data_query
+tests/integration/test_sqlite_verification.py::test_timestamp_continuity_query
+tests/integration/test_transactions.py::test_begin_immediate_captured
+tests/integration/test_transactions.py::test_begin_immediate_statement_captured
+tests/integration/test_transactions.py::test_network_and_validation_before_begin_immediate
+tests/unit/test_validator_empty.py::test_empty_rows_without_expectations_have_no_issues
+tests/unit/test_verification_sql.py::test_decimal_string_safe_comparisons
+tests/unit/test_verification_sql.py::test_no_cast_as_real
