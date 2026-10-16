@@ -61,9 +61,14 @@ def test_detector_flags_hollow_trivial_and_accepts_real_tests(tmp_path):
         "def test_real():\n    assert call() == 1\n"
         "def test_raises():\n    with pytest.raises(ValueError):\n        f()\n"
         "def test_helper():\n    assert_valid_klines([])\n"
+        "async def test_async_hollow():\n    await call()\n"
+        "async def test_async_trivial():\n    await call()\n    assert True\n"
+        "async def test_async_real():\n    assert await call() == 1\n"
+        "class TestGroup:\n    def test_method_hollow(self):\n        call()\n    def test_method_real(self):\n        assert call() == 1\n"
     )
     assert hollow_tests(tmp_path) == {f"tests/test_x.py::{n}" for n in (
-        "test_hollow", "test_trivial_true", "test_trivial_one", "test_comment_only", "test_string_mentions_assert")}
+        "test_hollow", "test_trivial_true", "test_trivial_one", "test_comment_only", "test_string_mentions_assert",
+        "test_async_hollow", "test_async_trivial", "test_method_hollow")}
 
 
 @pytest.mark.requirement("HYGIENE-02")

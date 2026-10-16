@@ -189,10 +189,11 @@ class CandleRepository:
                 return len(new_rows)
             except IntegrityError:
                 connection.rollback()
-                raise CandleConflictError("unique constraint conflict; nothing was written") from None
+                # (falls through to the raise below, outside the except block: no cause/context leak)
             except BaseException:
                 connection.rollback()
                 raise
+            raise CandleConflictError("unique constraint conflict; nothing was written")
 
     @staticmethod
     def _batch_diff(a: dict[str, Any], b: dict[str, Any]) -> list[str]:

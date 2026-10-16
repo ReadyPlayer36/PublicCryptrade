@@ -137,3 +137,47 @@ def test_insert_runs_in_one_begin_immediate_transaction_then_commits():
     repository.insert_candles([candle()])
     assert statements[0] == ["BEGIN", "IMMEDIATE"]
     assert statements.count(["BEGIN", "IMMEDIATE"]) == 1
+
+
+@pytest.mark.requirement("M1-07")
+def test_failure_after_rows_are_written_rolls_everything_back_and_leaves_no_lock():
+    from sqlalchemy import event
+    repository = make_repo()
+    repository.insert_candles([candle()])
+    base = candle().open_time
+
+    def explode_after_insert(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("INSERT"):
+            raise RuntimeError("injected failure after the rows were written")
+
+    event.listen(repository.engine, "after_cursor_execute", explode_after_insert)
+    try:
+        with pytest.raises(RuntimeError, match="injected"):
+            repository.insert_candles([candle(open_time=base + timedelta(minutes=5 * i)) for i in range(1, 4)])
+    finally:
+        event.remove(repository.engine, "after_cursor_execute", explode_after_insert)
+    assert repository.count() == 1                                  # none of the three new rows persisted
+    assert repository.insert_candles([candle(open_time=base + timedelta(minutes=5))]) == 1   # write lock was released
+
+
+@pytest.mark.requirement("M1-07")
+def test_integrity_error_after_rows_are_written_becomes_a_conflict_and_rolls_back():
+    from sqlalchemy import event
+    from sqlalchemy.exc import IntegrityError
+    from trading_app.data.repository import CandleConflictError
+    repository = make_repo()
+    repository.insert_candles([candle()])
+    base = candle().open_time
+
+    def raise_integrity_error(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("INSERT"):
+            raise IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed: SECRET-DETAIL"))
+
+    event.listen(repository.engine, "after_cursor_execute", raise_integrity_error)
+    try:
+        with pytest.raises(CandleConflictError) as failed:
+            repository.insert_candles([candle(open_time=base + timedelta(minutes=5 * i)) for i in range(1, 4)])
+    finally:
+        event.remove(repository.engine, "after_cursor_execute", raise_integrity_error)
+    assert "SECRET-DETAIL" not in str(failed.value) and failed.value.__cause__ is None and failed.value.__context__ is None
+    assert repository.count() == 1

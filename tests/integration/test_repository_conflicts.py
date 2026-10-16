@@ -61,10 +61,18 @@ def test_identical_rows_idempotent_and_conflicts_raise():
 
 @pytest.mark.requirement("CONFLICT-01")
 def test_every_failure_mode_leaves_the_persisted_state_unchanged():
+    from sqlalchemy import text
     repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
     original = candle()
-    repository.insert_candles([original])
-    snapshot = repository.get_candles(symbol="BTCUSDT", timeframe="5m")
+    other_series = candle(symbol="ETHUSDT", open="2000.5")
+    other_timeframe = candle(timeframe="15m", open_time=original.open_time)
+    repository.insert_candles([original, other_series, other_timeframe])
+
+    def full_state():                      # every column of every row, every series (ids and created_at included)
+        with repository.engine.connect() as connection:
+            return [tuple(r) for r in connection.execute(text("SELECT * FROM candles ORDER BY id")).all()]
+
+    snapshot = full_state()
     t = original.open_time
     valid_new = candle(open_time=t + timedelta(minutes=5))
     more_new = candle(open_time=t + timedelta(minutes=10))
@@ -73,9 +81,11 @@ def test_every_failure_mode_leaves_the_persisted_state_unchanged():
         [candle(open_time=t + timedelta(minutes=15)), candle(open_time=t + timedelta(minutes=20), volume="1"),
          candle(open_time=t + timedelta(minutes=20), volume="2")],                            # in-batch conflict after valid entries
         [valid_new, candle(open_time=t + timedelta(minutes=25), trade_count=-1)],             # invalid field after a valid entry
+        [valid_new, candle(symbol="ETHUSDT", open="9999")],                                   # conflict in ANOTHER series
+        [candle(timeframe="15m", open_time=t, high="777")],                                   # conflict in another timeframe
     ]
     for batch in failing_batches:
         with pytest.raises((CandleConflictError, ValueError)):
             repository.insert_candles(batch)
-        assert repository.get_candles(symbol="BTCUSDT", timeframe="5m") == snapshot
-        assert repository.count() == 1
+        assert full_state() == snapshot
+    assert repository.count() == 3

@@ -23,7 +23,7 @@ def hollow_tests(root: Path) -> set[str]:
     for path in sorted((Path(root) / "tests").rglob("test_*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
                 if not any(_meaningful(child) for child in ast.walk(node)):
                     found.add(f"{path.relative_to(root).as_posix()}::{node.name}")
     return found
