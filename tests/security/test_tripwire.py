@@ -70,6 +70,8 @@ def test_tripwire_scanned_file_count_and_tests_exemption(tmp_path, capsys):
     ("direct_create_connection", "import socket\nsocket.create_connection(('x', 443))\n", "http-method"),
     ("from_create_connection", "from socket import create_connection as dial\ndial(('x', 443))\n", "http-import"),
     ("raw_socket", "import socket\ns = socket.socket()\n", "http-method"),
+    ("aliased_raw_socket", "import socket as net\ns = net.socket()\n", "http-method"),
+    ("aliased_raw_socket_second_import", "import os\nimport socket as sk, sys\nsk.socket()\n", "http-method"),
     ("from_socket_socket", "from socket import socket\n", "http-import"),
     ("http_client_connection", "import http.client\nhttp.client.HTTPSConnection('x')\n", "http-method"),
     ("asyncio_connection", "import asyncio\nasyncio.open_connection('x', 443)\n", "http-method"),
@@ -93,4 +95,11 @@ def test_tripwire_does_not_flag_plain_get_usage(tmp_path):
 def test_tripwire_stays_quiet_on_the_allowed_client_and_sqlite_usage(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "ok.py").write_text("import sqlite3, httpx\nconn = sqlite3.connect('x.db')\nc = httpx.Client(timeout=5)\nc.get('https://data-api.binance.vision/api/v3/time')\nsocket_count = 1\n")
+    assert scan(tmp_path).findings == ()
+
+
+@pytest.mark.requirement("TRIP-01")
+def test_tripwire_does_not_flag_socket_attribute_on_unrelated_objects(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "ok.py").write_text("import net_config as net\nvalue = net.socket\n")
     assert scan(tmp_path).findings == ()

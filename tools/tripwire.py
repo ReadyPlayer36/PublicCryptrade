@@ -48,6 +48,12 @@ def _scan_file(path: Path, rel: str) -> list[Finding]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
     findings: list[Finding] = []
     aliases: set[str] = set()                      # local names bound to forbidden functions
+    socket_names: set[str] = {"socket"}            # local names bound to the socket module
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for item in node.names:
+                if item.name == "socket":
+                    socket_names.add(item.asname or item.name)
     for node in ast.walk(tree):                    # pass 1: `from httpx import post as send`
         if isinstance(node, ast.ImportFrom) and (node.module or "") in HTTP_MODULES:
             for item in node.names:
@@ -60,7 +66,7 @@ def _scan_file(path: Path, rel: str) -> list[Finding]:
         if isinstance(node, ast.Attribute) and (node.attr in FORBIDDEN_HTTP_METHODS or node.attr in DIRECT_NETWORK_APIS):
             # any reference, called or not: `c.post(...)`, `f = c.post`, `socket.create_connection(...)`
             findings.append(Finding(rel, node.lineno, "http-method", f".{node.attr}"))
-        elif isinstance(node, ast.Attribute) and node.attr == "socket" and isinstance(node.value, ast.Name) and node.value.id == "socket":
+        elif isinstance(node, ast.Attribute) and node.attr == "socket" and isinstance(node.value, ast.Name) and node.value.id in socket_names:
             findings.append(Finding(rel, node.lineno, "http-method", "socket.socket"))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in aliases:
