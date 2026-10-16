@@ -57,3 +57,25 @@ def test_identical_rows_idempotent_and_conflicts_raise():
     assert repository.insert_candles([candle(open="100.10", created_at_ms=999999)]) == 0
     with pytest.raises(CandleConflictError, match="conflict|different|mismatch"):
         repository.insert_candles([candle(open="100.11")])
+
+
+@pytest.mark.requirement("CONFLICT-01")
+def test_every_failure_mode_leaves_the_persisted_state_unchanged():
+    repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
+    original = candle()
+    repository.insert_candles([original])
+    snapshot = repository.get_candles(symbol="BTCUSDT", timeframe="5m")
+    t = original.open_time
+    valid_new = candle(open_time=t + timedelta(minutes=5))
+    more_new = candle(open_time=t + timedelta(minutes=10))
+    failing_batches = [
+        [valid_new, more_new, candle(close="1.00")],                                          # existing-row conflict last
+        [candle(open_time=t + timedelta(minutes=15)), candle(open_time=t + timedelta(minutes=20), volume="1"),
+         candle(open_time=t + timedelta(minutes=20), volume="2")],                            # in-batch conflict after valid entries
+        [valid_new, candle(open_time=t + timedelta(minutes=25), trade_count=-1)],             # invalid field after a valid entry
+    ]
+    for batch in failing_batches:
+        with pytest.raises((CandleConflictError, ValueError)):
+            repository.insert_candles(batch)
+        assert repository.get_candles(symbol="BTCUSDT", timeframe="5m") == snapshot
+        assert repository.count() == 1

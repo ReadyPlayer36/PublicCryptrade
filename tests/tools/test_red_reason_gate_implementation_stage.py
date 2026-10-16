@@ -52,3 +52,51 @@ def test_known_hollow_placeholders_are_tolerated_only_when_listed(tmp_path):
     other.write_text("tests/integration/test_other.py::test_x\n")
     assert run(tmp_path, xml, 1, "--implementation-stage", "--hollow-allowlist", str(other)).returncode != 0
     assert run(tmp_path, xml, 1, "--hollow-allowlist", str(listed)).returncode != 0    # not honoured outside implementation stage
+
+
+def _final_tree(root, hollow=False, listed=None):
+    (root / "tests").mkdir(exist_ok=True)
+    (root / "tests" / "test_a.py").write_text("def test_a():\n    " + ("pass\n" if hollow else "assert 1 + 1 == 2\n"))
+    if listed is not None:
+        (root / "tests" / "hollow_allowlist.txt").write_text(listed)
+    return root / "tests" / "hollow_allowlist.txt"
+
+
+PASSING = '<testsuite tests="1"><testcase classname="tests.test_a" name="test_a"/></testsuite>'
+
+
+@pytest.mark.requirement("TOOLS-05")
+def test_final_gate_passes_only_when_everything_is_real_and_green(tmp_path):
+    allow = _final_tree(tmp_path, listed="# empty\n")
+    result = run(tmp_path, PASSING, 0, "--final-gate", "--root", str(tmp_path), "--hollow-allowlist", str(allow))
+    assert result.returncode == 0 and "FINAL GATE PASS" in result.stdout
+
+
+@pytest.mark.requirement("TOOLS-05")
+def test_final_gate_rejects_hollow_tests_regardless_of_the_allowlist(tmp_path):
+    allow = _final_tree(tmp_path, hollow=True, listed="tests/test_a.py::test_a\n")
+    result = run(tmp_path, PASSING, 0, "--final-gate", "--root", str(tmp_path), "--hollow-allowlist", str(allow))
+    assert result.returncode != 0 and "allowlist must be empty" in result.stdout and "hollow test(s) remain" in result.stdout
+
+
+@pytest.mark.requirement("TOOLS-05")
+def test_final_gate_fails_closed_on_missing_or_malformed_allowlist(tmp_path):
+    _final_tree(tmp_path)
+    missing = run(tmp_path, PASSING, 0, "--final-gate", "--root", str(tmp_path), "--hollow-allowlist", str(tmp_path / "nope.txt"))
+    assert missing.returncode != 0 and "missing" in missing.stdout
+    bad = tmp_path / "bad.txt"
+    bad.write_text("not an entry\n")
+    malformed = run(tmp_path, PASSING, 0, "--final-gate", "--root", str(tmp_path), "--hollow-allowlist", str(bad))
+    assert malformed.returncode != 0 and "malformed" in malformed.stdout
+
+
+@pytest.mark.requirement("TOOLS-05")
+def test_final_gate_rejects_failures_skips_nonzero_exit_and_stage_mode(tmp_path):
+    allow = _final_tree(tmp_path, listed="")
+    flags = ("--final-gate", "--root", str(tmp_path), "--hollow-allowlist", str(allow))
+    failing = '<testsuite tests="1"><testcase classname="tests.test_a" name="test_a"><failure message="x">x</failure></testcase></testsuite>'
+    skipped = '<testsuite tests="1"><testcase classname="tests.test_a" name="test_a"><skipped/></testcase></testsuite>'
+    assert run(tmp_path, failing, 1, *flags).returncode != 0
+    assert run(tmp_path, skipped, 0, *flags).returncode != 0
+    assert run(tmp_path, PASSING, 1, *flags).returncode != 0
+    assert run(tmp_path, PASSING, 0, *flags, "--implementation-stage").returncode != 0

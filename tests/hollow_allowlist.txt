@@ -1,5 +1,6 @@
 # Known assertion-free placeholder tests, to be REPLACED by real tests in Stage D2/D3.
-# Policy: this list may only shrink; it must be EMPTY at the final gate.
+# Policy: this list may only shrink; it must be EMPTY at the final gate (tools/red_reason_gate.py --final-gate).
+# Adding an entry also requires editing PINNED_ORIGINAL in tests/tools/test_no_hollow_tests.py (visible in review).
 tests/integration/test_audit.py::test_failure_audit_contents
 tests/integration/test_audit.py::test_failure_audit_write_cannot_mask_original_exception
 tests/integration/test_concurrency.py::test_conflict_rolls_back_entire_transaction
@@ -16,6 +17,5 @@ tests/integration/test_sqlite_verification.py::test_timestamp_continuity_query
 tests/integration/test_transactions.py::test_begin_immediate_captured
 tests/integration/test_transactions.py::test_begin_immediate_statement_captured
 tests/integration/test_transactions.py::test_network_and_validation_before_begin_immediate
-tests/unit/test_validator_empty.py::test_empty_rows_without_expectations_have_no_issues
 tests/unit/test_verification_sql.py::test_decimal_string_safe_comparisons
 tests/unit/test_verification_sql.py::test_no_cast_as_real

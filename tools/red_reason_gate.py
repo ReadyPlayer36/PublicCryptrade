@@ -46,6 +46,44 @@ def nodeid(case: ET.Element) -> str:
 def allowlisted(n: str) -> bool:
     return n in ALLOWED_EXACT or n.startswith(ALLOWED_PREFIXES)
 
+def _final_gate(args: argparse.Namespace) -> int:
+    """Final acceptance gate: no stubs, no failures, no skips, no hollow tests, allowlist empty."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from tools.hollow_scan import hollow_tests, load_allowlist
+    errors: list[str] = []
+    if args.implementation_stage:
+        errors.append("--final-gate cannot be combined with --implementation-stage")
+    if args.pytest_exit_code != 0:
+        errors.append(f"pytest exit code must be 0, got {args.pytest_exit_code}")
+    try:
+        cases = list(ET.parse(args.junit).getroot().iter("testcase"))
+    except Exception as exc:
+        print(f"FINAL GATE FAIL: unreadable JUnit: {exc}")
+        return 1
+    if not cases:
+        errors.append("JUnit contains no testcases")
+    for case in cases:
+        if case.find("failure") is not None or case.find("error") is not None or case.find("skipped") is not None:
+            errors.append(f"not passing: {nodeid(case)}")
+    try:
+        entries = load_allowlist(args.hollow_allowlist)
+        if entries:
+            errors.append(f"hollow allowlist must be empty, has {len(entries)} entries")
+    except ValueError as exc:
+        errors.append(str(exc))
+    remaining = hollow_tests(args.root)
+    if remaining:
+        errors.append(f"{len(remaining)} hollow test(s) remain: {sorted(remaining)[:5]}")
+    if errors:
+        print(f"FINAL GATE FAIL: {len(errors)} issue(s)")
+        for error in errors:
+            print(" - " + error)
+        return 1
+    print(f"FINAL GATE PASS: {len(cases)} tests passed; no hollow tests; allowlist empty")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("junit", type=Path)
@@ -53,9 +91,14 @@ def main() -> int:
     ap.add_argument("--implementation-stage", action="store_true",
                     help="allow passing behavioral tests (code is being implemented); "
                          "every failure must still be a NotImplementedError from an unimplemented src stub")
+    ap.add_argument("--final-gate", action="store_true",
+                    help="final acceptance: every test passes, no hollow tests exist, and the hollow allowlist is present and empty")
+    ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1], help="repository root (final gate)")
     ap.add_argument("--hollow-allowlist", type=Path, default=Path(__file__).resolve().parents[1] / "tests" / "hollow_allowlist.txt",
                     help="known assertion-free placeholder tests; tolerated (and counted) while failing in implementation-stage mode")
     args = ap.parse_args()
+    if args.final_gate:
+        return _final_gate(args)
     hollow = set()
     if args.implementation_stage and args.hollow_allowlist.is_file():
         hollow = {l.strip() for l in args.hollow_allowlist.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")}
