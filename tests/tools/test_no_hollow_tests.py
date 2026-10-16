@@ -64,11 +64,17 @@ def test_detector_flags_hollow_trivial_and_accepts_real_tests(tmp_path):
         "async def test_async_hollow():\n    await call()\n"
         "async def test_async_trivial():\n    await call()\n    assert True\n"
         "async def test_async_real():\n    assert await call() == 1\n"
+        "def test_unused_nested_assert():\n    def helper():\n        assert call() == 1\n    call()\n"
+        "def test_nested_assert_never_called_by_name():\n    def helper():\n        assert call() == 1\n    other = helper\n"
+        "def test_called_nested_helper():\n    def check():\n        assert call() == 1\n    check()\n"
+        "def test_nested_class_assert_only():\n    class Inner:\n        def m(self):\n            assert 1 == 1\n    call()\n"
+        "def test_lambda_hides_raises():\n    f = lambda: pytest.raises(ValueError)\n"
         "class TestGroup:\n    def test_method_hollow(self):\n        call()\n    def test_method_real(self):\n        assert call() == 1\n"
     )
     assert hollow_tests(tmp_path) == {f"tests/test_x.py::{n}" for n in (
         "test_hollow", "test_trivial_true", "test_trivial_one", "test_comment_only", "test_string_mentions_assert",
-        "test_async_hollow", "test_async_trivial", "test_method_hollow")}
+        "test_async_hollow", "test_async_trivial", "test_method_hollow",
+        "test_unused_nested_assert", "test_nested_assert_never_called_by_name", "test_nested_class_assert_only", "test_lambda_hides_raises")}
 
 
 @pytest.mark.requirement("HYGIENE-02")

@@ -18,13 +18,37 @@ def _meaningful(node: ast.AST) -> bool:
     return False
 
 
+_NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+
+
+def _own_nodes(node: ast.AST):
+    """Nodes of this function's own body, NOT descending into nested functions, lambdas or classes."""
+    stack = list(ast.iter_child_nodes(node))
+    while stack:
+        current = stack.pop()
+        yield current
+        if not isinstance(current, _NESTED):
+            stack.extend(ast.iter_child_nodes(current))
+
+
+def _has_meaningful_check(function: ast.AST) -> bool:
+    own = list(_own_nodes(function))
+    if any(_meaningful(n) for n in own):
+        return True
+    # A nested helper counts only if the test body actually CALLS it by name and the helper itself checks something.
+    helpers = {n.name for n in own if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and any(_meaningful(c) for c in _own_nodes(n))}
+    called = {n.func.id for n in own if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    return bool(helpers & called)
+
+
 def hollow_tests(root: Path) -> set[str]:
     found: set[str] = set()
     for path in sorted((Path(root) / "tests").rglob("test_*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
-                if not any(_meaningful(child) for child in ast.walk(node)):
+                if not _has_meaningful_check(node):
                     found.add(f"{path.relative_to(root).as_posix()}::{node.name}")
     return found
 
