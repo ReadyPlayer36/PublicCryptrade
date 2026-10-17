@@ -12,32 +12,66 @@ def pytest_runtest_makereport(item, call):
             report.user_properties.append(("requirement", str(marker.args[0])))
 
 
-_LOOPBACK = {"127.0.0.1", "::1", "localhost", ""}
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}      # the empty hostname is NOT allowed
+
+
+def _norm(host):
+    if isinstance(host, bytes):
+        host = host.decode("ascii", "replace")
+    return host.lower() if isinstance(host, str) else host
+
+
+def _is_remote(host) -> bool:
+    return _norm(host) not in _LOOPBACK
+
+
+def _address_host(address):
+    return address[0] if isinstance(address, tuple) and address else address
 
 
 @pytest.fixture(autouse=True)
 def _no_real_network(monkeypatch):
-    """Tests must never reach a real network: any non-loopback connect or DNS lookup fails loudly."""
-    real_connect, real_connect_ex, real_getaddrinfo = socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo
+    """Tests must never reach a real network: any non-loopback connect, datagram send or DNS lookup fails loudly."""
+    S = socket.socket
+    real = {name: getattr(S, name) for name in ("connect", "connect_ex", "sendto", "sendmsg")}
+    real_dns = {name: getattr(socket, name) for name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr", "getnameinfo")}
 
-    def _host(address):
-        return address[0] if isinstance(address, tuple) and address else address
+    def forbid(what, host):
+        raise RuntimeError(f"real network access is forbidden in tests: {what} {host!r}")
 
-    def guarded_connect(self, address, *args, **kwargs):
-        if self.family != socket.AF_UNIX and _host(address) not in _LOOPBACK:
-            raise RuntimeError(f"real network access is forbidden in tests: connect to {_host(address)!r}")
-        return real_connect(self, address, *args, **kwargs)
+    def make_socket_guard(key, label, address_of):
+        def guarded(self, *args, **kwargs):
+            address = address_of(args, kwargs)
+            if self.family != socket.AF_UNIX and _is_remote(_address_host(address)):
+                forbid(label, _address_host(address))
+            return real[key](self, *args, **kwargs)
+        return guarded
 
-    def guarded_connect_ex(self, address, *args, **kwargs):
-        if self.family != socket.AF_UNIX and _host(address) not in _LOOPBACK:
-            raise RuntimeError(f"real network access is forbidden in tests: connect_ex to {_host(address)!r}")
-        return real_connect_ex(self, address, *args, **kwargs)
+    last_arg = lambda args, kwargs: kwargs.get("address", args[-1] if args else None)      # sendto(data, [flags,] address)
+    first_arg = lambda args, kwargs: args[0] if args else kwargs.get("address")            # connect(address)
+    sendmsg_addr = lambda args, kwargs: kwargs.get("address", args[3] if len(args) > 3 else None)  # sendmsg(buffers, ancdata, flags, address)
 
-    def guarded_getaddrinfo(host, *args, **kwargs):
-        if host not in _LOOPBACK:
-            raise RuntimeError(f"real network access is forbidden in tests: DNS lookup of {host!r}")
-        return real_getaddrinfo(host, *args, **kwargs)
+    def guarded_sendmsg(self, *args, **kwargs):
+        address = sendmsg_addr(args, kwargs)
+        if address is not None and self.family != socket.AF_UNIX and _is_remote(_address_host(address)):
+            forbid("sendmsg to", _address_host(address))
+        return real["sendmsg"](self, *args, **kwargs)
 
-    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
-    monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
-    monkeypatch.setattr(socket, "getaddrinfo", guarded_getaddrinfo)
+    def dns_guard(name, host_of):
+        def guarded(*args, **kwargs):
+            host = host_of(args, kwargs)
+            if host is not None and _is_remote(host):
+                forbid(f"DNS {name} of", host)
+            return real_dns[name](*args, **kwargs)
+        return guarded
+
+    host_first = lambda args, kwargs: args[0] if args else kwargs.get("host", kwargs.get("hostname", kwargs.get("ip_address")))
+    nameinfo_host = lambda args, kwargs: _address_host(args[0] if args else kwargs.get("sockaddr"))
+
+    monkeypatch.setattr(S, "connect", make_socket_guard("connect", "connect to", first_arg))
+    monkeypatch.setattr(S, "connect_ex", make_socket_guard("connect_ex", "connect_ex to", first_arg))
+    monkeypatch.setattr(S, "sendto", make_socket_guard("sendto", "sendto", last_arg))
+    monkeypatch.setattr(S, "sendmsg", guarded_sendmsg)
+    for name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr"):
+        monkeypatch.setattr(socket, name, dns_guard(name, host_first))
+    monkeypatch.setattr(socket, "getnameinfo", dns_guard("getnameinfo", nameinfo_host))

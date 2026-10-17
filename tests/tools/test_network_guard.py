@@ -21,7 +21,7 @@ def test_remote_connect_is_blocked_before_any_packet_is_sent():
 
 @pytest.mark.requirement("HYGIENE-03")
 def test_dns_lookup_of_remote_names_is_blocked():
-    with pytest.raises(RuntimeError, match="DNS lookup"):
+    with pytest.raises(RuntimeError, match="DNS getaddrinfo"):
         socket.getaddrinfo("data-api.binance.vision", 443)
 
 
@@ -52,3 +52,71 @@ def test_default_http_client_cannot_reach_binance_from_tests():
                                          start=datetime(2024, 1, 1, tzinfo=timezone.utc), end=datetime(2024, 1, 1, 0, 5, tzinfo=timezone.utc))
     finally:
         client.close()
+
+
+@pytest.mark.requirement("HYGIENE-03")
+def test_udp_datagram_sends_to_remote_addresses_are_blocked():
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        with pytest.raises(RuntimeError, match="sendto"):
+            udp.sendto(b"x", ("8.8.8.8", 53))
+        with pytest.raises(RuntimeError, match="sendto"):
+            udp.sendto(b"x", 0, ("8.8.8.8", 53))                      # flags form
+        with pytest.raises(RuntimeError, match="sendto"):
+            udp.sendto(b"x", ("example.com", 53))
+        with pytest.raises(RuntimeError, match="sendmsg"):
+            udp.sendmsg([b"x"], [], 0, ("8.8.8.8", 53))
+        with pytest.raises(RuntimeError, match="forbidden"):
+            udp.connect(("8.8.8.8", 53))                              # connected-UDP route
+    finally:
+        udp.close()
+
+
+@pytest.mark.requirement("HYGIENE-03")
+def test_every_dns_resolution_path_is_blocked_for_remote_names():
+    with pytest.raises(RuntimeError, match="DNS gethostbyname of"):
+        socket.gethostbyname("data-api.binance.vision")
+    with pytest.raises(RuntimeError, match="DNS gethostbyname_ex of"):
+        socket.gethostbyname_ex("data-api.binance.vision")
+    with pytest.raises(RuntimeError, match="DNS gethostbyaddr of"):
+        socket.gethostbyaddr("8.8.8.8")
+    with pytest.raises(RuntimeError, match="DNS getnameinfo of"):
+        socket.getnameinfo(("8.8.8.8", 53), 0)
+
+
+@pytest.mark.requirement("HYGIENE-03")
+def test_empty_and_look_alike_hostnames_are_not_treated_as_loopback():
+    for host in ("", "0.0.0.0", "localhost.evil.example", "127.0.0.1.evil.example", "LOCALHOST.evil.example"):
+        with pytest.raises(RuntimeError, match="forbidden"):
+            socket.getaddrinfo(host, 80)
+        with pytest.raises(RuntimeError, match="forbidden"):
+            socket.gethostbyname(host)
+    raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        with pytest.raises(RuntimeError, match="forbidden"):
+            raw.connect(("", 80))
+    finally:
+        raw.close()
+
+
+@pytest.mark.requirement("HYGIENE-03")
+def test_loopback_udp_and_name_resolution_still_work():
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.bind(("127.0.0.1", 0))
+    receiver.settimeout(2)
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sender.sendto(b"ping", receiver.getsockname())
+        data, _ = receiver.recvfrom(16)
+        assert data == b"ping"
+        sender.sendto(b"flag", 0, receiver.getsockname())             # (data, flags, address) form to loopback must pass
+        assert receiver.recvfrom(16)[0] == b"flag"
+        sender.sendmsg([b"pong"], [], 0, receiver.getsockname())
+        assert receiver.recvfrom(16)[0] == b"pong"
+        assert socket.gethostbyname("localhost") in ("127.0.0.1", "::1")
+        assert socket.getaddrinfo("127.0.0.1", 80)
+        assert socket.getaddrinfo("LOCALHOST", 80)
+        assert socket.getaddrinfo(None, 80)                           # passive/wildcard lookups carry no remote host
+    finally:
+        sender.close()
+        receiver.close()

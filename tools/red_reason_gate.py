@@ -122,7 +122,7 @@ def main() -> int:
     # Collection errors are never an acceptable expected-red result.
     for el in root.iter():
         if el.tag == "error":
-            errors.append(f"collection/suite error: {el.attrib.get('message', el.text or 'unknown error')}")
+            errors.append(f"SUITE-LEVEL error (collection/session, not tied to one test): {el.attrib.get('message', el.text or 'unknown error')}")
     expected_red = 0
     for case in cases:
         n = nodeid(case)
@@ -138,7 +138,7 @@ def main() -> int:
         if failure is not None or error is not None:
             blob = "\n".join(_text_of(el) for el in (failure, error))
             if error is not None:
-                errors.append(f"error is not an expected-red result: {n}")
+                errors.append(f"TESTCASE-LEVEL error (setup/teardown/warning-as-error) is not an expected-red result: {n}: " + (error.attrib.get("message") or "no message").splitlines()[0][:160])
             elif STUB_RE.search(blob) and SRC_FRAME_RE.search(blob):
                 expected_red += 1
             else:

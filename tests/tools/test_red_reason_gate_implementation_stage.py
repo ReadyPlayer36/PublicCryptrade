@@ -109,5 +109,13 @@ def test_gate_reports_error_only_testcases_cleanly_instead_of_crashing(tmp_path)
            '<error message="failed on setup with ResourceWarning">ResourceWarning: unclosed socket</error></testcase></testsuite>')
     result = run(tmp_path, xml, 1, "--implementation-stage")
     assert result.returncode == 1
-    assert "error is not an expected-red result: tests/unit/test_a.py::test_b" in result.stdout
+    assert "TESTCASE-LEVEL error" in result.stdout and "not an expected-red result: tests/unit/test_a.py::test_b" in result.stdout
+    assert "ResourceWarning" in result.stdout                      # the reason is shown, one line
     assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
+
+
+@pytest.mark.requirement("TOOLS-04")
+def test_gate_labels_suite_level_errors_differently_from_testcase_errors(tmp_path):
+    xml = '<testsuite tests="0" errors="1"><error message="collection failure in tests/x.py">ImportError</error></testsuite>'
+    result = run(tmp_path, xml, 2, "--implementation-stage")
+    assert result.returncode == 1 and "SUITE-LEVEL error" in result.stdout and "TESTCASE-LEVEL" not in result.stdout

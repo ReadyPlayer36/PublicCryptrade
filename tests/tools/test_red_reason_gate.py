@@ -34,4 +34,4 @@ def test_collection_error_is_rejected(tmp_path):
     xml='<testsuite tests="0" errors="1"><error message="collection failed">ImportError</error></testsuite>'
     result=run_gate(tmp_path,xml,2)
     assert result.returncode != 0
-    assert "collection/suite error" in result.stdout
+    assert "SUITE-LEVEL error" in result.stdout
