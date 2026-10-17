@@ -120,8 +120,9 @@ def main() -> int:
     if not cases:
         errors.append("JUnit contains no testcases")
     # Collection errors are never an acceptable expected-red result.
+    testcase_level = {id(e) for c in cases for e in c.iter("error")}      # these are reported once, as TESTCASE-LEVEL
     for el in root.iter():
-        if el.tag == "error":
+        if el.tag == "error" and id(el) not in testcase_level:
             errors.append(f"SUITE-LEVEL error (collection/session, not tied to one test): {el.attrib.get('message', el.text or 'unknown error')}")
     expected_red = 0
     for case in cases:

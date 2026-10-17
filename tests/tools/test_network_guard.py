@@ -120,3 +120,38 @@ def test_loopback_udp_and_name_resolution_still_work():
     finally:
         sender.close()
         receiver.close()
+
+
+@pytest.mark.requirement("HYGIENE-03")
+def test_sendmsg_keyword_address_and_addressless_sends_cannot_bypass_the_guard():
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        with pytest.raises(RuntimeError, match="sendmsg"):
+            udp.sendmsg([b"x"], address=("8.8.8.8", 53))              # keyword form is checked by the guard itself
+        with pytest.raises(RuntimeError, match="forbidden"):
+            udp.connect(("8.8.8.8", 53))                              # so a socket can never be connected to a remote peer
+        with pytest.raises(OSError):
+            udp.sendmsg([b"x"])                                       # address-less send on a never-connected socket: no packet
+        with pytest.raises(OSError):
+            udp.send(b"x")
+    finally:
+        udp.close()
+
+
+@pytest.mark.requirement("HYGIENE-03")
+def test_addressless_sends_on_a_loopback_connected_udp_socket_still_work():
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.bind(("127.0.0.1", 0))
+    receiver.settimeout(2)
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sender.connect(receiver.getsockname())
+        sender.sendmsg([b"a"])
+        assert receiver.recvfrom(8)[0] == b"a"
+        sender.send(b"b")
+        assert receiver.recvfrom(8)[0] == b"b"
+        with pytest.raises(TypeError):                                # CPython's sendmsg takes no keyword arguments at all
+            sender.sendmsg([b"x"], address=receiver.getsockname())
+    finally:
+        sender.close()
+        receiver.close()

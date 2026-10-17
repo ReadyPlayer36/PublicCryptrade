@@ -111,6 +111,8 @@ def test_gate_reports_error_only_testcases_cleanly_instead_of_crashing(tmp_path)
     assert result.returncode == 1
     assert "TESTCASE-LEVEL error" in result.stdout and "not an expected-red result: tests/unit/test_a.py::test_b" in result.stdout
     assert "ResourceWarning" in result.stdout                      # the reason is shown, one line
+    assert "SUITE-LEVEL" not in result.stdout                      # a testcase-only error is never mislabelled as suite-level
+    assert result.stdout.count("not an expected-red result") == 1 and "1 issue(s)" in result.stdout     # and never double-counted
     assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
 
 
@@ -119,3 +121,16 @@ def test_gate_labels_suite_level_errors_differently_from_testcase_errors(tmp_pat
     xml = '<testsuite tests="0" errors="1"><error message="collection failure in tests/x.py">ImportError</error></testsuite>'
     result = run(tmp_path, xml, 2, "--implementation-stage")
     assert result.returncode == 1 and "SUITE-LEVEL error" in result.stdout and "TESTCASE-LEVEL" not in result.stdout
+
+
+@pytest.mark.requirement("TOOLS-04")
+def test_suite_level_and_testcase_level_errors_are_each_reported_exactly_once(tmp_path):
+    xml = ('<testsuites><testsuite tests="1" errors="2"><error message="collection failure in tests/x.py">ImportError</error>'
+           '<testcase classname="tests.unit.test_a" name="test_b"><error message="setup boom">E</error></testcase></testsuite></testsuites>')
+    result = run(tmp_path, xml, 1, "--implementation-stage")
+    assert result.returncode == 1 and "2 issue(s)" in result.stdout
+    assert result.stdout.count("SUITE-LEVEL error") == 1 and "collection failure in tests/x.py" in result.stdout
+    assert result.stdout.count("TESTCASE-LEVEL error") == 1 and "tests/unit/test_a.py::test_b" in result.stdout
+    suite_line = [l for l in result.stdout.splitlines() if "SUITE-LEVEL" in l][0]
+    case_line = [l for l in result.stdout.splitlines() if "TESTCASE-LEVEL" in l][0]
+    assert "setup boom" not in suite_line and "collection failure" not in case_line
