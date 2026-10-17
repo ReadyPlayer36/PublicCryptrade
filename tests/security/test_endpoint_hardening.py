@@ -42,8 +42,16 @@ def test_frozen_host_set():
 @pytest.mark.requirement("NET-01")
 def test_redirects_disabled():
     """Frozen acceptance case: NET-01."""
-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision")
-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+    fake = FakeHttpClient([FakeResponse(status_code=302, headers={"Location": "https://example.com"})])
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=fake, finality_lag_ms=0)
+    with pytest.raises(BinanceClientError, match="302|redirect"):
+        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+    assert len(fake.calls) == 1                                  # the redirect was neither followed nor retried
+    default = BinanceMarketDataClient(base_url="https://data-api.binance.vision")
+    try:
+        assert default.http_client.follow_redirects is False
+    finally:
+        default.close()
 
 @pytest.mark.requirement("REDIRECT-01")
 def test_redirects_disabled_and_3xx_rejected():

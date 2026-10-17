@@ -46,6 +46,10 @@ def nodeid(case: ET.Element) -> str:
 def allowlisted(n: str) -> bool:
     return n in ALLOWED_EXACT or n.startswith(ALLOWED_PREFIXES)
 
+def _text_of(element) -> str:
+    return "" if element is None else "\n".join((element.text or "", element.attrib.get("message", "")))
+
+
 def _final_gate(args: argparse.Namespace) -> int:
     """Final acceptance gate: no stubs, no failures, no skips, no hollow tests, allowlist empty."""
     import sys
@@ -132,7 +136,7 @@ def main() -> int:
             hollow_failing += 1          # known placeholder awaiting a real test; tracked by the hollow-test ratchet
             continue
         if failure is not None or error is not None:
-            blob = "\n".join((failure.text or "", failure.attrib.get("message", ""), error.text or "" if error is not None else "", error.attrib.get("message", "") if error is not None else ""))
+            blob = "\n".join(_text_of(el) for el in (failure, error))
             if error is not None:
                 errors.append(f"error is not an expected-red result: {n}")
             elif STUB_RE.search(blob) and SRC_FRAME_RE.search(blob):
@@ -153,4 +157,10 @@ def main() -> int:
     print(f"RED-REASON GATE PASS: {expected_red} failure(s) are NotImplementedError from src/trading_app; {mode}; pytest exit={args.pytest_exit_code}" + (f"; KNOWN HOLLOW placeholders failing={hollow_failing} (must reach 0 at the final gate)" if hollow else ""))
     return 0
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:      # the gate must never die with a bare traceback
+        print(f"RED-REASON GATE ERROR: {type(exc).__name__}: {exc}")
+        raise SystemExit(1)

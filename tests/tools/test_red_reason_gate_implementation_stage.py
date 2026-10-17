@@ -100,3 +100,14 @@ def test_final_gate_rejects_failures_skips_nonzero_exit_and_stage_mode(tmp_path)
     assert run(tmp_path, skipped, 0, *flags).returncode != 0
     assert run(tmp_path, PASSING, 1, *flags).returncode != 0
     assert run(tmp_path, PASSING, 0, *flags, "--implementation-stage").returncode != 0
+
+
+@pytest.mark.requirement("TOOLS-04")
+def test_gate_reports_error_only_testcases_cleanly_instead_of_crashing(tmp_path):
+    """Regression: a testcase with <error> and no <failure> (e.g. a setup error) used to crash the gate with a traceback."""
+    xml = ('<testsuite tests="1" errors="1"><testcase classname="tests.unit.test_a" name="test_b">'
+           '<error message="failed on setup with ResourceWarning">ResourceWarning: unclosed socket</error></testcase></testsuite>')
+    result = run(tmp_path, xml, 1, "--implementation-stage")
+    assert result.returncode == 1
+    assert "error is not an expected-red result: tests/unit/test_a.py::test_b" in result.stdout
+    assert "Traceback" not in result.stderr and "Traceback" not in result.stdout

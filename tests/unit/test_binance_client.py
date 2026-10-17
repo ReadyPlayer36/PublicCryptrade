@@ -101,7 +101,7 @@ def test_read_timeout_retry():
 @pytest.mark.requirement("RETRY-01")
 def test_repeated_429_persists_cooldown():
     http = FakeHttpClient([FakeResponse(status_code=429) for _ in range(4)])
-    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
     with pytest.raises(BinanceClientError, match="429|cooldown|rate limit"):
         client.get_server_time()
     assert len(http.calls) == 4

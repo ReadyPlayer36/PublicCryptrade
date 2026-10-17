@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   python312:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,11 +30,26 @@ jobs:
         run: |
           mkdir -p artifacts
           set +e
-          python -m pytest -ra --junitxml=artifacts/junit-offline.xml
-          pytest_rc=$?
+          python -m pytest -ra --junitxml=artifacts/junit-offline.xml 2>&1 | tee artifacts/pytest-output.txt
+          pytest_rc=${PIPESTATUS[0]}
+          python tools/red_reason_gate.py artifacts/junit-offline.xml --pytest-exit-code "$pytest_rc" --implementation-stage 2>&1 | tee artifacts/gate-output.txt
+          gate_rc=${PIPESTATUS[0]}
           set -e
-          python tools/red_reason_gate.py artifacts/junit-offline.xml --pytest-exit-code "$pytest_rc" --implementation-stage
+          {
+            echo "### Expected-red gate (exit $gate_rc, pytest exit $pytest_rc)"
+            echo '```'
+            tail -n 40 artifacts/gate-output.txt
+            echo '```'
+            echo "<details><summary>pytest short summary</summary>"
+            echo
+            echo '```'
+            grep -E "^(FAILED|ERROR)|passed|failed" artifacts/pytest-output.txt | tail -n 60
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$gate_rc"
       - name: Traceability audit (fails only on structural errors; acceptance remains BLOCKED)
+        if: always() && hashFiles('artifacts/junit-offline.xml') != ''
         shell: bash
         run: |
           mkdir -p artifacts
