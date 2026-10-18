@@ -15,6 +15,7 @@ import logging
 import random
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -58,6 +59,17 @@ logger = logging.getLogger("trading_app.binance_client")
 # exception text, response bodies, or anything secret-like.
 _DIGITS = re.compile(r"[0-9]+")
 _SYMBOL = re.compile(r"[A-Z0-9]{2,20}")
+
+
+@dataclass(frozen=True)
+class FetchInfo:
+    """What the last fetch learned from the exchange (for the audit record)."""
+
+    server_time_ms: int
+    finality_lag_ms: int
+    effective_start_ms: int
+    effective_end_ms: int
+    host: str
 
 
 class BinanceClientError(RuntimeError):
@@ -137,6 +149,7 @@ class BinanceMarketDataClient:
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))
         self._cooldown_path = Path(cooldown_path) if cooldown_path is not None else None
         self._cooldown_until_ms = 0
+        self.last_fetch: FetchInfo | None = None
         self._owns_http_client = http_client is None
         self.http_client = http_client or httpx.Client(
             timeout=timeout_seconds,
@@ -313,12 +326,14 @@ class BinanceMarketDataClient:
                 raise ValueError(f"{name} is not aligned to {timeframe}")
 
         self.begin_fetch()
+        self.last_fetch = None
         server_time_ms = self.get_server_time()          # the single S snapshot for this fetch
         if self.finality_lag_ms is None:
             raise BinanceClientError("finality lag is not configured; refusing to fetch without an explicit finality_lag_ms")
         lag_ms = self.finality_lag_ms
         boundary_ms = server_time_ms - lag_ms
         end_effective = effective_end_ms(end_ms, server_time_ms, lag_ms, interval_ms)
+        self.last_fetch = FetchInfo(server_time_ms, lag_ms, start_ms, end_effective, self._host)
         if end_effective <= start_ms:
             raise EmptyEffectiveRangeError(
                 f"effective range is empty: effective_end {end_effective} <= start {start_ms}"

@@ -103,3 +103,20 @@ def test_tripwire_does_not_flag_socket_attribute_on_unrelated_objects(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "ok.py").write_text("import net_config as net\nvalue = net.socket\n")
     assert scan(tmp_path).findings == ()
+
+
+@pytest.mark.requirement("TRIP-02")
+def test_string_exemption_is_limited_to_the_audit_denylist_and_to_string_findings(tmp_path, capsys):
+    from tools.tripwire import STRING_EXEMPT_FILES, main
+    assert STRING_EXEMPT_FILES == ("src/trading_app/data/audit.py",)
+    exempt = tmp_path / "src" / "trading_app" / "data"
+    exempt.mkdir(parents=True)
+    (exempt / "audit.py").write_text("PATTERN = 'apiKey|signature|secret'\nclient.post('https://x')\n")   # string tokens ok, HTTP write still caught
+    (tmp_path / "src" / "other.py").write_text("PATTERN = 'apiKey'\n")                                        # same text elsewhere is flagged
+    report = scan(tmp_path)
+    found = {(f.path, f.kind) for f in report.findings}
+    assert ("src/other.py", "forbidden-string") in found
+    assert ("src/trading_app/data/audit.py", "http-method") in found
+    assert ("src/trading_app/data/audit.py", "forbidden-string") not in found
+    main(["tripwire", str(tmp_path)])
+    assert "STRING-EXEMPT: src/trading_app/data/audit.py" in capsys.readouterr().out

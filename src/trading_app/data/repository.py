@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -19,7 +20,8 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
 
-from trading_app.data.models import Base, CandleModel
+from trading_app.data.audit import assert_safe_audit_text
+from trading_app.data.models import Base, CandleModel, DataFetchModel
 from trading_app.data.schemas import Candle
 
 BUSY_TIMEOUT_MS = 10_000   # explicit; differs from the sqlite3 module default (5000) so it is verifiable
@@ -114,6 +116,64 @@ def _normalize(candle: Any, index: int) -> dict[str, Any]:
     return row
 
 
+FETCH_SCHEMA_VERSION = 1
+_FETCH_INT_FIELDS = ("requested_start_ms", "requested_end_ms", "row_count", "fetched_at_ms")
+_FETCH_OPTIONAL_INT_FIELDS = ("effective_start_ms", "effective_end_ms", "server_time_ms", "finality_lag_ms")
+_FETCH_FIELDS = ("symbol", "timeframe", *_FETCH_INT_FIELDS, *_FETCH_OPTIONAL_INT_FIELDS, "host", "dataset_sha256",
+                 "status", "error_class", "error_text")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _normalize_fetch(fetch: Mapping[str, Any], *, expect_status: str) -> dict[str, Any]:
+    """Validate a fetch audit record before any transaction starts; unknown keys are rejected, not dropped."""
+    unknown = sorted(set(fetch) - set(_FETCH_FIELDS) - {"schema_version"})
+    if unknown:
+        raise ValueError(f"unknown fetch record field(s): {unknown}")
+    record: dict[str, Any] = {"schema_version": FETCH_SCHEMA_VERSION}
+    if fetch.get("schema_version", FETCH_SCHEMA_VERSION) != FETCH_SCHEMA_VERSION:
+        raise ValueError("unsupported fetch record schema_version")
+    for name in ("symbol", "timeframe"):
+        value = fetch.get(name)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"fetch record {name} must be a non-empty string")
+        record[name] = value
+    for name in _FETCH_INT_FIELDS:
+        value = fetch.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"fetch record {name} must be an int >= 0")
+        record[name] = value
+    for name in _FETCH_OPTIONAL_INT_FIELDS:
+        value = fetch.get(name)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            raise ValueError(f"fetch record {name} must be an int >= 0 or None")
+        record[name] = value
+    host = fetch.get("host")
+    if host is not None and (not isinstance(host, str) or len(host) > 64 or "/" in host or ":" in host or "@" in host):
+        raise ValueError("fetch record host must be a bare host name or None")
+    record["host"] = host
+    if fetch.get("status") != expect_status:
+        raise ValueError(f"fetch record status must be {expect_status!r}")
+    record["status"] = expect_status
+    digest = fetch.get("dataset_sha256")
+    if expect_status == "success":
+        if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+            raise ValueError("a successful fetch record needs a 64-hex dataset_sha256")
+        if fetch.get("error_class") is not None or fetch.get("error_text") is not None:
+            raise ValueError("a successful fetch record must not carry an error")
+    elif digest is not None:
+        raise ValueError("a failed fetch record must not carry a dataset_sha256")
+    record["dataset_sha256"] = digest
+    for name in ("error_class", "error_text"):
+        value = fetch.get(name)
+        if expect_status == "failed" and (not isinstance(value, str) or not value):
+            raise ValueError(f"a failed fetch record needs {name}")
+        assert_safe_audit_text(value)
+        record[name] = value
+    if record["error_class"] is not None and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", record["error_class"]):
+        raise ValueError("error_class must be a plain class name")
+    return record
+
+
 def _differences(stored: Mapping[str, Any], incoming: dict[str, Any]) -> list[str]:
     """Names of conflict fields that differ (numeric Decimal equality; created_at excluded)."""
     different: list[str] = []
@@ -146,13 +206,38 @@ class CandleRepository:
         existing row is skipped; a differing one raises CandleConflictError and rolls the
         entire batch back. Existing rows are never overwritten.
         """
-        batch = list(candles)
+        rows = self._prepare_rows(list(candles))
+        if not rows:
+            return 0
+        return self._run_write_transaction(rows, None)
+
+    def insert_candles_with_fetch(self, candles: Iterable[Any], fetch: Mapping[str, Any]) -> int:
+        """Save candles AND the success audit row in ONE atomic BEGIN IMMEDIATE transaction.
+
+        Both are validated before the transaction begins. If anything fails (conflict, injected
+        error, audit-row failure) neither the candles nor the audit row are persisted.
+        """
+        rows = self._prepare_rows(list(candles))
+        record = _normalize_fetch(fetch, expect_status="success")
+        return self._run_write_transaction(rows, record)
+
+    def record_failed_fetch(self, fetch: Mapping[str, Any]) -> None:
+        """Write a failure audit row in its own short transaction (call AFTER the candle transaction rolled back)."""
+        record = _normalize_fetch(fetch, expect_status="failed")
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                connection.execute(DataFetchModel.__table__.insert(), [record])
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+    def _prepare_rows(self, batch: list[Any]) -> dict[tuple[str, str, int], dict[str, Any]]:
         if len(batch) > self.max_candles_per_fetch:
             raise TooManyCandlesError(
                 f"{len(batch)} candles exceed max_candles_per_fetch={self.max_candles_per_fetch}; nothing persisted"
             )
-        if not batch:
-            return 0
         rows: dict[tuple[str, str, int], dict[str, Any]] = {}
         for index, candle in enumerate(batch):
             row = _normalize(candle, index)
@@ -166,7 +251,9 @@ class CandleRepository:
                     )
                 continue
             rows[key] = row
+        return rows
 
+    def _run_write_transaction(self, rows: dict[tuple[str, str, int], dict[str, Any]], fetch_record: dict[str, Any] | None) -> int:
         with self.engine.connect() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
             try:
@@ -185,15 +272,17 @@ class CandleRepository:
                         )
                 if new_rows:
                     connection.execute(CandleModel.__table__.insert(), new_rows)
+                if fetch_record is not None:
+                    connection.execute(DataFetchModel.__table__.insert(), [fetch_record])
                 connection.commit()
                 return len(new_rows)
             except IntegrityError:
                 connection.rollback()
-                # (falls through to the raise below, outside the except block: no cause/context leak)
             except BaseException:
                 connection.rollback()
                 raise
-            raise CandleConflictError("unique constraint conflict; nothing was written")
+        # IntegrityError path: raised outside the except block so no database detail leaks via cause/context
+        raise CandleConflictError("unique constraint conflict; nothing was written")
 
     @staticmethod
     def _batch_diff(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
@@ -252,3 +341,9 @@ class CandleRepository:
     def scan_legacy_data(self, *args: Any, **kwargs: Any):
         """Return legacy-data findings without modifying records (Stage D2)."""
         raise NotImplementedError("Stage-2 implementation not started: scan_legacy_data")
+
+    def get_fetches(self) -> list[dict[str, Any]]:
+        """All audit rows in insertion order (for verification and tests)."""
+        table = DataFetchModel.__table__
+        with self.engine.connect() as connection:
+            return [dict(r) for r in connection.execute(select(table).order_by(table.c.id)).mappings().all()]

@@ -12,6 +12,9 @@ from pathlib import Path
 
 SCANNED_DIRS = ("src", "scripts")
 EXEMPT_DIRS = ("tests",)
+# Files whose forbidden-STRING findings are exempt because they are a secret-pattern denylist, not secret use.
+# Only string findings are exempt; HTTP-method and network-API findings are still enforced in these files.
+STRING_EXEMPT_FILES = ("src/trading_app/data/audit.py",)
 FORBIDDEN_HTTP_METHODS = {"post", "put", "delete", "patch", "request", "send", "stream"}
 DIRECT_NETWORK_APIS = {"urlopen", "urlretrieve", "create_connection", "create_server", "HTTPConnection", "HTTPSConnection",
                        "getaddrinfo", "gethostbyname", "open_connection", "start_server"}
@@ -41,6 +44,7 @@ class TripwireReport:
     def summary(self) -> str:
         return (f"TRIPWIRE: scanned {len(self.scanned_files)} file(s) under {', '.join(SCANNED_DIRS)}; "
                 f"EXEMPT: {', '.join(d + '/' for d in self.exempt)} (negative-test fixtures); "
+                f"STRING-EXEMPT: {', '.join(STRING_EXEMPT_FILES)} (secret-pattern denylist); "
                 f"findings={len(self.findings)}")
 
 
@@ -76,7 +80,7 @@ def _scan_file(path: Path, rel: str) -> list[Finding]:
                 findings.append(Finding(rel, node.lineno, "http-method", f"getattr(..., {node.args[1].value!r})"))
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             lowered = node.value.lower()
-            for token in FORBIDDEN_STRINGS:
+            for token in () if rel in STRING_EXEMPT_FILES else FORBIDDEN_STRINGS:
                 if token.lower() in lowered:
                     findings.append(Finding(rel, node.lineno, "forbidden-string", token))
     return findings
