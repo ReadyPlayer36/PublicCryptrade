@@ -89,11 +89,11 @@ class MarketDataService:
             raise ValueError(f"Timeframe {timeframe!r} is not configured.")
         requested_start_ms, requested_end_ms = to_ms(start), to_ms(end)
 
-        row_count = 0          # rows fetched AND verified by the client; stays 0 if the failure happens before that
+        row_count = 0          # rows fetched AND fully verified (client checks + service conversion); 0 until then
         try:
             rows = self.client.get_historical_klines(symbol=symbol, timeframe=timeframe, start=start, end=end)
-            row_count = len(rows)
             candles, records = self._normalize(rows, symbol, timeframe)          # full validation BEFORE any write
+            row_count = len(candles)      # "verified" = the client's checks AND this service's own conversion both passed
             digest = hash_candles(records)
             fetch = self._fetch_record(symbol, timeframe, requested_start_ms, requested_end_ms, status="success",
                                        row_count=row_count, dataset_sha256=digest)
@@ -133,16 +133,24 @@ class MarketDataService:
     def _normalize(rows: list[list[Any]], symbol: str, timeframe: str) -> tuple[list[Candle], list[dict[str, Any]]]:
         candles: list[Candle] = []
         records: list[dict[str, Any]] = []
-        for row in rows:
-            open_ms, close_ms = int(row[0]), int(row[6])
-            candles.append(Candle(
-                symbol=symbol, timeframe=timeframe, open_time=_from_ms(open_ms), close_time=_from_ms(close_ms),
-                open=Decimal(str(row[1])), high=Decimal(str(row[2])), low=Decimal(str(row[3])), close=Decimal(str(row[4])),
-                volume=Decimal(str(row[5])), quote_volume=Decimal(str(row[7])), trade_count=int(row[8]),
-            ))
-            records.append({
-                "symbol": symbol, "timeframe": timeframe, "open_time_ms": open_ms, "close_time_ms": close_ms,
-                "open": str(row[1]), "high": str(row[2]), "low": str(row[3]), "close": str(row[4]),
-                "volume": str(row[5]), "quote_volume": str(row[7]), "trade_count": int(row[8]),
-            })
+        malformed: int | None = None
+        for index, row in enumerate(rows):
+            try:
+                open_ms, close_ms = int(row[0]), int(row[6])
+                candles.append(Candle(
+                    symbol=symbol, timeframe=timeframe, open_time=_from_ms(open_ms), close_time=_from_ms(close_ms),
+                    open=Decimal(str(row[1])), high=Decimal(str(row[2])), low=Decimal(str(row[3])), close=Decimal(str(row[4])),
+                    volume=Decimal(str(row[5])), quote_volume=Decimal(str(row[7])), trade_count=int(row[8]),
+                ))
+                records.append({
+                    "symbol": symbol, "timeframe": timeframe, "open_time_ms": open_ms, "close_time_ms": close_ms,
+                    "open": str(row[1]), "high": str(row[2]), "low": str(row[3]), "close": str(row[4]),
+                    "volume": str(row[5]), "quote_volume": str(row[7]), "trade_count": int(row[8]),
+                })
+            except Exception:           # IndexError, TypeError, ValueError, decimal.InvalidOperation, pydantic errors...
+                malformed = index
+            if malformed is not None:
+                break
+        if malformed is not None:      # raised outside the except block: no cause/context can carry row values
+            raise DataValidationError(f"[MALFORMED_ROW] row {malformed} could not be converted")
         return candles, records

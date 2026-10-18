@@ -201,3 +201,65 @@ def test_failures_before_any_rows_were_returned_record_zero_rows():
         with pytest.raises(Exception):
             env.run(3)
         assert env.repo.get_fetches()[0]["row_count"] == 0
+
+
+class RowsClient:
+    """A client double that returns rows without any client-side checks, to exercise the service's own verification."""
+    finality_lag_ms = 0
+    last_fetch = None
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def get_historical_klines(self, **kwargs):
+        return self.rows
+
+
+def service_with(rows):
+    from tests.fixtures.service_env import SETTINGS
+    from trading_app.data.repository import CandleRepository, create_engine_from_url
+    from trading_app.data.service import MarketDataService
+    repo = CandleRepository(create_engine_from_url("sqlite:///:memory:"))
+    repo.create_tables()
+    return MarketDataService(settings=SETTINGS, client=RowsClient(rows), repository=repo, now_ms=lambda: NOW), repo
+
+
+@pytest.mark.requirement("AUDIT-01")
+def test_row_count_is_zero_before_verification_and_positive_after():
+    from tests.fixtures.service_env import dt
+    from trading_app.data.validator import DataValidationError
+    good = make_rows(S0, 3)
+    malformed = {
+        "short row": [good[0], [S0 + I]],
+        "non-numeric price": [good[0], good[1][:1] + ["abc"] + good[1][2:]],
+        "bad trade count": [good[0], good[1][:8] + ["x"] + good[1][9:]],
+        "none instead of a row": [good[0], None],
+        "bad timestamp": [good[0], ["not-a-time"] + good[1][1:]],
+    }
+    # --- BEFORE verification completes: nothing was verified, so the failure row records 0 even though rows came back
+    for name, rows in malformed.items():
+        service, repo = service_with(rows)
+        with pytest.raises(DataValidationError, match="MALFORMED_ROW") as failed:
+            service.download_and_store(symbol="BTCUSDT", timeframe="5m", start=dt(S0), end=dt(S0 + 3 * I))
+        assert failed.value.__cause__ is None and failed.value.__context__ is None, name
+        assert "abc" not in str(failed.value) and "100" not in str(failed.value) and "not-a-time" not in str(failed.value), name   # no row values in the message either
+        (audit,) = repo.get_fetches()
+        assert audit["row_count"] == 0, name
+        assert (audit["status"], audit["error_class"]) == ("failed", "DataValidationError")
+        assert audit["error_text"] == "market-data validation failed: MALFORMED_ROW", name
+        assert "abc" not in audit["error_text"] and repo.count() == 0
+    # --- AFTER verification: the same service, valid rows, failing later -> the real positive count
+    service, repo = service_with(good)
+    assert service.download_and_store(symbol="BTCUSDT", timeframe="5m", start=dt(S0), end=dt(S0 + 3 * I)) == 3
+    changed = [list(r) for r in good]
+    changed[1][5] = "999"
+    service.client.rows = changed
+    from trading_app.data.repository import CandleConflictError
+    with pytest.raises(CandleConflictError):
+        service.download_and_store(symbol="BTCUSDT", timeframe="5m", start=dt(S0), end=dt(S0 + 3 * I))
+    assert [a["row_count"] for a in repo.get_fetches()] == [3, 3]
+    _fail_first_insert(repo.engine, "candles", RuntimeError("injected failure after the candle write began"))
+    service.client.rows = make_rows(S0 + 10 * I, 2)
+    with pytest.raises(RuntimeError, match="injected"):
+        service.download_and_store(symbol="BTCUSDT", timeframe="5m", start=dt(S0 + 10 * I), end=dt(S0 + 12 * I))
+    assert repo.get_fetches()[-1]["row_count"] == 2 and repo.get_fetches()[-1]["status"] == "failed"
