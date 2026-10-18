@@ -1,9 +1,6 @@
 # Known assertion-free placeholder tests, to be REPLACED by real tests in Stage D2/D3.
 # Policy: this list may only shrink; it must be EMPTY at the final gate (tools/red_reason_gate.py --final-gate).
 # Adding an entry also requires editing PINNED_ORIGINAL in tests/tools/test_no_hollow_tests.py (visible in review).
-tests/integration/test_concurrency.py::test_conflict_rolls_back_entire_transaction
-tests/integration/test_concurrency.py::test_no_duplicate_rows_after_overlap
-tests/integration/test_concurrency.py::test_two_processes_overlap_without_duplicates
 tests/integration/test_sqlite_verification.py::test_direct_sqlite_verification_procedure
 tests/integration/test_sqlite_verification.py::test_invalid_volume_query
 tests/integration/test_sqlite_verification.py::test_ohlc_correctness_query

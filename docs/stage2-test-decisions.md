@@ -56,3 +56,9 @@ Any test expectation that conflicts with `matrix.yaml` requires a new spec versi
 - Test infrastructure: `tests/fixtures/service_env.py` records one timeline of network requests, SQLAlchemy events and SQLite's own statement trace; the order assertions (TX-01/02/09, AUDIT-02) read that timeline.
 - Equivalent mutant accepted: removing the explicit `rollback()` is unobservable because closing the connection rolls back; the tests prove a ROLLBACK statement is executed before the failure-audit transaction.
 - `tools/tripwire.py` has one explicit string-finding exemption: `src/trading_app/data/audit.py` (a secret-word denylist). HTTP-method and network-API findings still apply to it.
+
+## Stage D2b decisions (concurrency, legacy scan)
+- Concurrency tests launch real subprocesses (`tests/fixtures/concurrency_worker.py`, `process_runner.py`) against a shared SQLite file with a file-based start barrier; the worker uses the production repository and has no network access.
+- `scan_legacy_data(*, repair=False)` is keyword-only, read-only (`PRAGMA query_only=ON` for the scan, OFF afterwards) and returns a `LegacyScanReport` (`scanned_rows`, `issues`, `counts()`, `flagged_keys()`); findings carry fixed text, never stored values. `repair` is refused for any value other than `False`.
+- The Stage-2 legacy test constructed `CandleRepository(tmp_path/"legacy.db")` with a path instead of an engine and asserted findings on an empty database (self-contradictory). It was replaced, keeping the bound name `test_legacy_scan_flags_without_repair`, by a crafted legacy database.
+- `delete_candles(keys, *, confirm=True)` is the explicit manual-remediation step (one transaction, validated keys, never implicit).

@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, delete, event, func, select
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
 
@@ -187,6 +188,101 @@ def _differences(stored: Mapping[str, Any], incoming: dict[str, Any]) -> list[st
     return different
 
 
+@dataclass(frozen=True)
+class LegacyIssue:
+    """One heuristic finding about one stored candle. ``detail`` is fixed text (no stored values)."""
+
+    code: str
+    symbol: str
+    timeframe: str
+    open_time_ms: int
+    row_id: int
+    detail: str
+
+
+@dataclass(frozen=True)
+class LegacyScanReport:
+    scanned_rows: int
+    issues: tuple[LegacyIssue, ...]
+    repaired: bool = False                   # always False: the scan never repairs
+
+    def counts(self) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for issue in self.issues:
+            out[issue.code] = out.get(issue.code, 0) + 1
+        return dict(sorted(out.items()))
+
+    def flagged_keys(self) -> list[tuple[str, str, int]]:
+        """Distinct (symbol, timeframe, open_time_ms) of every flagged row, for the manual delete step."""
+        return sorted({(i.symbol, i.timeframe, i.open_time_ms) for i in self.issues})
+
+
+_LEGACY_DETAIL = {
+    "FORMING_CANDLE": "stored before its close time; it may have been a still-forming candle (heuristic)",
+    "UNKNOWN_TIMEFRAME": "timeframe is not supported",
+    "MISALIGNED_OPEN": "open time is not aligned to the timeframe",
+    "BAD_DURATION": "close time does not match open time plus one interval minus 1 ms",
+    "INVALID_OHLC": "high/low are inconsistent with open/close",
+    "NONPOSITIVE_PRICE": "a price is not greater than zero",
+    "NEGATIVE_VOLUME": "a volume is negative",
+    "NEGATIVE_TRADE_COUNT": "trade count is negative",
+    "BAD_DECIMAL_TEXT": "a stored decimal is not plain fixed-point text (scientific notation, non-finite or unparsable)",
+    "SERIES_GAP": "candle(s) missing between the previous stored candle and this one",
+}
+
+
+def _scan_row(row: Mapping[str, Any], previous: dict[tuple[str, str], int]) -> list[LegacyIssue]:
+    from trading_app.data.validator import TIMEFRAME_MS
+
+    found: list[LegacyIssue] = []
+
+    def flag(code: str) -> None:
+        found.append(LegacyIssue(code, row["symbol"], row["timeframe"], row["open_time_ms"], row["id"], _LEGACY_DETAIL[code]))
+
+    interval = TIMEFRAME_MS.get(row["timeframe"])
+    open_ms, close_ms = row["open_time_ms"], row["close_time_ms"]
+    if row["created_at_ms"] <= close_ms:
+        flag("FORMING_CANDLE")
+    if interval is None:
+        flag("UNKNOWN_TIMEFRAME")
+    else:
+        if open_ms % interval != 0:
+            flag("MISALIGNED_OPEN")
+        if close_ms != open_ms + interval - 1:
+            flag("BAD_DURATION")
+        last = previous.get((row["symbol"], row["timeframe"]))
+        if last is not None and open_ms > last + interval:
+            flag("SERIES_GAP")
+        previous[(row["symbol"], row["timeframe"])] = open_ms
+    values: dict[str, Decimal] = {}
+    bad_text = False
+    for name in ("open_price", "high_price", "low_price", "close_price", "volume", "quote_volume"):
+        text = row[name]
+        try:
+            number = Decimal(text)
+        except (InvalidOperation, TypeError, ValueError):
+            bad_text = True
+            continue
+        if not number.is_finite() or "e" in str(text).lower():
+            bad_text = True
+            continue
+        values[name] = number
+    if bad_text:
+        flag("BAD_DECIMAL_TEXT")
+    prices = [values[n] for n in ("open_price", "high_price", "low_price", "close_price") if n in values]
+    if any(p <= 0 for p in prices):
+        flag("NONPOSITIVE_PRICE")
+    if len(prices) == 4:
+        o, h, l, c = (values[n] for n in ("open_price", "high_price", "low_price", "close_price"))
+        if h < max(o, c) or l > min(o, c) or l > h:
+            flag("INVALID_OHLC")
+    if any(values.get(n, Decimal(0)) < 0 for n in ("volume", "quote_volume")):
+        flag("NEGATIVE_VOLUME")
+    if row["trade_count"] < 0:
+        flag("NEGATIVE_TRADE_COUNT")
+    return found
+
+
 class CandleRepository:
     """Persistence layer for validated candles."""
 
@@ -338,9 +434,59 @@ class CandleRepository:
             for r in rows
         ]
 
-    def scan_legacy_data(self, *args: Any, **kwargs: Any):
-        """Return legacy-data findings without modifying records (Stage D2)."""
-        raise NotImplementedError("Stage-2 implementation not started: scan_legacy_data")
+    def scan_legacy_data(self, *, repair: bool = False) -> "LegacyScanReport":
+        """Read-only, heuristic scan of stored candles. Reports findings; NEVER repairs or writes.
+
+        Manual remediation is: list the flagged rows, delete them explicitly (``delete_candles``),
+        re-fetch, re-verify. ``repair=True`` is refused.
+        """
+        if repair is not False:
+            raise ValueError("repair is not supported: remediation is manual (list flagged rows, delete explicitly, re-fetch, re-verify)")
+        table = CandleModel.__table__
+        issues: list[LegacyIssue] = []
+        scanned = 0
+        previous: dict[tuple[str, str], int] = {}
+        with self.engine.connect() as connection:
+            if self.engine.dialect.name == "sqlite":
+                connection.exec_driver_sql("PRAGMA query_only=ON")           # the scan cannot write even by accident
+            try:
+                statement = select(table).order_by(table.c.symbol, table.c.timeframe, table.c.open_time_ms)
+                for row in connection.execute(statement.execution_options(stream_results=True)).mappings():
+                    scanned += 1
+                    issues.extend(_scan_row(row, previous))
+            finally:
+                if self.engine.dialect.name == "sqlite":
+                    connection.exec_driver_sql("PRAGMA query_only=OFF")
+        return LegacyScanReport(scanned_rows=scanned, issues=tuple(issues))
+
+    def delete_candles(self, keys: Iterable[tuple[str, str, int]], *, confirm: bool = False) -> int:
+        """Explicitly delete the given (symbol, timeframe, open_time_ms) candles in ONE transaction.
+
+        Manual-remediation step only: it needs ``confirm=True`` and exact keys, and never touches the audit table.
+        """
+        if confirm is not True:
+            raise ValueError("delete_candles needs an explicit confirm=True")
+        wanted = list(keys)
+        if not wanted or len(wanted) > self.max_candles_per_fetch:
+            raise ValueError(f"delete_candles needs between 1 and {self.max_candles_per_fetch} keys")
+        for key in wanted:
+            if (not isinstance(key, tuple) or len(key) != 3 or not isinstance(key[0], str) or not key[0]
+                    or not isinstance(key[1], str) or not key[1] or isinstance(key[2], bool) or not isinstance(key[2], int)):
+                raise ValueError("each key must be (symbol, timeframe, open_time_ms)")
+        table = CandleModel.__table__
+        deleted = 0
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                for symbol, timeframe, open_ms in wanted:
+                    result = connection.execute(delete(table).where(
+                        table.c.symbol == symbol, table.c.timeframe == timeframe, table.c.open_time_ms == open_ms))
+                    deleted += result.rowcount
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+        return deleted
 
     def get_fetches(self) -> list[dict[str, Any]]:
         """All audit rows in insertion order (for verification and tests)."""
