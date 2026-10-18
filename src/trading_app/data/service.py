@@ -89,15 +89,17 @@ class MarketDataService:
             raise ValueError(f"Timeframe {timeframe!r} is not configured.")
         requested_start_ms, requested_end_ms = to_ms(start), to_ms(end)
 
+        row_count = 0          # rows fetched AND verified by the client; stays 0 if the failure happens before that
         try:
             rows = self.client.get_historical_klines(symbol=symbol, timeframe=timeframe, start=start, end=end)
+            row_count = len(rows)
             candles, records = self._normalize(rows, symbol, timeframe)          # full validation BEFORE any write
             digest = hash_candles(records)
             fetch = self._fetch_record(symbol, timeframe, requested_start_ms, requested_end_ms, status="success",
-                                       row_count=len(rows), dataset_sha256=digest)
+                                       row_count=row_count, dataset_sha256=digest)
             return self.repository.insert_candles_with_fetch(candles, fetch)     # one short BEGIN IMMEDIATE transaction
         except Exception as exc:
-            self._record_failure(exc, symbol, timeframe, requested_start_ms, requested_end_ms)
+            self._record_failure(exc, symbol, timeframe, requested_start_ms, requested_end_ms, row_count)
             raise
 
     # ---- helpers ---------------------------------------------------------------
@@ -118,10 +120,10 @@ class MarketDataService:
             "fetched_at_ms": self._now_ms(),
         }
 
-    def _record_failure(self, exc: BaseException, symbol: str, timeframe: str, start_ms: int, end_ms: int) -> None:
+    def _record_failure(self, exc: BaseException, symbol: str, timeframe: str, start_ms: int, end_ms: int, row_count: int = 0) -> None:
         """Best-effort failure audit, attempted AFTER the candle transaction has rolled back. Never raises."""
         try:
-            record = self._fetch_record(symbol, timeframe, start_ms, end_ms, status="failed",
+            record = self._fetch_record(symbol, timeframe, start_ms, end_ms, status="failed", row_count=row_count,
                                         error_class=type(exc).__name__, error_text=safe_error_text(exc))
             self.repository.record_failed_fetch(record)
         except Exception as audit_exc:      # the original exception must always win

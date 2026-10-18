@@ -157,3 +157,47 @@ def test_candles_and_success_audit_are_all_or_nothing():
     assert env.repo.count() == 0                                      # the candles written before the audit row were rolled back too
     (audit,) = env.repo.get_fetches()
     assert audit["status"] == "failed"                                # and no success row exists
+
+
+@pytest.mark.requirement("AUDIT-01")
+def test_failure_after_rows_were_fetched_and_verified_records_that_row_count():
+    # (a) conflict with stored data: the 3 rows were fetched and validated before the save failed
+    changed = make_rows(S0, 3)
+    changed[1][5] = "999"
+    env = Env(ok_responses(3) + ok_responses(3, rows=changed))
+    env.run(3)
+    from trading_app.data.repository import CandleConflictError
+    with pytest.raises(CandleConflictError):
+        env.run(3)
+    success, failure = env.repo.get_fetches()
+    assert (success["status"], success["row_count"]) == ("success", 3)
+    assert failure["status"] == "failed" and failure["row_count"] == 3 and failure["dataset_sha256"] is None
+    assert failure["server_time_ms"] is not None and failure["effective_end_ms"] == S0 + 3 * I      # what was learned is kept too
+
+    # (b) failure after the candle transaction began
+    env = Env(ok_responses(4, rows=make_rows(S0, 4)))
+    _fail_first_insert(env.engine, "candles", RuntimeError("injected failure after the candle write began"))
+    with pytest.raises(RuntimeError):
+        env.run(4)
+    assert env.repo.get_fetches()[0]["row_count"] == 4 and env.repo.count() == 0
+
+    # (c) failure while preparing the save (hashing), after the fetch and validation succeeded
+    from trading_app.data import service as service_module
+    env = Env(ok_responses(2))
+    real = service_module.hash_candles
+    service_module.hash_candles = lambda records: (_ for _ in ()).throw(ValueError("hash failure"))
+    try:
+        with pytest.raises(ValueError, match="hash failure"):
+            env.run(2)
+    finally:
+        service_module.hash_candles = real
+    assert env.repo.get_fetches()[0]["row_count"] == 2
+
+
+@pytest.mark.requirement("AUDIT-01")
+def test_failures_before_any_rows_were_returned_record_zero_rows():
+    for responses in ([FakeResponse(status_code=503) for _ in range(4)], ok_responses(3, rows=[]), [time_resp(S0 + 1)]):
+        env = Env(responses)
+        with pytest.raises(Exception):
+            env.run(3)
+        assert env.repo.get_fetches()[0]["row_count"] == 0
