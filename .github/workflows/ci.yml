@@ -106,6 +106,16 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$evidence_rc"
+      - name: Verify the main test run's concurrency evidence (overlap, scenarios, integrity)
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          python tools/concurrency_evidence.py --verify-only artifacts/concurrency-evidence 2>&1 | tee -a artifacts/concurrency-evidence-output.txt
+          verify_rc=${PIPESTATUS[0]}
+          set -e
+          { echo "### Concurrency evidence of the main test run (exit $verify_rc)"; echo '```'; tail -n 20 artifacts/concurrency-evidence-output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$verify_rc"
       - name: Upload concurrency evidence
         if: always()
         uses: actions/upload-artifact@v4

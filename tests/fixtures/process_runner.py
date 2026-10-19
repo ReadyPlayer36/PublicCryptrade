@@ -48,6 +48,18 @@ def scrub_stderr(stderr: str, tmp_path: Path, db: Path) -> str:
     return stderr.replace(str(db), "<db>").replace(str(tmp_path), "<tmp>")[-STDERR_TAIL_CHARS:]
 
 
+def make_evidence_record(label: str, windows: list[tuple[float, float]], *, rows: int = 10, distinct: int | None = None, integrity: str = "ok",
+                         returncodes: list[int] | None = None, recorded_max: int | None = None) -> dict:
+    """A well-formed schema-1 evidence record for tests of the evidence gate (windows are (started_at, finished_at) pairs)."""
+    workers = [{"index": n, "spec": {"start": n, "count": 1, "volume": "1"}, "returncode": (returncodes or [0] * len(windows))[n],
+                "result": {"ok": True, "inserted": 1}, "stderr_tail": "",
+                "metrics": {"pid": 1000 + n, "started_at": a, "finished_at": b, "elapsed_s": round(b - a, 6)}} for n, (a, b) in enumerate(windows)]
+    return {"schema": EVIDENCE_SCHEMA, "label": label, "recorded_utc": "2026-01-01T00:00:00+00:00", "environment": environment(),
+            "barrier": "file-based start barrier", "workers": workers, "release_to_finish_s": 1.0,
+            "max_concurrency": recorded_max if recorded_max is not None else max_concurrency(windows),
+            "database": {"file": "shared.db", "rows": rows, "distinct_keys": rows if distinct is None else distinct, "integrity_check": integrity}}
+
+
 def write_evidence(record: dict, directory: Path | None = None) -> Path:
     """Archive one scenario as JSON. The record must already be free of secrets and absolute temp paths."""
     target = Path(directory) if directory is not None else evidence_dir()
