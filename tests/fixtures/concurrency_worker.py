@@ -36,12 +36,16 @@ def main(argv):
         if time.time() > deadline:
             return 3
         time.sleep(0.001)
+    started = time.time()
     try:
         result = {"ok": True, "inserted": repository.insert_candles(candles)}
     except CandleConflictError:
         result = {"ok": False, "error": "CandleConflictError"}
     except Exception as exc:                            # anything else is a real problem
         result = {"ok": False, "error": type(exc).__name__}
+    finished = time.time()
+    with open(out + ".metrics.json", "w") as handle:           # evidence only; kept apart from the result the tests compare
+        json.dump({"pid": os.getpid(), "started_at": started, "finished_at": finished, "elapsed_s": round(finished - started, 6)}, handle)
     tmp = out + ".tmp"
     with open(tmp, "w") as handle:
         json.dump(result, handle)

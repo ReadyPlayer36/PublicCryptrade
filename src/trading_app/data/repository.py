@@ -213,8 +213,13 @@ class LegacyScanReport:
         return dict(sorted(out.items()))
 
     def flagged_keys(self) -> list[tuple[str, str, int]]:
-        """Distinct (symbol, timeframe, open_time_ms) of every flagged row, for the manual delete step."""
-        return sorted({(i.symbol, i.timeframe, i.open_time_ms) for i in self.issues})
+        """Distinct (symbol, timeframe, open_time_ms) of every flagged row, for the manual delete step.
+
+        Rows whose identifiers are malformed (placeholder ``<invalid>`` / -1) are excluded: they have no
+        trustworthy key, so ``row_id`` on their issues is the handle for manual inspection.
+        """
+        return sorted({(i.symbol, i.timeframe, i.open_time_ms) for i in self.issues
+                       if i.symbol != _INVALID and i.timeframe != _INVALID and i.open_time_ms >= 0})
 
 
 _LEGACY_DETAIL = {
@@ -228,58 +233,82 @@ _LEGACY_DETAIL = {
     "NEGATIVE_TRADE_COUNT": "trade count is negative",
     "BAD_DECIMAL_TEXT": "a stored decimal is not plain fixed-point text (scientific notation, non-finite or unparsable)",
     "SERIES_GAP": "candle(s) missing between the previous stored candle and this one",
+    "MALFORMED_FIELD": "a stored integer, timestamp or identifier field has an unexpected type or shape",
 }
+_INT_FIELDS = ("id", "open_time_ms", "close_time_ms", "trade_count", "created_at_ms")
+_SAFE_SYMBOL = re.compile(r"[A-Z0-9]{2,20}")
+_SAFE_TIMEFRAME = re.compile(r"[0-9]{1,3}[a-zA-Z]")
+_INVALID = "<invalid>"          # placeholder shown instead of a stored identifier that is not a plain symbol/timeframe
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _scan_row(row: Mapping[str, Any], previous: dict[tuple[str, str], int]) -> list[LegacyIssue]:
+    """Heuristic checks on one stored row. Never raises, never echoes a stored value:
+    findings carry fixed text, and identifiers that are not plain symbols/timeframes are replaced by a placeholder."""
     from trading_app.data.validator import TIMEFRAME_MS
 
     found: list[LegacyIssue] = []
+    try:
+        symbol_raw, timeframe_raw = row["symbol"], row["timeframe"]
+        symbol = symbol_raw if isinstance(symbol_raw, str) and _SAFE_SYMBOL.fullmatch(symbol_raw) else _INVALID
+        timeframe = timeframe_raw if isinstance(timeframe_raw, str) and _SAFE_TIMEFRAME.fullmatch(timeframe_raw) else _INVALID
+        ints = {name: row[name] for name in _INT_FIELDS}
+        row_id = ints["id"] if _is_int(ints["id"]) else -1
+        open_ms = ints["open_time_ms"] if _is_int(ints["open_time_ms"]) else -1
 
-    def flag(code: str) -> None:
-        found.append(LegacyIssue(code, row["symbol"], row["timeframe"], row["open_time_ms"], row["id"], _LEGACY_DETAIL[code]))
+        def flag(code: str) -> None:
+            found.append(LegacyIssue(code, symbol, timeframe, open_ms, row_id, _LEGACY_DETAIL[code]))
 
-    interval = TIMEFRAME_MS.get(row["timeframe"])
-    open_ms, close_ms = row["open_time_ms"], row["close_time_ms"]
-    if row["created_at_ms"] <= close_ms:
-        flag("FORMING_CANDLE")
-    if interval is None:
-        flag("UNKNOWN_TIMEFRAME")
-    else:
-        if open_ms % interval != 0:
-            flag("MISALIGNED_OPEN")
-        if close_ms != open_ms + interval - 1:
-            flag("BAD_DURATION")
-        last = previous.get((row["symbol"], row["timeframe"]))
-        if last is not None and open_ms > last + interval:
-            flag("SERIES_GAP")
-        previous[(row["symbol"], row["timeframe"])] = open_ms
-    values: dict[str, Decimal] = {}
-    bad_text = False
-    for name in ("open_price", "high_price", "low_price", "close_price", "volume", "quote_volume"):
-        text = row[name]
-        try:
-            number = Decimal(text)
-        except (InvalidOperation, TypeError, ValueError):
-            bad_text = True
-            continue
-        if not number.is_finite() or "e" in str(text).lower():
-            bad_text = True
-            continue
-        values[name] = number
-    if bad_text:
-        flag("BAD_DECIMAL_TEXT")
-    prices = [values[n] for n in ("open_price", "high_price", "low_price", "close_price") if n in values]
-    if any(p <= 0 for p in prices):
-        flag("NONPOSITIVE_PRICE")
-    if len(prices) == 4:
-        o, h, l, c = (values[n] for n in ("open_price", "high_price", "low_price", "close_price"))
-        if h < max(o, c) or l > min(o, c) or l > h:
-            flag("INVALID_OHLC")
-    if any(values.get(n, Decimal(0)) < 0 for n in ("volume", "quote_volume")):
-        flag("NEGATIVE_VOLUME")
-    if row["trade_count"] < 0:
-        flag("NEGATIVE_TRADE_COUNT")
+        malformed = symbol == _INVALID or timeframe == _INVALID or not all(_is_int(v) for v in ints.values())
+        if malformed:
+            flag("MALFORMED_FIELD")                                              # exactly once per row, whatever is wrong
+        close_ms, created_ms, trade_count = ints["close_time_ms"], ints["created_at_ms"], ints["trade_count"]
+        if _is_int(created_ms) and _is_int(close_ms) and created_ms <= close_ms:
+            flag("FORMING_CANDLE")
+        interval = TIMEFRAME_MS.get(timeframe_raw) if isinstance(timeframe_raw, str) else None
+        if timeframe != _INVALID and interval is None:
+            flag("UNKNOWN_TIMEFRAME")
+        if interval is not None and _is_int(ints["open_time_ms"]):
+            if open_ms % interval != 0:
+                flag("MISALIGNED_OPEN")
+            if _is_int(close_ms) and close_ms != open_ms + interval - 1:
+                flag("BAD_DURATION")
+            if symbol != _INVALID:
+                last = previous.get((symbol, timeframe))
+                if last is not None and open_ms > last + interval:
+                    flag("SERIES_GAP")
+                previous[(symbol, timeframe)] = open_ms
+        if _is_int(trade_count) and trade_count < 0:
+            flag("NEGATIVE_TRADE_COUNT")
+        values: dict[str, Decimal] = {}
+        bad_text = False
+        for name in ("open_price", "high_price", "low_price", "close_price", "volume", "quote_volume"):
+            text = row[name]
+            try:
+                number = Decimal(text) if isinstance(text, str) else None
+            except (InvalidOperation, ValueError):
+                number = None
+            if number is None or not number.is_finite() or "e" in text.lower():
+                bad_text = True
+                continue
+            values[name] = number
+        if bad_text:
+            flag("BAD_DECIMAL_TEXT")
+        prices = [values[n] for n in ("open_price", "high_price", "low_price", "close_price") if n in values]
+        if any(p <= 0 for p in prices):
+            flag("NONPOSITIVE_PRICE")
+        if len(prices) == 4:
+            o, h, l, c = (values[n] for n in ("open_price", "high_price", "low_price", "close_price"))
+            if h < max(o, c) or l > min(o, c) or l > h:
+                flag("INVALID_OHLC")
+        if any(values.get(n, Decimal(0)) < 0 for n in ("volume", "quote_volume")):
+            flag("NEGATIVE_VOLUME")
+    except Exception:                                                         # last resort: a hostile row must not crash the scan
+        if not any(i.code == "MALFORMED_FIELD" for i in found):
+            found.append(LegacyIssue("MALFORMED_FIELD", _INVALID, _INVALID, -1, -1, _LEGACY_DETAIL["MALFORMED_FIELD"]))
     return found
 
 

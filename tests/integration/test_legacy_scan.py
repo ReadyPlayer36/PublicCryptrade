@@ -209,3 +209,126 @@ def test_delete_candles_safeguards_and_atomicity(tmp_path):
         event.remove(repository.engine, "after_cursor_execute", explode)
     assert repository.count() == 3                                             # the first delete was rolled back with the failure
     assert repository.delete_candles(keys, confirm=True) == 3 and repository.count() == 0
+
+
+# ---- malformed-type robustness (reviewer condition): a legacy table with NO column types keeps whatever was written ----
+POISON = "SECRET-hunter2-TOKEN"
+
+
+def loose_db(tmp_path, name="loose.db"):
+    db = tmp_path / name
+    connection = sqlite3.connect(db)
+    connection.execute("CREATE TABLE candles (id INTEGER PRIMARY KEY, symbol, timeframe, open_time_ms, close_time_ms, open_price, high_price,"
+                       " low_price, close_price, volume, quote_volume, trade_count, created_at_ms)")
+    connection.commit()
+    connection.close()
+    return db, CandleRepository(create_engine_from_url(f"sqlite:///{db}"))
+
+
+def loose_insert(db, n, **overrides):
+    open_ms = S0 + n * I
+    row = dict(id=n + 1, symbol="BTCUSDT", timeframe="5m", open_time_ms=open_ms, close_time_ms=open_ms + I - 1, open_price="100", high_price="101",
+               low_price="99", close_price="100.5", volume="1", quote_volume="1", trade_count=1, created_at_ms=LATE)
+    row.update(overrides)
+    connection = sqlite3.connect(db)
+    connection.execute(f"INSERT INTO candles ({','.join(row)}) VALUES ({','.join('?' * len(row))})", list(row.values()))
+    connection.commit()
+    connection.close()
+
+
+def everything_reported(report):
+    parts = [repr(report), str(report.counts()), str(report.flagged_keys())]
+    for issue in report.issues:
+        parts += [repr(issue), issue.code, issue.symbol, issue.timeframe, issue.detail]
+    return " | ".join(parts)
+
+
+@pytest.mark.requirement("LEGACY-01")
+def test_malformed_stored_types_get_one_fixed_finding_and_never_leak_values(tmp_path):
+    db, repository = loose_db(tmp_path)
+    loose_insert(db, 0)                                                         # id 1  healthy
+    loose_insert(db, 1, trade_count=POISON)                                     # id 2  text where an integer belongs
+    loose_insert(db, 2, created_at_ms=POISON)                                   # id 3  text timestamp
+    loose_insert(db, 3, open_time_ms=1.5, close_time_ms=b"SECRET-bytes")        # id 4  float open time, bytes close time
+    loose_insert(db, 4, trade_count=None)                                       # id 5  NULL integer
+    loose_insert(db, 5, symbol="BTC " + POISON)                                 # id 6  hostile symbol
+    loose_insert(db, 6, timeframe=POISON)                                       # id 7  hostile timeframe
+    loose_insert(db, 7, volume=POISON)                                          # id 8  bad decimal text: NOT a malformed-field case
+    loose_insert(db, 8, trade_count=POISON, created_at_ms=POISON, close_time_ms=POISON, symbol=None)   # id 9  everything wrong at once
+    loose_insert(db, 9, open_price=b"SECRET-blob", high_price=None)             # id 10 non-text decimals
+    before = [tuple(r) for r in sqlite3.connect(db).execute("SELECT * FROM candles ORDER BY id")]
+
+    report = repository.scan_legacy_data()                                      # must complete without raising
+
+    assert report.scanned_rows == 10
+    per_row = {}
+    for issue in report.issues:
+        per_row.setdefault(issue.row_id, []).append(issue.code)
+    malformed_rows = {rid for rid, codes in per_row.items() if "MALFORMED_FIELD" in codes}
+    assert malformed_rows == {2, 3, 4, 5, 6, 7, 9}
+    assert all(codes.count("MALFORMED_FIELD") <= 1 for codes in per_row.values())     # exactly one fixed finding per row
+    # ids 8 and 10 have unparsable decimals (and, because the malformed rows between them leave real holes in the valid series, a gap)
+    assert set(per_row[8]) == {"BAD_DECIMAL_TEXT", "SERIES_GAP"} and set(per_row[10]) == {"BAD_DECIMAL_TEXT", "SERIES_GAP"}
+    assert 1 not in per_row                                                     # the healthy row is never flagged
+    assert report.counts()["MALFORMED_FIELD"] == 7
+    assert not any(token in everything_reported(report) for token in (POISON, "hunter2", "SECRET", "bytes", "blob"))
+    assert {i.detail for i in report.issues} <= set(__import__("trading_app.data.repository", fromlist=["_LEGACY_DETAIL"])._LEGACY_DETAIL.values())
+    # rows with untrustworthy identifiers are shown by placeholder and kept out of the delete list, but stay findable by row_id
+    placeholders = [i for i in report.issues if i.symbol == "<invalid>" or i.timeframe == "<invalid>"]
+    assert {i.row_id for i in placeholders} == {6, 7, 9}
+    assert all(k[0] != "<invalid>" and k[1] != "<invalid>" and k[2] >= 0 for k in report.flagged_keys())
+    assert [tuple(r) for r in sqlite3.connect(db).execute("SELECT * FROM candles ORDER BY id")] == before     # and still nothing was written
+
+
+@pytest.mark.requirement("LEGACY-01")
+def test_a_malformed_field_never_hides_the_other_findings_on_the_same_row(tmp_path):
+    db, repository = loose_db(tmp_path)
+    loose_insert(db, 0, created_at_ms=POISON, volume="-5", high_price="90")                    # id 1
+    loose_insert(db, 1, trade_count=POISON, created_at_ms=S0, volume="-5", high_price="90")    # id 2
+    loose_insert(db, 2, trade_count=POISON, close_time_ms=S0 + 2 * I + 7, volume="-5")         # id 3
+    per_row = {}
+    for issue in repository.scan_legacy_data().issues:
+        per_row.setdefault(issue.row_id, set()).add(issue.code)
+    assert per_row == {
+        1: {"MALFORMED_FIELD", "NEGATIVE_VOLUME", "INVALID_OHLC"},
+        2: {"MALFORMED_FIELD", "FORMING_CANDLE", "NEGATIVE_VOLUME", "INVALID_OHLC"},
+        3: {"MALFORMED_FIELD", "BAD_DURATION", "NEGATIVE_VOLUME"},
+    }
+
+
+@pytest.mark.requirement("LEGACY-01")
+def test_a_hostile_row_object_cannot_crash_the_scan_or_leak_through_an_exception():
+    from trading_app.data.repository import _LEGACY_DETAIL, _scan_row
+
+    class Hostile(dict):
+        def __getitem__(self, key):
+            if key == "volume":
+                raise RuntimeError(f"{POISON} exploded while reading")
+            return super().__getitem__(key)
+
+    row = Hostile(id=1, symbol="BTCUSDT", timeframe="5m", open_time_ms=S0, close_time_ms=S0 + I - 1, open_price="100", high_price="101",
+                  low_price="99", close_price="100.5", volume="1", quote_volume="1", trade_count=1, created_at_ms=LATE)
+    (issue,) = _scan_row(row, {})
+    assert issue.code == "MALFORMED_FIELD" and issue.detail == _LEGACY_DETAIL["MALFORMED_FIELD"]
+    assert POISON not in repr(issue) and issue.row_id == -1 and issue.symbol == "<invalid>"
+    # a row that is ALREADY malformed and then raises must still produce exactly one MALFORMED_FIELD finding
+    already = Hostile(row, trade_count=POISON)
+    findings = _scan_row(already, {})
+    assert [i.code for i in findings] == ["MALFORMED_FIELD"] and POISON not in repr(findings)
+
+
+@pytest.mark.requirement("LEGACY-01")
+def test_well_formed_rows_are_unaffected_by_the_type_checks(tmp_path):
+    db, repository = loose_db(tmp_path)
+    for n in range(4):
+        loose_insert(db, n)
+    assert repository.scan_legacy_data().issues == ()
+    loose_insert(db, 4, trade_count=-2)
+    assert [i.code for i in repository.scan_legacy_data().issues] == ["NEGATIVE_TRADE_COUNT"]      # integer checks still work
+
+
+@pytest.mark.requirement("LEGACY-01")
+def test_delete_candles_signature_defaults_to_refusal():
+    import inspect
+    parameter = inspect.signature(CandleRepository.delete_candles).parameters["confirm"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY and parameter.default is False       # explicit opt-in is required

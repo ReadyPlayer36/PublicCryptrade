@@ -91,6 +91,30 @@ jobs:
             artifacts/check-traceability.txt
             artifacts/traceability-classes.txt
           if-no-files-found: warn
+      - name: Concurrency stability and evidence (3 repeated runs; logs, JUnit and summary archived)
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          python tools/concurrency_evidence.py --runs 3 2>&1 | tee artifacts/concurrency-evidence-output.txt
+          evidence_rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### Concurrency evidence (exit $evidence_rc)"
+            echo '```'
+            cat artifacts/concurrency-evidence-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$evidence_rc"
+      - name: Upload concurrency evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: concurrency-evidence
+          path: |
+            artifacts/concurrency-evidence/
+            artifacts/concurrency-evidence-output.txt
+          if-no-files-found: error
       - name: Dependency audit (nonblocking until final gate)
         continue-on-error: true
         run: pip-audit
