@@ -34,6 +34,14 @@ def test_stderr_tail_is_scrubbed_and_truncated(tmp_path):
 
 
 @pytest.mark.requirement("EVIDENCE-01")
+def test_records_written_in_the_same_millisecond_never_overwrite_each_other(tmp_path, monkeypatch):
+    monkeypatch.setattr("tests.fixtures.process_runner.time.time", lambda: 1_800_000_000.123)       # a frozen clock: identical millisecond every time
+    paths = [write_evidence({"label": "same", "n": n}, tmp_path) for n in range(5)]
+    assert len({p.name for p in paths}) == 5 and len(list(tmp_path.glob("same-*.json"))) == 5
+    assert sorted(json.loads(p.read_text())["n"] for p in tmp_path.glob("same-*.json")) == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.requirement("EVIDENCE-01")
 def test_write_evidence_and_labels(tmp_path, monkeypatch):
     path = write_evidence({"label": "some_scenario", "x": 1}, tmp_path)
     assert path.parent == tmp_path and path.name.startswith("some_scenario-") and json.loads(path.read_text()) == {"label": "some_scenario", "x": 1}
@@ -138,6 +146,11 @@ def test_tool_fails_closed_on_the_existing_requirements(tmp_path, name, body, ex
     ("zero_time", scenario(extra='    record["workers"][0]["metrics"]["started_at"] = 0'), "worker 0 has malformed timing"),
     ("bool_time", scenario(extra='    record["workers"][0]["metrics"]["started_at"] = True'), "worker 0 has malformed timing"),
     ("backwards", scenario(extra='    record["workers"][0]["metrics"]["finished_at"] = 99.0'), "worker 0 finished before it started"),
+    ("zero_inside_a_window", scenario("[(100.0, 102.0), (101.0, 101.0)]"), "worker 1 has a zero-duration window"),
+    ("zero_among_overlapping_workers", scenario("[(100.0, 102.0), (100.5, 101.5), (101.0, 101.0)]"), "worker 2 has a zero-duration window"),
+    ("zero_at_a_window_start", scenario("[(100.0, 102.0), (100.0, 100.0)]"), "worker 1 has a zero-duration window"),
+    ("zero_at_a_window_end", scenario("[(100.0, 102.0), (102.0, 102.0)]"), "worker 1 has a zero-duration window"),
+    ("all_zero", scenario("[(100.0, 100.0), (100.0, 100.0)]"), "worker 0 has a zero-duration window"),
     ("no_pid", scenario(extra='    record["workers"][0]["metrics"]["pid"] = None'), "worker 0 has no process id"),
 ])
 def test_tool_fails_closed_unless_the_windows_really_overlapped(tmp_path, name, body, expected):
@@ -156,6 +169,33 @@ def test_tool_fails_closed_unless_the_windows_really_overlapped(tmp_path, name, 
 def test_tool_fails_closed_when_expected_scenarios_are_missing_or_unexpected(tmp_path, name, body, expect, expected):
     done, _ = run_tool(tmp_path, write_target(tmp_path, f"test_{name}.py", body), 1, *expect)
     assert done.returncode == 1 and expected in done.stdout, done.stdout
+
+
+@pytest.mark.requirement("EVIDENCE-01")
+@pytest.mark.parametrize("name,body,expect,expected", [
+    ("duplicate_record", "def test_ok():\n    for _ in range(2):\n        write_evidence(make_evidence_record('good', [(100.0, 101.0), (100.5, 101.5)]))\n",
+     ("--expect", "good:2"), "unexpected additional 2-worker record for scenario 'good'"),
+    ("triplicate_for_two", "def test_ok():\n    for _ in range(3):\n        write_evidence(make_evidence_record('good', [(100.0, 101.0), (100.5, 101.5)]))\n",
+     ("--expect", "good:2,2"), "unexpected additional 2-worker record for scenario 'good'"),
+    ("extra_other_size", "def test_ok():\n    write_evidence(make_evidence_record('good', [(100.0, 101.0), (100.5, 101.5)]))\n"
+                         "    write_evidence(make_evidence_record('good', [(100.0, 101.0), (100.2, 101.0), (100.4, 101.0), (100.6, 101.0)]))\n",
+     ("--expect", "good:2"), "unexpected additional 4-worker record for scenario 'good'"),
+])
+def test_tool_rejects_excess_duplicate_records_for_an_expected_scenario(tmp_path, name, body, expect, expected):
+    done, _ = run_tool(tmp_path, write_target(tmp_path, f"test_{name}.py", body), 1, *expect)
+    assert done.returncode == 1 and expected in done.stdout, done.stdout
+
+
+@pytest.mark.requirement("EVIDENCE-01")
+def test_each_expected_record_appearing_exactly_once_passes_including_two_sizes_and_repeats():
+    from tools.concurrency_evidence import verify_records
+    two = make_evidence_record("a", [(1.0, 3.0), (2.0, 4.0)])
+    four = make_evidence_record("a", [(1.0, 5.0), (1.5, 5.0), (2.0, 5.0), (2.5, 5.0)])
+    solo = make_evidence_record("a", [(1.0, 2.0)])
+    assert verify_records([("1", two), ("2", four), ("3", solo)], {"a": [2, 4]})[0] == []
+    assert verify_records([("1", two), ("2", two)], {"a": [2, 2]})[0] == []
+    assert verify_records([("1", two), ("2", two)], {"a": [2]})[0] == ["unexpected additional 2-worker record for scenario 'a' (each expected record must appear exactly once)"]
+    assert verify_records([("1", two), ("2", two), ("3", two)], {"a": [2]})[0].count("unexpected additional 2-worker record for scenario 'a' (each expected record must appear exactly once)") == 2
 
 
 @pytest.mark.requirement("EVIDENCE-01")
@@ -224,6 +264,75 @@ def test_overlap_helpers_agree_with_the_runner_and_handle_edge_cases():
     assert overlap_degrees([(1.0, 2.0), (2.0, 3.0)]) == [0, 0]                      # touching is not overlapping
 
 
+def _run_src(*calls):
+    body = "\n".join(f"    {c}" for c in calls)
+    return f"def test_x(tmp_path):\n{body}\n"
+
+
+@pytest.mark.requirement("EVIDENCE-01")
+@pytest.mark.parametrize("source,expected", [
+    (_run_src('run_workers(tmp_path, db, [(0, 1, "1"), (1, 1, "1")])'), {"test_x": [2]}),
+    (_run_src('run_workers(tmp_path, db, [(0, 1, "1")] * 4)'), {"test_x": [4]}),
+    (_run_src('run_workers(tmp_path, db, 3 * [(0, 1, "1"), (1, 1, "1")])'), {"test_x": [6]}),
+    (_run_src('run_workers(tmp_path, db, specs=[(0, 1, "1"), (1, 1, "1"), (2, 1, "1")])'), {"test_x": [3]}),
+    (_run_src('process_runner.run_workers(tmp_path, db, [(0, 1, "1"), (1, 1, "1")])'), {"test_x": [2]}),
+    (_run_src('run_workers(tmp_path, db, [(0, 1, "1")])', 'run_workers(tmp_path, db, [(0, 1, "1"), (1, 1, "1")])', 'run_workers(tmp_path, db, [(0, 1, "1")])'), {"test_x": [2]}),
+    (_run_src('run_workers(tmp_path, db, [(0, 1, "1")] * 2)', 'run_workers(tmp_path, db, [(0, 1, "1")] * 4)'), {"test_x": [2, 4]}),
+    (_run_src('run_workers(tmp_path, db, [(0, 1, "1")])'), {}),
+    (_run_src('do_something_else(tmp_path)'), {}),
+])
+def test_declared_worker_sizes_reads_the_real_calls(source, expected):
+    from tools.concurrency_evidence import declared_worker_sizes
+    assert declared_worker_sizes(source) == expected
+
+
+@pytest.mark.requirement("EVIDENCE-01")
+@pytest.mark.parametrize("source", [
+    _run_src("run_workers(tmp_path, db, specs)"),
+    _run_src('run_workers(tmp_path, db, [(0, 1, "1")] * n)'),
+    _run_src('run_workers(tmp_path, db, [(0, 1, "1") for _ in range(3)])'),
+    _run_src('run_workers(tmp_path, db, [*base, (1, 1, "1")])'),
+    _run_src('run_workers(tmp_path, db, make_specs())'),
+])
+def test_declared_worker_sizes_refuses_to_guess(source):
+    from tools.concurrency_evidence import declared_worker_sizes
+    with pytest.raises(ValueError, match="cannot determine the worker count"):
+        declared_worker_sizes(source)
+
+
+@pytest.mark.requirement("EVIDENCE-01")
+def test_a_run_workers_call_without_specs_is_refused_with_a_clear_message():
+    from tools.concurrency_evidence import declared_worker_sizes
+    with pytest.raises(ValueError, match=r"cannot determine the worker count of a run_workers call \(no specs argument\)"):
+        declared_worker_sizes(_run_src("run_workers(tmp_path, db)"))
+
+
+@pytest.mark.requirement("EVIDENCE-01")
+def test_a_change_to_a_tests_real_worker_count_makes_the_manifest_stale():
+    from tools.concurrency_evidence import manifest_problems
+    in_sync = _run_src('run_workers(tmp_path, db, [(0, 1, "1")] * 4)')
+    assert manifest_problems({"test_x": [4]}, in_sync) == []
+    assert manifest_problems({"test_x": [2]}, in_sync) == ["manifest is stale for 'test_x': manifest says [2], the test makes [4]"]          # test now uses 4
+    assert manifest_problems({"test_x": [4]}, _run_src('run_workers(tmp_path, db, [(0, 1, "1")] * 3)'))                                 # test now uses 3
+    assert manifest_problems({"test_x": [4]}, _run_src('run_workers(tmp_path, db, [(0, 1, "1")] * 4)', 'run_workers(tmp_path, db, [(0, 1, "1")] * 2)'))   # a new call
+    assert manifest_problems({"test_x": [2, 4]}, in_sync)                                                                                 # a call was removed
+    assert manifest_problems({"test_x": [4], "test_gone": [2]}, in_sync) == ["manifest is stale for 'test_gone': manifest says [2], the test makes no multi-worker call"]
+    assert manifest_problems({}, in_sync) == ["manifest is stale for 'test_x': manifest says nothing, the test makes [4]"]                # a new test is not in the manifest
+    assert manifest_problems({"test_x": [4]}, _run_src('run_workers(tmp_path, db, [(0, 1, "1")] * 4)').replace("test_x", "test_renamed"))   # renamed
+
+
+@pytest.mark.requirement("EVIDENCE-01")
+def test_the_tool_refuses_to_run_with_a_stale_built_in_manifest(tmp_path, monkeypatch, capsys):
+    import tools.concurrency_evidence as tool
+    (tmp_path / "ev").mkdir()
+    write_evidence(make_evidence_record("x", [(1.0, 2.0), (1.5, 2.5)]), tmp_path / "ev")
+    monkeypatch.setattr(tool, "EXPECTED_SCENARIOS", {**tool.EXPECTED_SCENARIOS, "test_no_duplicate_rows_after_overlap": [3]})
+    assert tool.main(["--verify-only", str(tmp_path / "ev")]) == 1
+    out = capsys.readouterr().out
+    assert "built-in manifest does not match the real concurrency suite (fail closed)" in out and "'test_no_duplicate_rows_after_overlap'" in out
+    assert not (tmp_path / "ev" / "verification.json").exists()                  # it stopped before verifying anything
+
+
 @pytest.mark.requirement("EVIDENCE-01")
 def test_the_built_in_manifest_matches_the_real_concurrency_suite():
     import ast
@@ -231,6 +340,10 @@ def test_the_built_in_manifest_matches_the_real_concurrency_suite():
     tree = ast.parse((ROOT / DEFAULT_TARGET).read_text())
     names = {n.name for n in tree.body if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")}
     assert set(EXPECTED_SCENARIOS) == names                                          # every real test is expected, and nothing else
+    from tools.concurrency_evidence import declared_worker_sizes, manifest_problems
+    declared = declared_worker_sizes((ROOT / DEFAULT_TARGET).read_text())
+    assert {k: sorted(v) for k, v in EXPECTED_SCENARIOS.items()} == declared      # the manifest equals the ACTUAL multi-worker calls
+    assert manifest_problems(EXPECTED_SCENARIOS, (ROOT / DEFAULT_TARGET).read_text()) == []
     assert all(isinstance(v, list) and v and all(isinstance(c, int) and c >= 2 for c in v) for v in EXPECTED_SCENARIOS.values())
 
 

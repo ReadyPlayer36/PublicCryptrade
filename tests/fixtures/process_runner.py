@@ -1,6 +1,7 @@
 """Runs several real worker processes against one SQLite file, released together by a start barrier."""
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import platform
@@ -15,6 +16,7 @@ from trading_app.data.repository import CandleRepository, create_engine_from_url
 
 WORKER = Path(__file__).with_name("concurrency_worker.py")
 EVIDENCE_SCHEMA = 1
+_SEQUENCE = itertools.count()          # makes every evidence file name unique within a process, even within one millisecond
 STDERR_TAIL_CHARS = 2000
 
 
@@ -64,7 +66,7 @@ def write_evidence(record: dict, directory: Path | None = None) -> Path:
     """Archive one scenario as JSON. The record must already be free of secrets and absolute temp paths."""
     target = Path(directory) if directory is not None else evidence_dir()
     target.mkdir(parents=True, exist_ok=True)
-    path = target / f"{record['label']}-{os.getpid()}-{int(time.time() * 1000)}.json"
+    path = target / f"{record['label']}-{os.getpid()}-{int(time.time() * 1000)}-{next(_SEQUENCE)}.json"
     path.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
     return path
 

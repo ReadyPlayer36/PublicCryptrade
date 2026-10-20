@@ -13,6 +13,7 @@ and summary.json. The gate fails closed (exit 1) unless, in EVERY run:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import math
 import os
@@ -48,6 +49,53 @@ def junit_counts(path: Path) -> dict:
     return {k: int(attrs.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
 
 
+def _worker_count(node: ast.AST) -> int:
+    """Number of workers declared by a ``run_workers`` specs argument: ``[a, b, ...]`` or ``[a] * N`` (either order)."""
+    if isinstance(node, ast.List):
+        if any(isinstance(e, ast.Starred) for e in node.elts):
+            raise ValueError("cannot determine the worker count of a run_workers call (starred element)")
+        return len(node.elts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        for lst, count in ((node.left, node.right), (node.right, node.left)):
+            if isinstance(lst, ast.List) and not any(isinstance(e, ast.Starred) for e in lst.elts) and isinstance(count, ast.Constant) and isinstance(count.value, int) and not isinstance(count.value, bool) and count.value >= 0:
+                return len(lst.elts) * count.value
+    raise ValueError("cannot determine the worker count of a run_workers call (use a list literal or [spec] * N)")
+
+
+def declared_worker_sizes(source: str) -> dict[str, list[int]]:
+    """For every test function in ``source``: the sorted worker counts (>= 2) of its ``run_workers`` calls.
+
+    Raises ValueError for a call whose worker count cannot be read statically, so the manifest can never be checked against a guess.
+    """
+    out: dict[str, list[int]] = {}
+    for node in ast.parse(source).body:
+        if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_")):
+            continue
+        sizes = []
+        for call in ast.walk(node):
+            if isinstance(call, ast.Call) and (getattr(call.func, "id", None) == "run_workers" or getattr(call.func, "attr", None) == "run_workers"):
+                specs = call.args[2] if len(call.args) > 2 else next((k.value for k in call.keywords if k.arg == "specs"), None)
+                if specs is None:
+                    raise ValueError("cannot determine the worker count of a run_workers call (no specs argument)")
+                count = _worker_count(specs)
+                if count >= 2:
+                    sizes.append(count)
+        if sizes:
+            out[node.name] = sorted(sizes)
+    return out
+
+
+def manifest_problems(manifest: dict[str, list[int]], source: str) -> list[str]:
+    """Differences between a manifest and the multi-worker calls actually made by the tests in ``source`` (empty = in sync)."""
+    declared = declared_worker_sizes(source)
+    problems = []
+    for label in sorted(set(manifest) | set(declared)):
+        want, have = sorted(manifest.get(label, [])), declared.get(label, [])
+        if want != have:
+            problems.append(f"manifest is stale for {label!r}: manifest says {want or 'nothing'}, the test makes {have or 'no multi-worker call'}")
+    return problems
+
+
 def _number(value) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
         raise ValueError("not a finite positive number")
@@ -70,6 +118,8 @@ def windows_of(record: dict) -> list[tuple[float, float]]:
             raise ValueError(f"worker {index} has malformed timing") from None
         if end < start:
             raise ValueError(f"worker {index} finished before it started")
+        if end == start:
+            raise ValueError(f"worker {index} has a zero-duration window (finished exactly when it started)")
         if isinstance(metrics.get("pid"), bool) or not isinstance(metrics.get("pid"), int) or metrics["pid"] <= 0:
             raise ValueError(f"worker {index} has no process id")
         windows.append((start, end))
@@ -146,6 +196,8 @@ def verify_records(records: list[tuple[str, dict]], expected: dict[str, list[int
                     found.remove(size)
                 else:
                     errors.append(f"expected scenario {label!r} with {size} workers was not recorded")
+            for extra in sorted(found):          # whatever is left over was NOT expected: duplicates or a different worker count
+                errors.append(f"unexpected additional {extra}-worker record for scenario {label!r} (each expected record must appear exactly once)")
         for label in seen:
             if label not in expected:
                 errors.append(f"unexpected multi-worker scenario {label!r} (not in the manifest)")
@@ -201,6 +253,9 @@ def resolve_expectations(args) -> dict[str, list[int]] | None:
     if args.expect:
         return parse_expect(args.expect)
     if args.target == DEFAULT_TARGET:
+        problems = manifest_problems(EXPECTED_SCENARIOS, (ROOT / DEFAULT_TARGET).read_text(encoding="utf-8"))
+        if problems:
+            raise ValueError("the built-in manifest does not match the real concurrency suite (fail closed): " + "; ".join(problems))
         return dict(EXPECTED_SCENARIOS)
     if args.allow_no_expectations:
         return None
