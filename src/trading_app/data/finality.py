@@ -11,6 +11,8 @@ class EmptyEffectiveRangeError(ValueError):
     """Raised when effective end is not greater than requested start."""
 class NaiveDatetimeError(ValueError):
     """Raised when an input datetime has no timezone."""
+class StrictEndError(ValueError):
+    """Raised in strict-end mode when the requested end is later than the final-data boundary."""
 class NonFinalCandleError(RuntimeError):
     """Raised when upstream returns a candle whose close time is >= B."""
 

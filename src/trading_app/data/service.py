@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from trading_app.config import Settings
 from trading_app.data.binance_client import BinanceClientError, BinanceMarketDataClient
-from trading_app.data.finality import EmptyEffectiveRangeError, NaiveDatetimeError, NonFinalCandleError
+from trading_app.data.finality import EmptyEffectiveRangeError, NaiveDatetimeError, NonFinalCandleError, StrictEndError
 from trading_app.data.hashing import hash_candles
 from trading_app.data.repository import CandleConflictError, CandleRepository, TooManyCandlesError, _from_ms, to_ms
 from trading_app.data.schemas import Candle
@@ -42,6 +42,8 @@ def safe_error_text(exc: BaseException) -> str:
         return "upstream returned a non-final candle"
     if isinstance(exc, EmptyEffectiveRangeError):
         return "effective range is empty (requested candles are not final yet)"
+    if isinstance(exc, StrictEndError):
+        return "strict-end: requested end is later than the final-data boundary"
     if isinstance(exc, NaiveDatetimeError):
         return "naive datetime rejected"
     if isinstance(exc, TooManyCandlesError):
@@ -78,8 +80,15 @@ class MarketDataService:
         self.repository = repository
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))     # audit timestamps only; never used for finality
 
-    def download_and_store(self, *, symbol: str, timeframe: str, start: datetime, end: datetime) -> int:
-        """Return the number of NEW candles stored (0 on an idempotent rerun)."""
+    def download_and_store(self, *, symbol: str, timeframe: str, start: datetime, end: datetime,
+                           strict_end: bool = False) -> int:
+        """Return the number of NEW candles stored (0 on an idempotent rerun).
+
+        Default: an end later than the final-data boundary is clamped (recorded in the audit row).
+        ``strict_end=True``: that situation fails with StrictEndError BEFORE anything is written.
+        """
+        if not isinstance(strict_end, bool):
+            raise ValueError("strict_end must be a bool")
         if not isinstance(symbol, str):
             raise ValueError("symbol must be a string")
         symbol = symbol.upper()
@@ -92,6 +101,9 @@ class MarketDataService:
         row_count = 0          # rows fetched AND fully verified (client checks + service conversion); 0 until then
         try:
             rows = self.client.get_historical_klines(symbol=symbol, timeframe=timeframe, start=start, end=end)
+            info = getattr(self.client, "last_fetch", None)
+            if strict_end and info is not None and info.effective_end_ms < requested_end_ms:
+                raise StrictEndError("requested end is later than the final-data boundary")
             candles, records = self._normalize(rows, symbol, timeframe)          # full validation BEFORE any write
             row_count = len(candles)      # "verified" = the client's checks AND this service's own conversion both passed
             digest = hash_candles(records)
