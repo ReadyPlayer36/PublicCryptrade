@@ -1,18 +1,16 @@
-# OBS-01 / OBS-02 experiment protocol (DRAFT v0.3 for reviewer evaluation)
+# OBS-01 / OBS-02 experiment protocol (DRAFT v0.4 for reviewer evaluation)
 
 Status: **draft, not approved, nothing has been executed, no harness code exists, and no live request has been made.** Milestone 1 remains **BLOCKED**. No live data is collected until the reviewer approves this protocol AND a separately reviewed harness commit (section 11). Frozen files are untouched; this is a new document.
 
 Scope: public read-only Binance Spot market data only. No keys, no orders, no private endpoints, no futures/margin.
 
-## 0. Changes from v0.2 (reviewer findings)
+## 0. Changes from v0.3 (reviewer findings)
 
 | Item | Where addressed |
 |---|---|
-| 1. Completion-aware single pacer instead of fixed start times; expanded PACE-5 audit (completion order, non-overlap, rolling caps from monotonic timestamps) | sections 3, 5, 6 |
-| 2. Exact server-time-to-monotonic estimation, uncertainty bounds, failure and fallback behavior | sections 5.2, 5.3, 6 |
-| 3. Quote-volume window selection re-framed as a pre-registered historical activity proxy for time-of-day selection only | section 9 and Q4 |
-
-Also adjusted for consistency: V3 and the `bound_k` formula (section 8) now carry the 1 ms timestamp truncation and the drift allowance `delta`.
+| 1. Drift widening corrected: both interval endpoints widen from the request START `a_j` | section 5.2 |
+| 2. Formal derivation that widening from `a_j` is conservative; offline golden-vector test specification (nonzero durations, drift both directions, uncertainty boundary, fixed-point deadline) | sections 5.4 and 5.5 |
+| 3. The 18 s duration limit (strict deadline plus audit backstop); PACE-7 boundary admission tests; PACE-5 window boundary conditions (open-left, closed-right) | sections 3, 5.5 and 6 |
 
 ## 1. Facts, documentation conclusions (U1-U3), assumptions
 
@@ -35,7 +33,7 @@ Documentation conclusions. These are my reading of the official Binance develope
 - The cooldown file `data/binance_cooldown.json` is honored and written on 418/429; a corrupt or active cooldown aborts the run.
 - The harness lives outside `src/trading_app/` and outside pytest collection, runs only on the owner's machine (never CI), and refuses to start without `--live`. Offline tests (fake HTTP, fake clock, fake pacer) cover the harness and the analysis code in CI.
 - Finality-relevant times come only from `/api/v3/time`. The local MONOTONIC clock is the only local clock used (to schedule sleeps and to measure elapsed durations); the local wall clock is never used for scheduling or measurement. Production code is unchanged.
-- Timeouts: connect 5 s, read 12 s (above the documented 10 s API processing timeout, so a documented -1007 response is not cut off).
+- Timeouts: connect 5 s, read 12 s (above the documented 10 s API processing timeout, so a documented -1007 response is not cut off), plus a STRICT total deadline per request (section 3, rule PACE-8).
 
 ## 3. Pacing rules and the completion-aware scheduler (every request, including `/time`)
 
@@ -44,18 +42,19 @@ A request record has: `seq` (1, 2, 3, ...), `start_ns` and `end_ns` (local MONOT
 Rules:
 - PACE-1: one request in flight; request `n+1` may start only after request `n` has completed.
 - PACE-2: `start(n+1) >= start(n) + 0.6 s`.
-- PACE-3: for every request start `t`, at most 2 starts in `(t - 1 s, t]` and at most 60 starts in `(t - 60 s, t]`. Timed-out and failed attempts count.
+- PACE-3: for every request start `t`, at most 2 starts in the window `(t - 1 s, t]` and at most 60 starts in `(t - 60 s, t]`. Every window is OPEN on the left and CLOSED on the right, evaluated on integer nanoseconds: a start exactly `W` after an earlier start does NOT count that earlier start (it has left the window), while a start 1 ns less than `W` after it does. Timed-out, cancelled and failed attempts count.
 - PACE-4: one pacer object issues every request type (clock sync, observation `/time`, klines, reference, sweep, pre-registration query, OBS-01); it is the only network egress of the harness. No bypass, no exemptions.
-- PACE-6 (completion-aware scheduling, no fixed start times): for the next request the pacer computes `earliest = max(end(prev), start(prev) + 0.6 s, release)`, where `release` is the earliest instant at which PACE-3 would still hold if the request started then (the oldest start leaving the 1 s or 60 s window). The request starts at `max(earliest, target)`, where `target` is the monotonic deadline of section 5.2 for the FIRST request of a group; requests inside a group have no target and start at `earliest`. The wait is a monotonic-clock sleep. The pacer never starts early and never "catches up" by shortening a gap. A slow response simply delays everything after it.
-- PACE-7 (group admission): before the first request of a group, the pacer computes its earliest possible start `m_e` and the server-time interval `[m_e + theta_lo, m_e + theta_hi]` (section 5.2). If `m_e + theta_lo > T + o + tol` (the V1 window can no longer be met), the group is NOT started (outcome MISSED-WINDOW), the boundary is TIMING-INVALID and no further group of that boundary is sent.
+- PACE-6 (completion-aware scheduling, no fixed start times): for the next request the pacer computes `earliest = max(end(prev), start(prev) + 0.6 s, release)`, where `release` is the earliest instant at which PACE-3 would still hold if the request started then (the oldest start leaving the 1 s or 60 s window). The request starts at `max(earliest, target)`, where `target` is the monotonic deadline of section 5.2 for the FIRST request of a group; requests inside a group have no target and start at `earliest`. The wait is a monotonic-clock sleep. The pacer never starts early and never "catches up" by shortening a gap. A slow response simply delays everything after it. With the open-left/closed-right windows, `release` is exactly `start(oldest counted request) + W` (for example a 61st request after 60 starts within 60 s may start exactly 60 s after the oldest of them, not earlier).
+- PACE-7 (group admission): before the first request of a group, the pacer computes its earliest possible start `m_e` (monotonic, in integer nanoseconds) and the server-time interval `[m_e + theta_lo, m_e + theta_hi]` from the estimator of section 5.2 evaluated at `m_e`. The group is SKIPPED (outcome MISSED-WINDOW; the group and the rest of that boundary are not sent; the boundary is TIMING-INVALID) if and only if `m_e + theta_lo > T + o + tol` (strict inequality: even the earliest possible server time is already past the V1 window). Only `theta_lo` decides: a group that is merely POSSIBLY late (`m_e + theta_lo <= T + o + tol < m_e + theta_hi`) is started, and V1 judges it from the measured `S1`. A group exactly on the limit (`m_e + theta_lo = T + o + tol`) is admitted; one that is infeasible by 1 ns is skipped. The decision is recorded (with `m_e`, `theta_lo`, `theta_hi`, `T + o + tol`) in the evidence.
+- PACE-8 (strict total-request deadline): every request carries a hard total deadline of 17.0 s from its `start_ns` (connect 5 s + read 12 s), enforced by the harness, not only by the HTTP library's phase timeouts: a watchdog cancels the request and closes its connection at the deadline, the outcome is TIMEOUT and `end_ns` is taken when the cancellation has finished. No other request starts before that. The audit limit in check (e) is a BACKSTOP (18 s = the 17 s deadline plus 1 s cancellation allowance) that detects a failed enforcement; it is not the mechanism that enforces the limit.
 - No retry, no request after an ABORT.
 
 PACE-5 post-run audit (deterministic, from the recorded monotonic timestamps only). The run is INVALID-PACING (harness defect, treated as an incident, no result used) if ANY check fails:
 - (a) Integrity: `seq` is contiguous from 1 to `N`; every `seq` has exactly one start and one completion record; timestamps are integers; `end_ns >= start_ns`; start times are non-decreasing in `seq`; no record exists after an ABORT.
 - (b) Completion ordering and non-overlap: completions occur in the same order as starts, and `end_ns(n) <= start_ns(n+1)` for every `n` (a request never starts before the previous one completed).
 - (c) Spacing: `start_ns(n+1) - start_ns(n) >= 600,000,000` for every `n` (exact integer comparison).
-- (d) Rolling caps: for every `n`, the number of requests with `start_ns` in `(start_ns(n) - 1e9, start_ns(n)]` is at most 2, and in `(start_ns(n) - 60e9, start_ns(n)]` at most 60.
-- (e) Durations: every duration is at most `connect timeout + read timeout + 1 s` (18 s).
+- (d) Rolling caps: for every `n`, the number of requests with `start_ns` in `(start_ns(n) - 1e9, start_ns(n)]` is at most 2, and in `(start_ns(n) - 60e9, start_ns(n)]` at most 60 (open left, closed right, integer nanoseconds; the request `n` itself is counted). Examples: starts at 0, 600,000,000 and 1,000,000,000 ns pass the 1 s cap (the start at 0 is outside `(0, 1e9]`), starts at 0, 600,000,000 and 999,999,999 ns fail it.
+- (e) Durations (backstop for PACE-8): every `end_ns - start_ns` is at most 18,000,000,000 ns; a TIMEOUT caused by the strict deadline has a duration of at least 17,000,000,000 ns and at most 18,000,000,000 ns.
 - (f) Group integrity: the requests of one group are consecutive in `seq`, in the defined order (S1, 4h, 1h, 15m, 5m, S2 for a 4-timeframe group); groups of a boundary appear in order g0, g1, g2, g3, ref; no foreign request lies inside a group.
 - (g) Egress check: `N` equals the number of JSONL request records, equals the request counter of the single HTTP wrapper, and equals the count in the run manifest.
 - For OBS-01 the same audit applies with the spacing in (c) replaced by `>= 2,000,000,000` ns and the caps by 1 per 2 s and 30 per minute.
@@ -135,8 +134,9 @@ Notation. All times in milliseconds (converted from monotonic ns). For every `/t
 Offset model. `server_time = mono + theta`, with `theta` an unknown constant (plus a bounded rate error, below). Each sample bounds it:
 `theta in I_j = [ s_j - b_j , s_j + 1 - a_j ]`, width `RTT_j + 1 ms`.
 
-Drift allowance (assumption, documented): the server and local monotonic clocks advance at rates that differ by at most `delta = 100 ppm` (1e-4). At a later monotonic time `t >= b_j` the interval of sample `j` is widened:
-`I_j(t) = [ s_j - b_j - delta (t - b_j) , s_j + 1 - a_j + delta (t - a_j) ]`.
+Drift allowance (assumption, documented): the offset `theta` is a function of the monotonic time with `|theta(m2) - theta(m1)| <= delta |m2 - m1|` and `delta = 100 ppm` (1e-4), i.e. the server and local monotonic clocks differ in rate by at most `delta`, in either direction. At a later monotonic time `t >= b_j` the interval of sample `j` is widened on BOTH endpoints from the request START `a_j`:
+`I_j(t) = [ s_j - b_j - delta (t - a_j) , s_j + 1 - a_j + delta (t - a_j) ]`.
+Its width is `RTT_j + 1 ms + 2 delta (t - a_j)`. (v0.3 widened the lower endpoint from `b_j`; that is superseded.)
 
 Estimator at time `t` (the decision time):
 - Sample set: every `/time` call of the run with `b_j >= t - 600 s` (the 3 resync calls, every S1 and S2, the initial sync calls).
@@ -162,6 +162,42 @@ Boundary anchors: `T` is a server-time epoch value (multiple of `I`). The resync
 - A sleep that wakes more than 500 ms after its deadline is recorded as a diagnostic; whether the group is usable is decided only by V1-V4.
 - The parameters `delta`, `W_max`, the 600 s window, the 60 s fallback window, the 10-sample start, the 4 extra samples and the 3-boundary stop are written into the run manifest.
 
+### 5.4 Derivation: why widening from `a_j` is conservative
+
+Model. Let `theta(m) = server_time(m) - m` with `|theta(m2) - theta(m1)| <= delta |m2 - m1|` (both directions). For sample `j` the server generated its timestamp at an unknown monotonic instant `g_j` with `a_j <= g_j <= b_j`; the true server time then was `sigma_j` with `s_j <= sigma_j < s_j + 1` (truncation to whole milliseconds).
+
+1. At the generation instant: `theta(g_j) = sigma_j - g_j`, so `s_j - g_j <= theta(g_j) < s_j + 1 - g_j`. Since `g_j <= b_j` and `g_j >= a_j`: `theta(g_j)` lies in `[s_j - b_j, s_j + 1 - a_j]`.
+2. At a later time `t >= b_j >= g_j`: `|theta(t) - theta(g_j)| <= delta (t - g_j) <= delta (t - a_j)`, because `g_j >= a_j`. Hence
+   `theta(t) in [s_j - b_j - delta (t - a_j), s_j + 1 - a_j + delta (t - a_j)] = I_j(t)`.
+   The value of `g_j` is unknown, so any widening that is at least as large as the worst case over all `g_j` in `[a_j, b_j]` is sound; `t - a_j` is the largest possible `t - g_j`, so using it for both endpoints is sound for every `g_j`.
+3. Conservativeness. The exact worst-case envelope of the model, taking the extreme `g_j` for each endpoint, is: upper `s_j + 1 - a_j + delta (t - a_j)` (worst case `g_j = a_j`) and lower `s_j - b_j - delta (t - b_j)` (worst case `g_j = b_j`). The v0.4 interval equals this envelope at the upper endpoint and is wider than it at the lower endpoint by exactly `delta (b_j - a_j) = delta RTT_j` (0.018 ms for a 180 ms request, 0.1 ms for 1 s). So `I_j(t)` is a superset of the envelope: it can only make the estimator's `theta_lo` smaller and `theta_hi` larger, never exclude a feasible offset, and it needs no `b_j` for its widening term. Note for the reviewer: under this model the v0.3 lower endpoint was the tight envelope (golden vector GV-3 shows a feasible offset exactly on that edge), so it was not violated by any feasible offset; the symmetric form is adopted as requested because it is simpler, strictly more conservative by `delta RTT_j`, and has the same widening term on both sides. If the reviewer has a drift model under which the v0.3 form fails, please state it so a vector can be added.
+4. Consequences of a wider `theta` interval: `theta_lo` smaller means the start deadline `D(X) = X - theta_lo` is later (never early), PACE-7 skips less eagerly (it skips only when certainly late), and `w(t)` is larger by `2 delta (t - a_j)` (up to 120 ms for a sample at the edge of the 600 s window), which is already included in the `W_max = 250 ms` adequacy test because the test uses this same formula.
+5. Consistency with the other formulas: the same step gives the `bound_k` of section 8 (`sigma(end_k) <= (s1 + 1) + (end_k - a_1)(1 + delta)`) and the V3 interval (the difference of two samples is within the local elapsed time plus `delta` times that time plus 1 ms on each side).
+
+### 5.5 Offline golden-vector test specification (normative; computed independently, exact arithmetic)
+
+All vectors use `delta = 1/10000` and exact rational arithmetic (the implementation uses integer nanoseconds with endpoints rounded outward: lower floor, upper ceil, deadlines rounded up; tests compare with the exact values below, tolerance 1 ns). Times in ms. The vectors are computed by a separate script from the formulas above, not by the implementation under test; the CI suite must fail if the implementation changes any of them.
+
+GV-1 nonzero request duration, evaluated at `t = b`: sample `a = 1000`, `b = 1180` (RTT 180), `s = 1,700,000,001,234`. Expected `I = [1,700,000,000,053.982 , 1,700,000,000,235.018]`, width 181.036 (RTT + 1 + 2 delta RTT).
+
+GV-2 widening with sample age, same sample, `t = 601,000`: `delta (t - a) = 60` exactly. Expected `I = [1,699,999,999,994.000 , 1,700,000,000,295.000]`, width 301. Negative test: the v0.3 lower endpoint `1,699,999,999,994.018` must be REJECTED (the implementation must return 994.000).
+
+GV-3 drift in both directions, ground-truth containment: same sample, `t = 601,000`, true offset path `theta(m) = theta(g) + r (m - g)` with `r = +delta` and `r = -delta`, generation instant `g` in {1000, 1090, 1180}, truncation residue `eps` in {0, 0.999999999}, `sigma_g = s + eps`. For all 12 combinations `theta(t)` must lie in `I(t)`. Required margins: `g = 1180, r = -delta, eps = 0` gives `theta(t) - lower = 0.018` (it lies exactly on the v0.3 lower edge); `g = 1000, r = +delta, eps = 0.999999999` gives `upper - theta(t) = 1e-9` (it lies on the upper edge); `g = 1000, r = +delta, eps = 0` gives margins 300 and 1; `g = 1000, r = -delta, eps = 0` gives 180 and 121.
+
+GV-4 uncertainty boundary, `W_max = 250 ms`: one sample `a = 1000`, `b = 1200`. At `t = 246,000` the width is `201 + 2 delta 245,000 = 250.000` exactly: SYNC-ADEQUATE (the test is `w <= W_max`). At `t = 246,005` the width is `250.001`: NOT adequate. A width exactly 1 ns above `W_max` is NOT adequate; exactly `W_max` is.
+
+GV-5 PACE-7 admission at the boundary: sample `a = 0`, `b = 200`, `s = 1,700,000,002,710`; `T = 1,700,000,100,000`, `o = 0`, `tol = 2500` so `T + o + tol = 1,700,000,102,500`; `m_e = 100,000` ms. `theta_lo(m_e) = s - b - delta (m_e - a) = 1,700,000,002,510 - 10 = 1,700,000,002,500`, so `m_e + theta_lo = 1,700,000,102,500`, exactly the limit: ADMITTED. With `m_e + 1 ns`, `m_e + theta_lo = limit + 9.999e-7 ms`: SKIPPED (MISSED-WINDOW). At `m_e = 100,000` the upper side is `m_e + theta_hi = 1,700,000,102,721`, i.e. 221 ms past the limit, yet the group is admitted (only `theta_lo` decides), and V1 would judge the measured `S1`.
+
+GV-6 fixed-point deadline recomputation, one sample `a = 0`, `b = 200`, `s = 1,700,000,000,200`, target `X = 1,700,000,300,000`: `D(m) = 300,000 + delta m`. Iteration from `m = 0`: 300,000.0, 300,030.0, 300,030.003, 300,030.0030003, then constant to 1e-7. Closed form `m* = 300,000 / (1 - delta) = 300,030.0030003000300...` ms; the first integer-nanosecond instant satisfying `m >= D(m)` is `300,030,003,001 ns`; at `300,030,003,000 ns` the condition is false. The wake-up loop (sleep to `D(now)`, wake, recompute, sleep again if `now < D(now)`) must start the request at exactly `300,030,003,001 ns` and must wake at least twice (at 300,000 and 300,030 ms the deadline has moved later).
+
+GV-7 fixed point with two samples (the minimum over samples): samples `(a=0, b=200, s=1,700,000,000,200)` and `(a=100,000, b=100,060, s=1,700,000,100,062)`, same `X`. Per-sample roots `m_j = (X - s_j + b_j - delta a_j) / (1 - delta)` are 300,030.0030003 and 300,018.00180018; `m* = min = 300,018.00180018` ms, first valid instant `300,018,001,801 ns` (the previous nanosecond fails). Intersection at `t = 300,000`: sample lower endpoints `1,699,999,999,970` and `1,699,999,999,982`, upper endpoints `1,700,000,000,231` and `1,700,000,000,083`, so `Theta = [1,699,999,999,982.0 , 1,700,000,000,083.0]`, width 101.0.
+
+GV-8 PACE-5/PACE-3 window boundaries (starts in ns): (i) 61 starts at `0, 1e9, ..., 60e9` ns (spacing 1 s): the start at `60e9` sees window `(0, 60e9]` with 60 starts: PASS; a 61st start at `59,999,999,999` ns instead: FAIL (61 in the window). (ii) starts `0, 600e6, 1e9`: 1 s cap PASS, but spacing check (c) FAILS for the third (400 ms); starts `0, 600e6, 999,999,999`: 1 s cap FAIL. (iii) pacer release: 60 starts at `k x 600e6` (k = 0..59, last at 35.4 s); the 61st request must start at exactly `60,000,000,000` ns (60 s cap binding, PACE-2 alone would allow 36.0 s); 1 ns earlier is a violation. (iv) spacing: a gap of 599,999,999 ns FAILS check (c), 600,000,000 ns passes.
+
+GV-9 strict deadline (PACE-8): a simulated request that would take 20 s is cancelled at 17.0 s (TIMEOUT, duration in [17 s, 18 s]); a record of 18,000,000,001 ns fails check (e); a request that completes at 16.9 s is not affected.
+
+Each golden vector is a data file read by the offline tests (`tests/fixtures/vectors/`), not copied into the implementation.
+
 ## 6. Deterministic outcomes when timing windows cannot be met
 
 Every classification below is computed by the pure analysis function from the evidence files; no human judgment is involved.
@@ -169,9 +205,10 @@ Every classification below is computed by the pure analysis function from the ev
 | Event | Classification |
 |---|---|
 | V1 early or late, V2 exceeded, V3 violated, a timeout or connection failure on any request in the group | the group is TIMING-INVALID; its boundary is TIMING-INVALID (kept in the evidence, never counted) |
-| PACE-7 admission fails (V1 window can no longer be met) | MISSED-WINDOW: the group and the rest of the boundary are not sent; boundary TIMING-INVALID |
+| PACE-7 admission fails (`m_e + theta_lo > T + o + tol`, strict) | MISSED-WINDOW: the group and the rest of the boundary are not sent; boundary TIMING-INVALID |
 | not SYNC-ADEQUATE at `T - 10 s` (section 5.3) | SYNC-SKIPPED: no group sent; boundary TIMING-INVALID; 3 in a row stop the session as INCONCLUSIVE-TIMING |
 | not SYNC-ADEQUATE after the initial 10 samples | SYNC-INADEQUATE-AT-START: the run does not start |
+| a request reaches the strict 17.0 s deadline (PACE-8) | outcome TIMEOUT: the group and boundary are TIMING-INVALID (it counts as a request without an HTTP response) |
 | 3 consecutive requests without an HTTP response | ABORT (INCIDENT-NETWORK), run stops |
 | HTTP status other than 200 (including 403, 418, 429, any 3xx, any 5xx), non-JSON, wrong shape, wrong host/path, a row with a wrong open time, `X-MBX-USED-WEIGHT-1M` above 600, server time going backwards by more than 1 s | ABORT (INCIDENT), cooldown written for 418/429, owner reports to the reviewer before any rerun |
 | any PACE-5 check (a)-(g) of section 3 fails in the post-run audit, or a monotonic regression is seen | INVALID-PACING, whole run unusable, reported as a harness defect |
