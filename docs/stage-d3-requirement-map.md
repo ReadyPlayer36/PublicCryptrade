@@ -18,3 +18,8 @@ Implementer-produced evidence; the independent reviewer is asked to confirm each
 - Duplicates cannot occur in a healthy database (unique constraint); they are tested on a deliberately damaged table without the constraint.
 - A first connection switches the file to WAL mode (journal header change, not a data write); the byte-identity test accounts for this.
 - Not covered here: live evidence (LIVE-04 future-end run), OBS-01/OBS-02, lag approval. Milestone 1 remains BLOCKED on those and on the final gate.
+
+## Status of the mutation evidence (reviewer condition)
+- The 13-mutation run recorded for Stage D3 (`mutation-log.txt`, produced on commit `ef9fe11`) is **supplementary code-level validation only**. It was produced by an ad-hoc script that mutates the new D3 code (`cli.py`, `service.py` strict-end, `verification.py`) and checks that the D3 test files fail.
+- It is **not** the frozen mutation gate. The frozen 16-required-mutant matrix run (`tools/run_mutations.py`, each mutant with its bound killer test) is **reserved for the final release gate** and is not claimed, replaced or satisfied by this run.
+- Nothing in Stage D3 changes the Milestone 1 status: Milestone 1 remains BLOCKED.
