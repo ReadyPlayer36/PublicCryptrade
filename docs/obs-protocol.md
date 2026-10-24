@@ -1,16 +1,16 @@
-# OBS-01 / OBS-02 experiment protocol (DRAFT v0.4 for reviewer evaluation)
+# OBS-01 / OBS-02 experiment protocol (DRAFT v0.5 for reviewer evaluation)
 
 Status: **draft, not approved, nothing has been executed, no harness code exists, and no live request has been made.** Milestone 1 remains **BLOCKED**. No live data is collected until the reviewer approves this protocol AND a separately reviewed harness commit (section 11). Frozen files are untouched; this is a new document.
 
 Scope: public read-only Binance Spot market data only. No keys, no orders, no private endpoints, no futures/margin.
 
-## 0. Changes from v0.3 (reviewer findings)
+## 0. Changes from v0.4 (reviewer finding)
 
 | Item | Where addressed |
 |---|---|
-| 1. Drift widening corrected: both interval endpoints widen from the request START `a_j` | section 5.2 |
-| 2. Formal derivation that widening from `a_j` is conservative; offline golden-vector test specification (nonzero durations, drift both directions, uncertainty boundary, fixed-point deadline) | sections 5.4 and 5.5 |
-| 3. The 18 s duration limit (strict deadline plus audit backstop); PACE-7 boundary admission tests; PACE-5 window boundary conditions (open-left, closed-right) | sections 3, 5.5 and 6 |
+| Maximum widening for a sample at the edge of the retention window corrected from 120 ms to 123.4 ms (age from request start up to 617 s) | section 5.4, item 4 |
+
+Nothing else changed: the derivation, formulas and golden vectors are as in v0.4.
 
 ## 1. Facts, documentation conclusions (U1-U3), assumptions
 
@@ -171,7 +171,7 @@ Model. Let `theta(m) = server_time(m) - m` with `|theta(m2) - theta(m1)| <= delt
    `theta(t) in [s_j - b_j - delta (t - a_j), s_j + 1 - a_j + delta (t - a_j)] = I_j(t)`.
    The value of `g_j` is unknown, so any widening that is at least as large as the worst case over all `g_j` in `[a_j, b_j]` is sound; `t - a_j` is the largest possible `t - g_j`, so using it for both endpoints is sound for every `g_j`.
 3. Conservativeness. The exact worst-case envelope of the model, taking the extreme `g_j` for each endpoint, is: upper `s_j + 1 - a_j + delta (t - a_j)` (worst case `g_j = a_j`) and lower `s_j - b_j - delta (t - b_j)` (worst case `g_j = b_j`). The v0.4 interval equals this envelope at the upper endpoint and is wider than it at the lower endpoint by exactly `delta (b_j - a_j) = delta RTT_j` (0.018 ms for a 180 ms request, 0.1 ms for 1 s). So `I_j(t)` is a superset of the envelope: it can only make the estimator's `theta_lo` smaller and `theta_hi` larger, never exclude a feasible offset, and it needs no `b_j` for its widening term. Note for the reviewer: under this model the v0.3 lower endpoint was the tight envelope (golden vector GV-3 shows a feasible offset exactly on that edge), so it was not violated by any feasible offset; the symmetric form is adopted as requested because it is simpler, strictly more conservative by `delta RTT_j`, and has the same widening term on both sides. If the reviewer has a drift model under which the v0.3 form fails, please state it so a vector can be added.
-4. Consequences of a wider `theta` interval: `theta_lo` smaller means the start deadline `D(X) = X - theta_lo` is later (never early), PACE-7 skips less eagerly (it skips only when certainly late), and `w(t)` is larger by `2 delta (t - a_j)` (up to 120 ms for a sample at the edge of the 600 s window), which is already included in the `W_max = 250 ms` adequacy test because the test uses this same formula.
+4. Consequences of a wider `theta` interval: `theta_lo` smaller means the start deadline `D(X) = X - theta_lo` is later (never early), PACE-7 skips less eagerly (it skips only when certainly late), and `w(t)` is larger by `2 delta (t - a_j)` (up to 123.4 ms for a sample at the edge of the retention window: retention uses the completion time, `b_j >= t - 600 s`, and a request may last up to 17 s (PACE-8), so `t - a_j` can reach 617 s and `2 delta (t - a_j) = 2 x 1e-4 x 617,000 ms = 123.4 ms`), which is already included in the `W_max = 250 ms` adequacy test because the test uses this same formula.
 5. Consistency with the other formulas: the same step gives the `bound_k` of section 8 (`sigma(end_k) <= (s1 + 1) + (end_k - a_1)(1 + delta)`) and the V3 interval (the difference of two samples is within the local elapsed time plus `delta` times that time plus 1 ms on each side).
 
 ### 5.5 Offline golden-vector test specification (normative; computed independently, exact arithmetic)
