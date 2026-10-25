@@ -1,7 +1,10 @@
-"""HTTP transport: allow-listed host, no redirects, no proxies, single attempt, strict total deadline (PACE-8).
+"""HTTP transport: allow-listed host, no redirects, no proxies, single attempt, strict start-anchored deadline (PACE-8).
 
 Built on http.client so the watchdog can really interrupt a blocked request: it calls socket.shutdown(SHUT_RDWR) on the
 connection's socket (closing the client object alone does NOT wake a blocked read; verified by experiment) and then closes it.
+DNS resolution cannot be interrupted: a shared CancellationState is checked after connection setup and immediately before the
+request is written, so nothing is ever sent after a cancellation, and the transport is permanently disabled when a cancellation
+does not complete. The transport is also permanently disabled by any non-200 response.
 """
 from __future__ import annotations
 
@@ -13,18 +16,24 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 from urllib.parse import urlencode, urlsplit
 
-from tools.obs.params import (CANCEL_GRACE_NS, CONNECT_TIMEOUT_S, DEADLINE_NS, HOST, READ_TIMEOUT_S, RESPONSE_HEADER_WHITELIST, S)
+from tools.obs.clock import Clock, SystemClock
+from tools.obs.params import (CANCEL_GRACE_NS, CONNECT_TIMEOUT_S, HOST, READ_TIMEOUT_S, RESPONSE_HEADER_WHITELIST, S)
 from tools.obs.specs import RequestSpec, validate_spec
-from tools.obs.watchdog import run_with_deadline
+from tools.obs.watchdog import Cancelled, CancellationFailed, CancellationState, run_with_deadline
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 REQUEST_HEADERS = {"Accept": "application/json", "User-Agent": "binance-research-obs/0.1"}
 MAX_BODY_BYTES = 4 * 1024 * 1024
 
 # Outcomes without an HTTP response
-DEADLINE = "DEADLINE"                # strict 17 s deadline reached, request cancelled
+DEADLINE = "DEADLINE"                # strict 17 s deadline (anchored at the pacer's start_ns) reached, request cancelled
 TIMEOUT = "TIMEOUT"                  # connect/read timeout raised by the socket layer
 CONNECT_ERROR = "CONNECT_ERROR"      # any other transport failure
+CANCEL_FAILED = "CANCEL_FAILED"      # the cancellation did not complete within the allowance (incident)
+
+
+class TransportDisabled(RuntimeError):
+    """The transport was permanently disabled (non-200 response or failed cancellation); nothing more is sent."""
 
 
 @dataclass(frozen=True)
@@ -52,12 +61,28 @@ def default_connection_factory(scheme: str, host: str, port: int | None, timeout
     return http.client.HTTPConnection(host, port, timeout=timeout)
 
 
+def _close_quietly(conn: Any) -> None:
+    sock = getattr(conn, "sock", None)
+    if sock is not None:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+    try:
+        conn.close()
+    except OSError:
+        pass
+
+
 class HttpTransport:
     """Sends allow-listed GET requests. `base_url` must be https://data-api.binance.vision; a loopback http URL is accepted
-    only for offline tests. Environment proxies are never used (http.client does not read them)."""
+    only for offline tests. Environment proxies are never used (http.client does not read them).
+
+    `send` takes the ABSOLUTE monotonic deadline (the pacer's start_ns plus the 17 s deadline), measured on `clock`, so the
+    total time since the pacer started the request, not since this method was entered, is what is limited."""
 
     def __init__(self, *, base_url: str = f"https://{HOST}", connection_factory: ConnectionFactory = default_connection_factory,
-                 deadline_ns: int = DEADLINE_NS, grace_ns: int = CANCEL_GRACE_NS) -> None:
+                 grace_ns: int = CANCEL_GRACE_NS, clock: Clock | None = None) -> None:
         parts = urlsplit(base_url)
         official = parts.scheme == "https" and parts.hostname == HOST and parts.port in (None, 443)
         loopback = parts.scheme == "http" and parts.hostname in _LOOPBACK
@@ -65,25 +90,53 @@ class HttpTransport:
             raise ValueError("base_url must be https://data-api.binance.vision (loopback http is for offline tests only)")
         self._scheme, self._host, self._port = parts.scheme, parts.hostname, parts.port
         self._factory = connection_factory
-        self.deadline_ns = deadline_ns
         self.grace_ns = grace_ns
+        self.clock: Clock = clock if clock is not None else SystemClock()
         self.sent = 0                                     # egress counter for the PACE-5 (g) cross-check
+        self._lock = threading.Lock()
+        self._disabled: str | None = None
+
+    # ----- permanent disablement -----
+    @property
+    def disabled_reason(self) -> str | None:
+        with self._lock:
+            return self._disabled
+
+    def disable(self, reason: str) -> None:
+        """Permanently disable the transport; there is no way back (a new run needs a new instance)."""
+        with self._lock:
+            if self._disabled is None:
+                self._disabled = reason
 
     def close(self) -> None:                              # no persistent connection is kept between requests
         return None
 
-    def send(self, spec: RequestSpec) -> TransportResult:
+    # ----- sending -----
+    def send(self, spec: RequestSpec, *, deadline_at_ns: int) -> TransportResult:
+        with self._lock:
+            if self._disabled is not None:
+                raise TransportDisabled(self._disabled)
         validate_spec(spec)
         self.sent += 1
+        remaining_ns = deadline_at_ns - self.clock.now_ns()
+        if remaining_ns <= 0:                             # the deadline (anchored at start_ns) is already over: send nothing
+            return TransportResult(None, DEADLINE)
         target = spec.path + ("?" + urlencode(spec.params) if spec.params else "")
+        state = CancellationState()
         holder: dict[str, Any] = {}
 
         def call() -> TransportResult:
             conn = self._factory(self._scheme, self._host, self._port, CONNECT_TIMEOUT_S)
             holder["conn"] = conn
-            conn.connect()                                # TLS handshake included, bounded by the connect timeout
+            if state.cancelled:                           # cancelled before setup even started
+                _close_quietly(conn)
+                raise Cancelled("cancelled before connection setup")
+            conn.connect()                                # DNS + TCP + TLS: bounded by the connect timeout except DNS
             if conn.sock is not None:
                 conn.sock.settimeout(READ_TIMEOUT_S)
+            if not state.begin_send():                    # checked after setup and immediately before the request is written
+                _close_quietly(conn)
+                raise Cancelled("cancelled before the request was sent")
             conn.request("GET", target, headers=dict(REQUEST_HEADERS))
             response = conn.getresponse()
             body = response.read(MAX_BODY_BYTES + 1)
@@ -94,20 +147,14 @@ class HttpTransport:
 
         def cancel() -> None:
             conn = holder.get("conn")
-            if conn is None:
-                return
-            sock = getattr(conn, "sock", None)
-            if sock is not None:
-                try:
-                    sock.shutdown(socket.SHUT_RDWR)       # wakes a blocked read/write immediately
-                except OSError:
-                    pass
-            try:
-                conn.close()
-            except OSError:
-                pass
+            if conn is not None:
+                _close_quietly(conn)
 
-        outcome = run_with_deadline(call, cancel, deadline_s=self.deadline_ns / S, grace_s=self.grace_ns / S)
+        try:
+            outcome = run_with_deadline(call, cancel, deadline_s=remaining_ns / S, grace_s=self.grace_ns / S, state=state)
+        except CancellationFailed:
+            self.disable(CANCEL_FAILED)                   # the orphaned worker can no longer send (state is cancelled)
+            raise
         conn = holder.get("conn")
         if conn is not None and not outcome.timed_out:
             try:
@@ -117,5 +164,10 @@ class HttpTransport:
         if outcome.timed_out:
             return TransportResult(None, DEADLINE)
         if outcome.error is not None:
+            if isinstance(outcome.error, Cancelled):
+                return TransportResult(None, DEADLINE)
             return TransportResult(None, TIMEOUT if isinstance(outcome.error, (TimeoutError, socket.timeout)) else CONNECT_ERROR)
-        return outcome.value
+        result = outcome.value
+        if result.status is not None and result.status != 200:
+            self.disable(f"HTTP-{result.status}")         # any non-200 response ends all egress on this transport
+        return result

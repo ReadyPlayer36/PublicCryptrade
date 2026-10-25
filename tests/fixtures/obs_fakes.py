@@ -29,12 +29,30 @@ class ScriptedTransport:
         self.results = list(results) if results is not None else None
         self.sent: list[RequestSpec] = []
         self.starts: list[int] = []
+        self.deadlines: list[int] = []
+        self.disabled: str | None = None
 
-    def send(self, spec: RequestSpec) -> TransportResult:
+    def disable(self, reason: str) -> None:
+        if self.disabled is None:
+            self.disabled = reason
+
+    def send(self, spec: RequestSpec, *, deadline_at_ns: int) -> TransportResult:
+        if self.disabled is not None:
+            raise RuntimeError(f"transport disabled: {self.disabled}")
         self.sent.append(spec)
         self.starts.append(self.clock.now)
+        self.deadlines.append(deadline_at_ns)
         duration = self.durations.pop(0) if self.durations else 0
         self.clock.now += duration
         if self.results:
             return self.results.pop(0)
         return TransportResult(200, None, {}, b"[]")
+
+
+def audit_all(records, **kw):
+    """audit_pace with the three egress counters supplied (they are required; tests pass the true number by default)."""
+    from tools.obs.audit import audit_pace
+    kw.setdefault("jsonl_count", len(records))
+    kw.setdefault("wrapper_count", len(records))
+    kw.setdefault("manifest_count", len(records))
+    return audit_pace(records, **kw)

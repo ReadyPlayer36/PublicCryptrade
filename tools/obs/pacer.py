@@ -2,21 +2,35 @@
 from __future__ import annotations
 
 import bisect
+import threading
 from dataclasses import dataclass
 from typing import Protocol
 
 from tools.obs.clock import Clock
-from tools.obs.params import (MAX_CONSECUTIVE_NO_RESPONSE, OBS01_SPACING_NS, OBS01_WINDOWS, SPACING_NS, WINDOWS)
+from tools.obs.params import (DEADLINE_NS, MAX_CONSECUTIVE_NO_RESPONSE, OBS01_SPACING_NS, OBS01_WINDOWS, SPACING_NS, WINDOWS)
 from tools.obs.specs import RequestSpec, validate_spec
-from tools.obs.transport import TransportResult
+from tools.obs.transport import CANCEL_FAILED, TransportResult
+from tools.obs.watchdog import CancellationFailed
 
 
 class Transport(Protocol):
-    def send(self, spec: RequestSpec) -> TransportResult: ...
+    def send(self, spec: RequestSpec, *, deadline_at_ns: int) -> TransportResult: ...
 
 
 class PacerAborted(RuntimeError):
     """The run was aborted; no further request may be sent."""
+
+
+class ConcurrentExecution(RuntimeError):
+    """execute() was called while another request was in flight (single-flight rule); nothing was sent or recorded."""
+
+
+class NonOkResponse(RuntimeError):
+    """A response other than HTTP 200 was received: the run is aborted and all egress is disabled. `record` holds the evidence."""
+
+    def __init__(self, record: "RequestRecord") -> None:
+        super().__init__(f"HTTP {record.status}")
+        self.record = record
 
 
 class NetworkIncident(RuntimeError):
@@ -70,10 +84,13 @@ class Pacer:
     """The only network egress. One request in flight; the next may start only after the previous one completed,
     at least `spacing` after its start, and when the rolling windows allow it. Never starts early, never catches up."""
 
-    def __init__(self, clock: Clock, transport: Transport, *, profile: PaceProfile = OBS02_PROFILE) -> None:
+    def __init__(self, clock: Clock, transport: Transport, *, profile: PaceProfile = OBS02_PROFILE,
+                 deadline_ns: int = DEADLINE_NS) -> None:
         self.clock = clock
         self.transport = transport
         self.profile = profile
+        self.deadline_ns = deadline_ns                  # PACE-8 total deadline, anchored at each request's start_ns
+        self._flight = threading.Lock()                 # single-flight guard: execute() never runs concurrently
         self.records: list[RequestRecord] = []
         self.abort_reason: str | None = None
         self.abort_seq: int | None = None
@@ -93,12 +110,26 @@ class Pacer:
         return max(self.clock.now_ns(), self.earliest_start_ns())
 
     def abort(self, reason: str) -> None:
+        """Abort permanently: no further request may be sent through this pacer, and the transport is disabled too."""
         if self.abort_reason is None:
             self.abort_reason = reason
             self.abort_seq = len(self.records)
+        disable = getattr(self.transport, "disable", None)
+        if callable(disable):
+            disable(reason)
 
     # ----- execution -----
     def execute(self, spec: RequestSpec, *, target_ns: int | None = None) -> RequestRecord:
+        """Send one request. Strictly single-flight: a call made while another is in flight (another thread, or re-entrantly
+        from inside the transport) is rejected with ConcurrentExecution and changes nothing."""
+        if not self._flight.acquire(blocking=False):
+            raise ConcurrentExecution("another request is in flight")
+        try:
+            return self._execute(spec, target_ns)
+        finally:
+            self._flight.release()
+
+    def _execute(self, spec: RequestSpec, target_ns: int | None) -> RequestRecord:
         if self.abort_reason is not None:
             raise PacerAborted(self.abort_reason)
         validate_spec(spec)                                       # refused before any socket is opened
@@ -106,12 +137,26 @@ class Pacer:
         while self.clock.now_ns() < start_at:
             self.clock.sleep_until_ns(start_at)
         start_ns = self.clock.now_ns()
-        result = self.transport.send(spec)
+        cancel_failed = False
+        try:
+            result = self.transport.send(spec, deadline_at_ns=start_ns + self.deadline_ns)   # deadline anchored at start_ns
+        except CancellationFailed:
+            cancel_failed = True
+            result = TransportResult(None, CANCEL_FAILED)
+        except BaseException:
+            self.abort("TRANSPORT-EXCEPTION")                    # fail closed: an unexpected transport failure ends the run
+            raise
         end_ns = self.clock.now_ns()
         record = RequestRecord(seq=len(self.records) + 1, role=spec.role, path=spec.path, start_ns=start_ns, end_ns=end_ns,
                                status=result.status, error=result.error, group_name=spec.group_name, group_kind=spec.group_kind,
                                boundary_ms=spec.boundary_ms, body=result.body, headers=tuple(sorted(result.headers.items())))
         self.records.append(record)
+        if cancel_failed:
+            self.abort("INCIDENT-CANCEL")
+            raise CancellationFailed("request still running after cancellation allowance")
+        if result.status is not None and result.status != 200:
+            self.abort(f"HTTP-{result.status}")                   # every non-200 response is an incident: stop all egress
+            raise NonOkResponse(record)
         if result.status is None:
             self._no_response_streak += 1
             if self._no_response_streak >= MAX_CONSECUTIVE_NO_RESPONSE:
