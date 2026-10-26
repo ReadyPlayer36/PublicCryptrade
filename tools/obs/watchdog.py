@@ -21,9 +21,11 @@ class Cancelled(RuntimeError):
 
 
 class CancellationState:
-    """Shared, thread-safe cancellation flag. `begin_send` and `cancel` are mutually atomic:
-    either the worker marks the request as sent first (cancel then sees it in flight and interrupts it),
-    or cancel comes first and the worker must not send."""
+    """Shared, thread-safe cancellation flag. `guarded_send` and `cancel` are mutually exclusive critical sections:
+    the cancellation check, the absolute-deadline check and the start (and bounded completion) of the request write form ONE
+    unbroken sequence, so a cancellation can never fall between the check and the write. Either the write happened entirely
+    before `cancel()` took the lock (cancel then reports the request in flight and the socket shutdown interrupts the rest),
+    or cancel came first and nothing is ever written."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -41,17 +43,24 @@ class CancellationState:
             return self._sending
 
     def cancel(self) -> bool:
-        """Mark cancelled. Returns True when a request was already being sent."""
+        """Mark cancelled (blocks while a guarded write is in progress; that write is time-bounded). Returns True when a
+        request was already being sent."""
         with self._lock:
             self._cancelled = True
             return self._sending
 
-    def begin_send(self) -> bool:
-        """Called immediately before the request is written. False means: cancelled, do not send."""
+    def guarded_send(self, allowed: Callable[[], bool], send: Callable[[], None]) -> bool:
+        """Atomically: refuse if cancelled; refuse (and cancel for good) if `allowed()` is False, e.g. the absolute deadline
+        has passed; otherwise mark the request as sent and run `send()` while still holding the lock.
+        Returns False when nothing was sent."""
         with self._lock:
             if self._cancelled:
                 return False
+            if not allowed():
+                self._cancelled = True
+                return False
             self._sending = True
+            send()
             return True
 
 

@@ -11,11 +11,12 @@ unusable). Pure function over the request records. Checks:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Mapping, Sequence
 
 from tools.obs.admission import AdmissionDecision
 from tools.obs.pacer import OBS02_PROFILE, PaceProfile, RequestRecord, window_count
-from tools.obs.params import AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, DEADLINE_NS, KLINES_PATH, MAX_CONSECUTIVE_NO_RESPONSE, TIME_PATH
+from tools.obs.params import AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, DEADLINE_NS, KLINES_PATH, MAX_CONSECUTIVE_NO_RESPONSE, MS, TIME_PATH
 from tools.obs.transport import CANCEL_FAILED, DEADLINE
 
 ROLES_5M = ("S1", "K5m", "S2")
@@ -30,6 +31,8 @@ ROLE_PATH = {"T": TIME_PATH, "S1": TIME_PATH, "S2": TIME_PATH, "K4h": KLINES_PAT
              "K5m": KLINES_PATH, "SWEEP": KLINES_PATH, "PREREG": KLINES_PATH, "PROBE": KLINES_PATH}
 CANCEL_FAILED_MAX_NS = DEADLINE_NS + 2 * CANCEL_GRACE_NS     # start + deadline + cancellation allowance + scheduling slack
 SKIP_MISSED_WINDOW = "MISSED-WINDOW"
+# (nominal offset o, start tolerance tol) in milliseconds per group: the V1 window is [T + o, T + o + tol] (protocol section 5.1)
+GROUP_WINDOWS_MS = {"g0": (0, 2500), "g1": (2000, 2500), "g2": (10_000, 2500), "g3": (60_000, 5000), "ref": (180_000, 5000)}
 BOUNDARY_SKIP_SYNC = "SYNC-SKIPPED"
 
 
@@ -154,6 +157,62 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
     return AuditResult(tuple(failures))
 
 
+def _number(value: object) -> Fraction | None:
+    """An exact number (int or Fraction, never bool/float/str), else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, Fraction)):
+        return None
+    return Fraction(value)
+
+
+def validate_missed_window_decision(decision: object, *, boundary_ms: int, group_name: str, previous_end_ns: int | None) -> list[str]:
+    """Return every inconsistency of a MISSED-WINDOW admission decision (empty list = the decision is internally and externally
+    consistent). Exact arithmetic; nothing is trusted from the decision object:
+      * exact class, `admitted` is False, reason is MISSED-WINDOW;
+      * every number is an exact int or Fraction (no bool, float, str);
+      * `lower_server_ns == m_e_ns + theta_lo` and `upper_server_ns == m_e_ns + theta_hi` EXACTLY, and `theta_lo <= theta_hi`;
+      * `limit_ns == (T + o + tol) * 1e6` recomputed from the boundary and the group's own window (not the decision's claim);
+      * the strict skip inequality `lower_server_ns > limit_ns` (equality is NOT a skip);
+      * `m_e_ns` is a non-negative integer not earlier than the completion of the preceding request of that boundary.
+    """
+    if type(decision) is not AdmissionDecision:
+        return ["not an AdmissionDecision"]
+    problems: list[str] = []
+    if decision.admitted is not False:
+        problems.append("admitted must be exactly False")
+    if decision.reason != SKIP_MISSED_WINDOW:
+        problems.append(f"reason must be {SKIP_MISSED_WINDOW}")
+    values = {name: _number(getattr(decision, name)) for name in ("m_e_ns", "theta_lo", "theta_hi", "lower_server_ns", "upper_server_ns", "limit_ns")}
+    for name, value in values.items():
+        if value is None:
+            problems.append(f"{name} is not an exact number")
+    if problems and any(v is None for v in values.values()):
+        return problems
+    m_e, theta_lo, theta_hi = values["m_e_ns"], values["theta_lo"], values["theta_hi"]
+    lower, upper, limit = values["lower_server_ns"], values["upper_server_ns"], values["limit_ns"]
+    if not _is_int(decision.m_e_ns) or decision.m_e_ns < 0:
+        problems.append("m_e_ns must be a non-negative integer")
+    if not _is_int(decision.limit_ns):
+        problems.append("limit_ns must be an integer")
+    if theta_lo > theta_hi:
+        problems.append("theta_lo exceeds theta_hi")
+    if lower != m_e + theta_lo:
+        problems.append("lower_server_ns != m_e_ns + theta_lo")
+    if upper != m_e + theta_hi:
+        problems.append("upper_server_ns != m_e_ns + theta_hi")
+    window = GROUP_WINDOWS_MS.get(group_name)
+    if window is None:
+        problems.append(f"group {group_name!r} has no admission window")
+    elif limit != (boundary_ms + window[0] + window[1]) * MS:
+        problems.append(f"limit_ns != (T + o + tol) for boundary {boundary_ms} and group {group_name}")
+    if not lower > limit:
+        problems.append("the strict skip inequality lower_server_ns > limit_ns does not hold")
+    if previous_end_ns is None:
+        problems.append("no preceding request to anchor m_e_ns")
+    elif m_e < previous_end_ns:
+        problems.append("m_e_ns is earlier than the completion of the preceding request")
+    return problems
+
+
 def _record_metadata_ok(record: RequestRecord, fail) -> bool:
     ok = True
     expected_path = ROLE_PATH.get(record.role)
@@ -260,10 +319,10 @@ def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, 
             earlier_present = [n for n in GROUP_ORDER[:position] if n in groups]
             decision = skips.get((boundary, name))
             if decision is not None:
-                valid = isinstance(decision, AdmissionDecision) and decision.admitted is False \
-                    and decision.reason == SKIP_MISSED_WINDOW and decision.lower_server_ns > decision.limit_ns
-                if not valid:
-                    fail("f", None, f"skip evidence for ({boundary}, {name}) is not a consistent MISSED-WINDOW decision")
+                previous_end = groups[earlier_present[-1]][-1].end_ns if earlier_present else None
+                problems = validate_missed_window_decision(decision, boundary_ms=boundary, group_name=name, previous_end_ns=previous_end)
+                if problems:
+                    fail("f", None, f"skip evidence for ({boundary}, {name}) is not a consistent MISSED-WINDOW decision: " + "; ".join(problems))
                 elif later_present:
                     fail("f", groups[later_present[0]][0].seq, f"group {later_present[0]} was sent after {name} was skipped (rest of the boundary must not be sent)")
                 continue
@@ -278,6 +337,11 @@ def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, 
         for (b, name) in skips:
             if b == boundary and name in groups:
                 fail("f", groups[name][0].seq, f"group {name} of boundary {boundary} has skip evidence but was sent")
+
+    # skip evidence must refer to a recorded boundary and a real, skippable group
+    for (b, name) in skips:
+        if b not in by_boundary or name not in BOUNDARY_GROUPS:
+            fail("f", None, f"skip evidence ({b!r}, {name!r}) refers to an unknown boundary or group")
 
     # whole-boundary expectations
     if expected_boundaries is not None:

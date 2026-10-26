@@ -81,23 +81,69 @@ def test_a_zero_or_negative_deadline_cancels_immediately():
 
 def test_cancellation_state_semantics():
     state = CancellationState()
+    sent = []
     assert not state.cancelled and not state.sending
-    assert state.begin_send() is True and state.sending
+    assert state.guarded_send(lambda: True, lambda: sent.append(1)) is True and sent == [1] and state.sending
     assert state.cancel() is True and state.cancelled                 # cancel sees the request in flight
-    assert state.begin_send() is False                               # nothing may be sent after a cancellation
+    assert state.guarded_send(lambda: True, lambda: sent.append(2)) is False and sent == [1]      # nothing after a cancellation
     fresh = CancellationState()
-    assert fresh.cancel() is False and fresh.begin_send() is False
+    assert fresh.cancel() is False
+    assert fresh.guarded_send(lambda: True, lambda: sent.append(3)) is False and sent == [1]
 
 
-def test_begin_send_and_cancel_are_atomic_under_races():
+def test_a_disallowed_send_cancels_the_state_for_good_and_does_not_write():
+    state = CancellationState()
+    sent = []
+    assert state.guarded_send(lambda: False, lambda: sent.append(1)) is False
+    assert state.cancelled and not state.sending and sent == []
+    assert state.guarded_send(lambda: True, lambda: sent.append(2)) is False and sent == []      # permanently refused
+
+
+def test_the_write_is_inside_the_critical_section_so_cancel_cannot_interleave():
+    state = CancellationState()
+    in_write, release_write, cancel_returned = threading.Event(), threading.Event(), threading.Event()
+    log = []
+
+    def write():
+        in_write.set()
+        release_write.wait(5)
+        log.append("write finished")
+
+    worker = threading.Thread(target=lambda: log.append(("sent", state.guarded_send(lambda: True, write))))
+    worker.start()
+    assert in_write.wait(2)
+
+    def canceller():
+        log.append(("cancel returned", state.cancel()))
+        cancel_returned.set()
+    threading.Thread(target=canceller).start()
+    assert not cancel_returned.wait(0.2)                              # cancel is blocked while the write is in progress
+    release_write.set()
+    assert cancel_returned.wait(2)
+    worker.join(2)
+    assert log.index("write finished") < log.index(("cancel returned", True))     # the write completed before cancel took effect
+
+
+def test_an_exception_in_the_write_releases_the_lock_and_counts_as_sent():
+    state = CancellationState()
+
+    def failing():
+        raise OSError("broken pipe")
+    with pytest.raises(OSError):
+        state.guarded_send(lambda: True, failing)
+    assert state.sending and state.cancel() is True                  # the lock was released; the request had been initiated
+
+
+def test_guarded_send_and_cancel_are_atomic_under_races():
     for _ in range(300):
         state = CancellationState()
         barrier = threading.Barrier(2)
         out = {}
+        wrote = []
 
         def worker():
             barrier.wait()
-            out["sent"] = state.begin_send()
+            out["sent"] = state.guarded_send(lambda: True, lambda: wrote.append(1))
 
         def canceller():
             barrier.wait()
@@ -106,7 +152,7 @@ def test_begin_send_and_cancel_are_atomic_under_races():
         threads = [threading.Thread(target=worker), threading.Thread(target=canceller)]
         [t.start() for t in threads]
         [t.join(2) for t in threads]
-        assert out["sent"] == out["in_flight"]                       # either sent-then-cancelled, or cancelled-then-never-sent
+        assert out["sent"] == out["in_flight"] == bool(wrote)         # written and in flight, or cancelled first and never written
 
 
 def test_protocol_constants():
@@ -121,10 +167,12 @@ def test_protocol_constants():
 class FakeSock:
     def __init__(self):
         self.timeout = None
+        self.timeouts = []
         self.shut = False
 
     def settimeout(self, value):
         self.timeout = value
+        self.timeouts.append(value)
 
     def shutdown(self, how):
         self.shut = True
@@ -144,15 +192,19 @@ class FakeResponse:
 class FakeConnection:
     instances: list = []
 
-    def __init__(self, scheme, host, port, timeout, *, response=None, error=None, connect_error=None, connect_gate=None):
+    def __init__(self, scheme, host, port, timeout, *, response=None, error=None, connect_error=None, connect_gate=None, write_delay=0.0):
         self.scheme, self.host, self.port, self.connect_timeout = scheme, host, port, timeout
         self.response, self.error, self.connect_error, self.connect_gate = response or FakeResponse(), error, connect_error, connect_gate
+        self.write_delay = write_delay
         self.sock = None
+        self.auto_open = 1                                            # http.client default: request() silently reconnects a closed connection
+        self.connects = 0
         self.requests = []
         self.closed = False
         FakeConnection.instances.append(self)
 
     def connect(self):
+        self.connects += 1
         if self.connect_gate is not None:                             # simulates a DNS resolution that cannot be interrupted
             self.connect_gate.wait(10)
         if self.connect_error:
@@ -160,6 +212,13 @@ class FakeConnection:
         self.sock = FakeSock()
 
     def request(self, method, url, headers):
+        if self.sock is None:                                         # mimic http.client.HTTPConnection.send()
+            if self.auto_open:
+                self.connect()                                        # implicit reconnection
+            else:
+                raise http.client.NotConnected()
+        if self.write_delay:
+            time.sleep(self.write_delay)
         self.requests.append((method, url, headers))
         if self.error:
             raise self.error
@@ -259,6 +318,17 @@ def test_a_deadline_that_has_already_passed_sends_nothing():
     result = transport.send(time_request(role="S1"), deadline_at_ns=CLOCK.now_ns() - 1)
     assert (result.status, result.error) == (None, DEADLINE)
     assert FakeConnection.instances == [] and transport.sent == 1
+
+
+def test_an_expired_deadline_does_not_even_start_a_worker_thread(monkeypatch):
+    import tools.obs.transport as transport_module
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("a worker must not be started for an expired deadline")
+    monkeypatch.setattr(transport_module, "run_with_deadline", must_not_run)
+    transport = HttpTransport(connection_factory=fake_factory())
+    result = transport.send(time_request(role="S1"), deadline_at_ns=CLOCK.now_ns() - 1)
+    assert (result.status, result.error) == (None, DEADLINE) and FakeConnection.instances == []
 
 
 def test_time_spent_before_the_transport_is_reached_counts_against_the_deadline():
@@ -513,3 +583,163 @@ def test_a_real_non_200_over_a_socket_stops_all_egress(loopback):
         transport.send(spec, deadline_at_ns=CLOCK.now_ns() + 5 * S)     # continuation around the pacer
     assert loopback.time_hits == 1                                     # exactly one request ever reached the server
     assert audit_all(pacer.records, abort_seq=pacer.abort_seq, wrapper_count=transport.sent).ok
+
+
+# ---------------- send-boundary races, implicit reconnection, startup latency (re-audit findings 1 and 2) ----------------
+class ScriptedClock:
+    """now_ns() returns the scripted values in order, then repeats the last one (deterministic worker-start latency)."""
+
+    def __init__(self, values):
+        self.values = list(values)
+        self.calls = 0
+
+    def now_ns(self):
+        value = self.values[min(self.calls, len(self.values) - 1)]
+        self.calls += 1
+        return value
+
+    def sleep_until_ns(self, target_ns):
+        raise AssertionError("not used")
+
+
+DEADLINE_AT = 1_000_000_000
+
+
+def scripted_transport(values, **factory_kw):
+    return HttpTransport(connection_factory=fake_factory(**factory_kw), clock=ScriptedClock(values))
+
+
+def test_a_normal_request_disables_implicit_reconnection_and_uses_short_write_timeout():
+    transport = scripted_transport([0, 0, 0, 0])
+    result = transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
+    conn = FakeConnection.instances[0]
+    assert (result.status, result.error) == (200, None)
+    assert conn.auto_open == 0 and conn.connects == 1                              # a closed connection can no longer be reopened by request()
+    from tools.obs.params import SEND_TIMEOUT_S
+    assert conn.sock.timeouts == [READ_TIMEOUT_S, SEND_TIMEOUT_S, READ_TIMEOUT_S]    # the write (under the lock) is time-bounded
+    assert SEND_TIMEOUT_S <= 0.25
+
+
+def test_worker_started_after_the_absolute_deadline_does_nothing():
+    transport = scripted_transport([0, DEADLINE_AT + 1])                           # 2nd clock read = the worker's first check
+    result = transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
+    assert (result.status, result.error) == (None, DEADLINE)
+    assert FakeConnection.instances == []                                          # not even a connection object was created
+
+
+def test_deadline_passing_before_connection_setup_creates_but_never_connects():
+    transport = scripted_transport([0, 0, DEADLINE_AT])                            # 3rd read = just before connection setup (>= deadline)
+    result = transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
+    conn = FakeConnection.instances[0]
+    assert (result.status, result.error) == (None, DEADLINE)
+    assert conn.connects == 0 and conn.requests == [] and conn.closed
+
+
+def test_deadline_passing_during_setup_is_caught_inside_the_critical_section_before_the_write():
+    transport = scripted_transport([0, 0, 0, DEADLINE_AT + 7])                     # 4th read = immediately before the write, under the lock
+    result = transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
+    conn = FakeConnection.instances[0]
+    assert (result.status, result.error) == (None, DEADLINE)
+    assert conn.connects == 1 and conn.requests == [] and conn.closed
+    assert transport.disabled_reason is None                                       # a clean cancellation, not an incident
+
+
+def test_a_cancelled_state_alone_stops_setup_even_if_the_worker_clock_still_shows_time_left():
+    # The wall-time watchdog fires after 0.1 s while the (scripted) worker clock never advances: only the shared state can stop the worker.
+    gate = threading.Event()
+    created = []
+
+    def slow_factory(scheme, host, port, timeout):
+        gate.wait(10)                                                # construction stalls past the watchdog deadline
+        conn = FakeConnection(scheme, host, port, timeout)
+        created.append(conn)
+        return conn
+
+    transport = HttpTransport(connection_factory=slow_factory, clock=ScriptedClock([0]), grace_ns=100 * MS)
+    with pytest.raises(CancellationFailed):
+        transport.send(time_request(role="S1"), deadline_at_ns=100 * MS)             # remaining 0.1 s on the scripted clock
+    gate.set()
+    assert wait_for(lambda: bool(created) and created[0].closed)
+    time.sleep(0.05)
+    assert created[0].connects == 0 and created[0].requests == []                  # never connected: the state, not the clock, stopped it
+
+
+def test_the_deadline_boundary_is_inclusive_for_cancellation():
+    transport = scripted_transport([0, 0, 0, DEADLINE_AT - 1])                     # one ns before the deadline: still allowed
+    assert go_scripted(transport).status == 200
+    transport = scripted_transport([0, 0, 0, DEADLINE_AT])                         # exactly at the deadline: not allowed
+    assert go_scripted(transport).error == DEADLINE
+
+
+def go_scripted(transport):
+    return transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
+
+
+def test_a_cancellation_during_the_write_waits_for_the_write_and_never_reconnects():
+    transport = HttpTransport(connection_factory=fake_factory(write_delay=0.5), grace_ns=2 * S)
+    t0 = time.monotonic()
+    result = transport.send(time_request(role="S1"), deadline_at_ns=CLOCK.now_ns() + 200 * MS)
+    elapsed = time.monotonic() - t0
+    conn = FakeConnection.instances[0]
+    assert (result.status, result.error) == (None, DEADLINE)
+    assert elapsed >= 0.5                                                          # cancel() had to wait for the write to finish
+    assert len(conn.requests) == 1 and conn.connects == 1 and len(FakeConnection.instances) == 1     # one write, no second request, no reconnect
+    assert conn.closed and conn.sock is not None                                   # the fake does not clear sock; the real close does
+
+
+def test_a_connection_closed_between_setup_and_the_write_is_never_written_or_reopened():
+    transport = HttpTransport(connection_factory=lambda s, h, p, t: ClosedAfterConnect(s, h, p, t))
+    result = go(transport, time_request(role="S1"))
+    conn = FakeConnection.instances[-1]
+    assert (result.status, result.error) == (None, DEADLINE)                       # reported as a cancellation, not a transport error
+    assert conn.requests == [] and conn.connects == 1                             # no write and no implicit reconnect
+
+
+class ClosedAfterConnect(FakeConnection):
+    def connect(self):
+        super().connect()
+        self.sock = None                                                           # a cancellation closed the connection right after setup
+
+
+def test_without_auto_open_disabled_a_closed_connection_would_reconnect_in_http_client():
+    # documents WHY auto_open must be cleared: stdlib http.client reopens a closed connection on request()
+    conn = http.client.HTTPConnection("127.0.0.1", 9)
+    assert conn.auto_open == 1
+    conn.auto_open = 0
+    with pytest.raises(http.client.NotConnected):
+        conn.request("GET", "/")
+
+
+def test_real_http_client_never_reconnects_after_a_cancellation_close(loopback):
+    accepted = []
+    original = loopback.get_request
+
+    def counting():
+        pair = original()
+        accepted.append(pair[1])
+        return pair
+    loopback.get_request = counting
+    gate = threading.Event()
+
+    class RealButClosedAfterConnect(http.client.HTTPConnection):
+        def connect(self):
+            super().connect()
+            self.close()                                                           # simulated cancellation close right after setup
+            gate.set()
+
+    def factory(scheme, host, port, timeout):
+        return RealButClosedAfterConnect(host, port, timeout=timeout)
+
+    transport = HttpTransport(base_url=f"http://127.0.0.1:{loopback.server_address[1]}", connection_factory=factory)
+    result = go(transport, time_request(role="S1"))
+    assert gate.is_set() and (result.status, result.error) == (None, DEADLINE)
+    time.sleep(0.3)
+    assert len(accepted) == 1 and loopback.time_hits == 0                          # one TCP connection, never a second, and no request
+
+
+def test_pacer_passes_the_start_anchored_deadline_down_to_the_worker_checks():
+    clock = ScriptedClock([0, 0, 0, 0, 0, 0])
+    transport = HttpTransport(connection_factory=fake_factory(), clock=clock)
+    pacer = Pacer(FakeClock(), transport, deadline_ns=DEADLINE_AT)                 # pacer start_ns = 0 -> absolute deadline 1 s
+    record = pacer.execute(time_request(role="S1"))
+    assert record.status == 200 and FakeConnection.instances[0].requests

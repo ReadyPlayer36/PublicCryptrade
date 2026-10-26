@@ -19,6 +19,7 @@ OBS01_WINDOWS = ((2 * S, 1), (60 * S, 30))
 DEADLINE_NS = 17 * S                 # PACE-8 strict total deadline per request
 AUDIT_MAX_DURATION_NS = 18 * S       # PACE-5 (e) backstop
 CANCEL_GRACE_NS = 1 * S              # cancellation allowance after the deadline
+SEND_TIMEOUT_S = 0.25                # bound on the guarded request write (held under the cancellation lock)
 CONNECT_TIMEOUT_S, READ_TIMEOUT_S, WRITE_TIMEOUT_S, POOL_TIMEOUT_S = 5.0, 12.0, 5.0, 1.0
 MAX_CONSECUTIVE_NO_RESPONSE = 3      # INCIDENT-NETWORK
 

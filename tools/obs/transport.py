@@ -17,7 +17,7 @@ from typing import Any, Callable, Protocol
 from urllib.parse import urlencode, urlsplit
 
 from tools.obs.clock import Clock, SystemClock
-from tools.obs.params import (CANCEL_GRACE_NS, CONNECT_TIMEOUT_S, HOST, READ_TIMEOUT_S, RESPONSE_HEADER_WHITELIST, S)
+from tools.obs.params import (CANCEL_GRACE_NS, CONNECT_TIMEOUT_S, HOST, READ_TIMEOUT_S, RESPONSE_HEADER_WHITELIST, S, SEND_TIMEOUT_S)
 from tools.obs.specs import RequestSpec, validate_spec
 from tools.obs.watchdog import Cancelled, CancellationFailed, CancellationState, run_with_deadline
 
@@ -125,19 +125,41 @@ class HttpTransport:
         state = CancellationState()
         holder: dict[str, Any] = {}
 
+        def over() -> bool:
+            return self.clock.now_ns() >= deadline_at_ns          # the ABSOLUTE deadline (pacer start_ns + 17 s), re-read here
+
+        def give_up(conn: Any, why: str) -> None:
+            if conn is not None:                                  # the worker stops here: it raises, nothing else runs
+                _close_quietly(conn)
+            raise Cancelled(why)
+
         def call() -> TransportResult:
+            if over():                                            # thread start-up latency must not extend the deadline
+                give_up(None, "deadline passed before the worker started")
             conn = self._factory(self._scheme, self._host, self._port, CONNECT_TIMEOUT_S)
             holder["conn"] = conn
-            if state.cancelled:                           # cancelled before setup even started
-                _close_quietly(conn)
-                raise Cancelled("cancelled before connection setup")
-            conn.connect()                                # DNS + TCP + TLS: bounded by the connect timeout except DNS
-            if conn.sock is not None:
-                conn.sock.settimeout(READ_TIMEOUT_S)
-            if not state.begin_send():                    # checked after setup and immediately before the request is written
-                _close_quietly(conn)
-                raise Cancelled("cancelled before the request was sent")
-            conn.request("GET", target, headers=dict(REQUEST_HEADERS))
+            if state.cancelled:                                   # cancelled before setup even started
+                give_up(conn, "cancelled before connection setup")
+            if over():
+                give_up(conn, "deadline passed before connection setup")
+            conn.connect()                                        # DNS + TCP + TLS: bounded by the connect timeout except DNS
+            conn.auto_open = 0                                    # http.client would silently RECONNECT a closed connection on request()
+            sock = conn.sock                                      # one read: a concurrent close may set conn.sock to None
+            if sock is not None:
+                sock.settimeout(READ_TIMEOUT_S)
+
+            def deadline_allows() -> bool:
+                return not over()                                 # evaluated INSIDE the lock, immediately before the write
+
+            def write() -> None:
+                if sock is None or conn.sock is None:             # closed by a cancellation: never write, never reconnect
+                    raise Cancelled("connection closed before the request was written")
+                sock.settimeout(SEND_TIMEOUT_S)                   # the write holds the cancellation lock: keep it short
+                conn.request("GET", target, headers=dict(REQUEST_HEADERS))
+                sock.settimeout(READ_TIMEOUT_S)
+
+            if not state.guarded_send(deadline_allows, write):    # cancellation check + deadline check + write: one unbroken step
+                give_up(conn, "cancelled or past the deadline before the request was written")
             response = conn.getresponse()
             body = response.read(MAX_BODY_BYTES + 1)
             if len(body) > MAX_BODY_BYTES:

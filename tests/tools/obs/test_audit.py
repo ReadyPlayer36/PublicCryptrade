@@ -6,7 +6,7 @@ import pytest
 
 from tests.fixtures.obs_fakes import audit_all
 from tools.obs.admission import AdmissionDecision
-from tools.obs.audit import audit_pace, abort_condition_seq
+from tools.obs.audit import GROUP_WINDOWS_MS, abort_condition_seq, audit_pace, validate_missed_window_decision
 from tools.obs.pacer import OBS01_PROFILE, RequestRecord
 from tools.obs.params import KLINES_PATH, MS, S, TIME_PATH
 from tools.obs.transport import CANCEL_FAILED, CONNECT_ERROR, DEADLINE
@@ -49,11 +49,20 @@ def boundary_records(boundary, t0, names=("resync", "g0", "g1", "g2", "g3", "ref
     return out
 
 
-def missed_window_decision(**over):
-    values = dict(admitted=False, m_e_ns=100 * S, theta_lo=F(1), theta_hi=F(2), lower_server_ns=F(1_000_000_001), upper_server_ns=F(1_000_000_002),
-                  limit_ns=1_000_000_000, reason="MISSED-WINDOW")
+def decision_for(boundary, group, *, m_e_ns=100 * S, excess=F(1), width=F(100 * MS), **over):
+    """A fully consistent MISSED-WINDOW decision: lower = m_e + theta_lo = limit + excess (strictly past the window)."""
+    offset_ms, tol_ms = GROUP_WINDOWS_MS[group]
+    limit = (boundary + offset_ms + tol_ms) * MS
+    theta_lo = limit + excess - m_e_ns
+    theta_hi = theta_lo + width
+    values = dict(admitted=False, m_e_ns=m_e_ns, theta_lo=theta_lo, theta_hi=theta_hi, lower_server_ns=m_e_ns + theta_lo,
+                  upper_server_ns=m_e_ns + theta_hi, limit_ns=limit, reason="MISSED-WINDOW")
     values.update(over)
     return AdmissionDecision(**values)
+
+
+def missed_window_decision(boundary=1000, group="g2", **over):
+    return decision_for(boundary, group, **over)
 
 
 # ---- clean runs ----
@@ -264,30 +273,170 @@ def test_f_a_missing_group_without_evidence_is_refused():
 
 def test_f_a_missed_window_skip_is_verified_by_a_consistent_decision_and_no_later_groups():
     records = renumber(boundary_records(1000, 0, names=("resync", "g0", "g1")))
-    skips = {(1000, name): missed_window_decision() for name in ("g2", "g3", "ref")}
+    skips = {(1000, name): decision_for(1000, name) for name in ("g2", "g3", "ref")}
     assert audit_all(records, skips=skips).ok
-    only_first = {(1000, "g2"): missed_window_decision()}
+    only_first = {(1000, "g2"): decision_for(1000, "g2")}
     assert "f" in checks(records, skips=only_first)                                      # g3 and ref are still unverified
     middle_gap = renumber(boundary_records(1000, 0, names=("resync", "g0", "g2", "g3", "ref")))
-    sent_after_skip = audit_all(middle_gap, skips={(1000, "g1"): missed_window_decision()})
+    sent_after_skip = audit_all(middle_gap, skips={(1000, "g1"): decision_for(1000, "g1")})
     assert [f.detail for f in sent_after_skip.failures if "was sent after" in f.detail]   # g2.. were sent although g1 was skipped
     assert len(sent_after_skip.failures) == 1
     assert audit_all(renumber(boundary_records(1000, 0, names=("resync", "g0", "g1", "g2", "g3", "ref")))).ok
 
 
-@pytest.mark.parametrize("bad", [missed_window_decision(admitted=True), missed_window_decision(reason="ADMITTED"),
-                                 missed_window_decision(lower_server_ns=F(1_000_000_000)), missed_window_decision(lower_server_ns=F(999_999_999)),
-                                 "MISSED-WINDOW", None])
-def test_f_skip_evidence_must_be_a_consistent_missed_window_decision(bad):
+def validate(decision, *, boundary=1000, group="g2", previous_end=50 * S):
+    return validate_missed_window_decision(decision, boundary_ms=boundary, group_name=group, previous_end_ns=previous_end)
+
+
+@pytest.mark.parametrize("group", ["g0", "g1", "g2", "g3", "ref"])
+def test_a_consistent_decision_validates_for_every_group_window(group):
+    assert validate(decision_for(1000, group), group=group) == []
+    assert validate(decision_for(1_700_000_100_000, group, m_e_ns=1_700_000_100_000 * MS), boundary=1_700_000_100_000, group=group,
+                    previous_end=10) == []
+
+
+def test_group_windows_are_the_protocol_values():
+    assert GROUP_WINDOWS_MS == {"g0": (0, 2500), "g1": (2000, 2500), "g2": (10_000, 2500), "g3": (60_000, 5000), "ref": (180_000, 5000)}
+
+
+def test_the_strict_skip_inequality_equality_is_not_a_skip():
+    exact = decision_for(1000, "g2", excess=F(0))                                   # lower == limit: admitted, NOT skipped
+    assert any("strict skip inequality" in p for p in validate(exact))
+    one_ns = decision_for(1000, "g2", excess=F(1))
+    assert validate(one_ns) == []                                                   # 1 ns past the limit is a skip
+    below = decision_for(1000, "g2", excess=F(-1))
+    assert any("strict skip inequality" in p for p in validate(below))
+    fractional = decision_for(1000, "g2", excess=F(1, 10_000))                      # a fraction of a nanosecond past the limit is still past
+    assert validate(fractional) == []
+
+
+@pytest.mark.parametrize("field,delta", [("lower_server_ns", 1), ("lower_server_ns", -1), ("upper_server_ns", 1), ("upper_server_ns", -1)])
+def test_derived_server_bounds_must_equal_m_e_plus_theta_exactly(field, delta):
+    good = decision_for(1000, "g2")
+    bad = replace(good, **{field: getattr(good, field) + delta})
+    problems = validate(bad)
+    assert any(field.split("_")[0] in p and "!= m_e_ns +" in p for p in problems), problems
+
+
+def test_a_lower_bound_inflated_to_pass_the_inequality_is_caught_by_the_sum_check():
+    good = decision_for(1000, "g2", excess=F(-5))                                   # truly NOT past the limit
+    forged = replace(good, lower_server_ns=good.limit_ns + 1)                       # claims it is past the limit
+    problems = validate(forged)
+    assert any("lower_server_ns != m_e_ns + theta_lo" in p for p in problems)
+    assert validate(replace(forged, theta_lo=forged.lower_server_ns - forged.m_e_ns, theta_hi=forged.lower_server_ns - forged.m_e_ns + 5,
+                            upper_server_ns=forged.lower_server_ns + 5)) == []      # a fully consistent forgery is by construction a valid skip
+
+
+def test_limit_must_be_recomputed_from_the_boundary_and_the_group_window():
+    good = decision_for(1000, "g2")
+    assert any("limit_ns != (T + o + tol)" in p for p in validate(replace(good, limit_ns=good.limit_ns + 1)))
+    assert any("limit_ns != (T + o + tol)" in p for p in validate(good, boundary=1001))                 # decision belongs to another boundary
+    assert any("limit_ns != (T + o + tol)" in p for p in validate(good, group="g1"))                    # decision belongs to another group
+    loose = decision_for(1000, "g3")                                                                     # g3 has the wider 5 s tolerance
+    assert any("limit_ns != (T + o + tol)" in p for p in validate(loose, group="g2"))
+    assert any("no admission window" in p for p in validate(good, group="resync"))
+
+
+@pytest.mark.parametrize("field,value", [("m_e_ns", 100.0 * S), ("m_e_ns", True), ("m_e_ns", "100"), ("theta_lo", 1.5), ("theta_lo", None),
+                                         ("theta_lo", True), ("theta_hi", "x"), ("theta_hi", False), ("lower_server_ns", float("inf")),
+                                         ("lower_server_ns", True), ("upper_server_ns", object()), ("upper_server_ns", True),
+                                         ("limit_ns", 3.5e9), ("limit_ns", True)])
+def test_non_exact_or_mistyped_numbers_are_rejected(field, value):
+    problems = validate(replace(decision_for(1000, "g2"), **{field: value}))
+    assert f"{field} is not an exact number" in problems
+
+
+def test_negative_or_non_integer_m_e_and_a_non_integer_limit_are_rejected():
+    negative = decision_for(1000, "g2", m_e_ns=-5)                                  # internally consistent, but a negative instant
+    assert any("m_e_ns must be a non-negative integer" in p for p in validate(negative, previous_end=-10))
+    fractional_m_e = replace(decision_for(1000, "g2"), m_e_ns=F(200, 3))
+    assert any("non-negative integer" in p for p in validate(fractional_m_e))
+    base = decision_for(1000, "g2")
+    assert any("limit_ns must be an integer" in p for p in validate(replace(base, limit_ns=F(base.limit_ns) + F(1, 2))))
+
+
+def test_theta_lo_must_not_exceed_theta_hi():
+    good = decision_for(1000, "g2", width=F(0))
+    assert validate(good) == []                                                     # a point estimate is fine
+    inverted = replace(good, theta_hi=good.theta_lo - 1, upper_server_ns=good.upper_server_ns - 1)
+    assert any("theta_lo exceeds theta_hi" in p for p in validate(inverted))
+
+
+@pytest.mark.parametrize("over,expected", [({"admitted": True}, "admitted must be exactly False"), ({"admitted": 0}, "admitted must be exactly False"),
+                                           ({"admitted": None}, "admitted must be exactly False"), ({"reason": "ADMITTED"}, "reason must be"),
+                                           ({"reason": "missed-window"}, "reason must be")])
+def test_admitted_flag_and_reason_must_be_exact(over, expected):
+    assert any(expected in p for p in validate(replace(decision_for(1000, "g2"), **over)))
+
+
+@pytest.mark.parametrize("bad", ["MISSED-WINDOW", None, {"admitted": False}, 5, object()])
+def test_only_a_genuine_admission_decision_object_is_accepted(bad):
+    assert validate(bad) == ["not an AdmissionDecision"]
+
+
+def test_a_subclass_cannot_smuggle_in_a_decision():
+    class Forged(AdmissionDecision):
+        pass
+    good = decision_for(1000, "g2")
+    forged = Forged(**{f: getattr(good, f) for f in good.__dataclass_fields__})
+    assert validate(forged) == ["not an AdmissionDecision"]
+
+
+def test_m_e_must_not_precede_the_completion_of_the_preceding_request():
+    good = decision_for(1000, "g2", m_e_ns=100 * S)
+    assert validate(good, previous_end=100 * S) == []                               # equal is allowed
+    assert any("earlier than the completion" in p for p in validate(good, previous_end=100 * S + 1))
+    assert any("no preceding request" in p for p in validate(good, previous_end=None))
+
+
+def test_audit_rejects_every_malformed_decision_and_accepts_the_consistent_one():
     records = renumber(boundary_records(1000, 0, names=("resync", "g0", "g1")))
-    skips = {(1000, name): bad for name in ("g2", "g3", "ref")}
-    result = audit_all(records, skips=skips)
-    assert "f" in result.checks()
+    # boundary_records: resync at 0..., g0 at 12 s, g1 at 24 s: the preceding request ends at 24 s + 1.2 s; m_e = 100 s is later.
+    ok = {(1000, name): decision_for(1000, name) for name in ("g2", "g3", "ref")}
+    assert audit_all(records, skips=ok).ok
+    for name in ("g2", "g3", "ref"):
+        for mutate in (lambda d: replace(d, lower_server_ns=d.lower_server_ns + 1), lambda d: replace(d, limit_ns=d.limit_ns + 1),
+                       lambda d: replace(d, theta_lo=d.theta_hi + 1), lambda d: replace(d, admitted=True), lambda d: replace(d, m_e_ns=1)):
+            skips = dict(ok)
+            skips[(1000, name)] = mutate(ok[(1000, name)])
+            result = audit_all(records, skips=skips)
+            assert any("not a consistent MISSED-WINDOW decision" in f.detail for f in result.failures), (name, mutate)
+
+
+def test_audit_uses_the_completion_of_the_preceding_group_as_the_lower_limit_for_m_e():
+    records = renumber(boundary_records(1000, 0, names=("resync", "g0", "g1")))
+    last_end = records[-1].end_ns
+    early = decision_for(1000, "g2", m_e_ns=last_end - 1)
+    late = decision_for(1000, "g2", m_e_ns=last_end)
+    rest = {(1000, "g3"): decision_for(1000, "g3"), (1000, "ref"): decision_for(1000, "ref")}
+    assert any("earlier than the completion" in f.detail for f in audit_all(records, skips={**rest, (1000, "g2"): early}).failures)
+    assert audit_all(records, skips={**rest, (1000, "g2"): late}).ok
+
+
+def test_skip_evidence_for_unknown_boundaries_or_groups_is_refused():
+    records = renumber(boundary_records(1000, 0))
+    for key in ((5000, "g2"), (1000, "resync"), (1000, "zz"), ("1000", "g2")):
+        result = audit_all(records, skips={key: decision_for(1000, "g2")})
+        assert any("unknown boundary or group" in f.detail for f in result.failures), key
+
+
+def test_a_decision_produced_by_the_real_admission_function_passes_the_audit():
+    from tools.obs.admission import decide_admission
+    from tools.obs.estimator import OffsetEstimator, TimeSample
+    boundary = 1_700_000_100_000
+    estimator = OffsetEstimator()
+    estimator.add(TimeSample(0, 200 * MS, 1_700_000_002_710))                      # GV-5 sample
+    m_e = 100_000_000_001                                                          # 1 ns past the GV-5 boundary: MISSED-WINDOW
+    decision = decide_admission(estimator, m_e_ns=m_e, boundary_ms=boundary, offset_ms=0, tol_ms=2500)
+    assert decision.admitted is False and validate(decision, boundary=boundary, group="g0", previous_end=0) == []
+    forged_on_the_limit = decide_admission(estimator, m_e_ns=100_000_000_000, boundary_ms=boundary, offset_ms=0, tol_ms=2500)
+    assert forged_on_the_limit.admitted is True                                    # exactly on the limit is admitted, so it can never be skip evidence
+    assert any("admitted must be exactly False" in p for p in validate(forged_on_the_limit, boundary=boundary, group="g0", previous_end=0))
 
 
 def test_f_skip_evidence_for_a_group_that_was_actually_sent_is_inconsistent():
     records = renumber(boundary_records(1000, 0))
-    assert "f" in checks(records, skips={(1000, "g1"): missed_window_decision()})
+    assert "f" in checks(records, skips={(1000, "g1"): decision_for(1000, "g1")})
 
 
 def test_f_trailing_groups_may_be_absent_after_a_failed_group_or_at_the_end_of_an_aborted_run():
