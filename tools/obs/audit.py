@@ -10,12 +10,14 @@ unusable). Pure function over the request records. Checks:
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Mapping, Sequence
 
 from tools.obs.admission import AdmissionDecision
-from tools.obs.pacer import OBS02_PROFILE, PaceProfile, RequestRecord, window_count
+from tools.obs.estimator import OffsetEstimator, TimeSample
+from tools.obs.pacer import OBS02_PROFILE, PaceProfile, RequestRecord, release_ns, window_count
 from tools.obs.params import AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, DEADLINE_NS, KLINES_PATH, MAX_CONSECUTIVE_NO_RESPONSE, MS, TIME_PATH
 from tools.obs.transport import CANCEL_FAILED, DEADLINE
 
@@ -144,7 +146,7 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
             fail("e", record.seq, f"deadline cancellation took {duration} ns, expected between {DEADLINE_NS} and {AUDIT_MAX_DURATION_NS}")
 
     # (f) group metadata, group integrity, verified skips
-    _audit_groups(records, skips or {}, expected_boundaries, boundary_skips or {}, derived, abort_seq, fail)
+    _audit_groups(records, skips or {}, expected_boundaries, boundary_skips or {}, derived, abort_seq, profile, fail)
 
     # (g) egress counters: all three are required
     for label, count in (("jsonl", jsonl_count), ("wrapper", wrapper_count), ("manifest", manifest_count)):
@@ -213,6 +215,74 @@ def validate_missed_window_decision(decision: object, *, boundary_ms: int, group
     return problems
 
 
+def server_time_from_body(body: object) -> int | None:
+    """The integer `serverTime` of a recorded /api/v3/time body, or None when the body is not usable."""
+    if not isinstance(body, (bytes, bytearray)):
+        return None
+    try:
+        payload = json.loads(bytes(body))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    value = payload.get("serverTime") if isinstance(payload, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def time_samples_before(records: Sequence[RequestRecord], m_e_ns: int) -> tuple[list[TimeSample], list[str]]:
+    """The estimator inputs implied by the RECORDS: every /api/v3/time request that completed (end_ns <= m_e) with HTTP 200.
+    A 200 whose body has no usable serverTime is reported (fail closed); requests without a response give no sample."""
+    samples: list[TimeSample] = []
+    problems: list[str] = []
+    for record in records:
+        if record.path != TIME_PATH or record.status != 200 or not _is_int(record.end_ns) or record.end_ns > m_e_ns:
+            continue
+        server_ms = server_time_from_body(record.body)
+        if server_ms is None:
+            problems.append(f"/time record seq {record.seq} has no usable serverTime body")
+            continue
+        try:
+            samples.append(TimeSample(record.start_ns, record.end_ns, server_ms))
+        except (TypeError, ValueError):
+            problems.append(f"/time record seq {record.seq} cannot form an estimator sample")
+    return samples, problems
+
+
+def validate_decision_evidence(decision: AdmissionDecision, records: Sequence[RequestRecord], *, previous_record: RequestRecord,
+                               profile: PaceProfile) -> list[str]:
+    """Tie an admission decision to the recorded evidence instead of trusting its arithmetic.
+      * theta: the estimator (the approved implementation: exact rationals, drift widening from the request start, retention by
+        completion time, 60 s fallback after an empty intersection) is re-run on the /time responses recorded before `m_e_ns`,
+        and its theta_lo / theta_hi must equal the decision's claims EXACTLY;
+      * m_e_ns lies between the earliest instant the pacer rules allow after the preceding request (completion, spacing, rolling
+        caps, recomputed from the records) and the start of the next recorded request (the decision precedes it).
+    The decision must already have passed `validate_missed_window_decision` (so its numbers are exact and consistent)."""
+    problems: list[str] = []
+    m_e = decision.m_e_ns
+    prefix = list(records[: previous_record.seq])
+    starts = [record.start_ns for record in prefix]
+    earliest = max(previous_record.end_ns, previous_record.start_ns + profile.spacing_ns, release_ns(starts, profile.windows))
+    if m_e < earliest:
+        problems.append(f"m_e_ns {m_e} is earlier than the earliest start the pacer rules allow after the preceding request ({earliest})")
+    following = records[previous_record.seq] if previous_record.seq < len(records) else None
+    if following is not None and m_e > following.start_ns:
+        problems.append(f"m_e_ns {m_e} is later than the start of the next recorded request ({following.start_ns})")
+    samples, sample_problems = time_samples_before(records, m_e)
+    problems.extend(sample_problems)
+    estimator = OffsetEstimator()
+    for sample in samples:
+        estimator.add(sample)
+    estimate = estimator.estimate(m_e)
+    if estimate is None:
+        problems.append("the recorded /time evidence yields no offset estimate at m_e_ns")
+        return problems
+    if Fraction(decision.theta_lo) != estimate.lo:
+        problems.append(f"theta_lo {decision.theta_lo} does not match the evidence ({estimate.lo})")
+    if Fraction(decision.theta_hi) != estimate.hi:
+        problems.append(f"theta_hi {decision.theta_hi} does not match the evidence ({estimate.hi})")
+    return problems
+
+
 def _record_metadata_ok(record: RequestRecord, fail) -> bool:
     ok = True
     expected_path = ROLE_PATH.get(record.role)
@@ -248,7 +318,7 @@ def _record_metadata_ok(record: RequestRecord, fail) -> bool:
     return ok
 
 
-def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, abort_seq, fail) -> None:
+def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, abort_seq, profile, fail) -> None:
     meta_ok = [_record_metadata_ok(record, fail) for record in records]
     aborted = derived is not None or abort_seq is not None
     last_boundary: int | None = None
@@ -312,6 +382,7 @@ def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, 
         present = [name for name in GROUP_ORDER if name in groups]
         if "resync" not in groups:
             fail("f", groups[present[0]][0].seq, f"boundary {boundary} has groups but no resync group")
+        covered = False                       # a verified MISSED-WINDOW decision also covers the rest of the boundary (nothing is sent after it)
         for position, name in enumerate(GROUP_ORDER):
             if name in groups or name == "resync":
                 continue
@@ -319,12 +390,19 @@ def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, 
             earlier_present = [n for n in GROUP_ORDER[:position] if n in groups]
             decision = skips.get((boundary, name))
             if decision is not None:
-                previous_end = groups[earlier_present[-1]][-1].end_ns if earlier_present else None
-                problems = validate_missed_window_decision(decision, boundary_ms=boundary, group_name=name, previous_end_ns=previous_end)
+                previous = groups[earlier_present[-1]][-1] if earlier_present else None
+                problems = validate_missed_window_decision(decision, boundary_ms=boundary, group_name=name,
+                                                           previous_end_ns=previous.end_ns if previous is not None else None)
+                if not problems and previous is not None:
+                    problems = validate_decision_evidence(decision, records, previous_record=previous, profile=profile)
                 if problems:
                     fail("f", None, f"skip evidence for ({boundary}, {name}) is not a consistent MISSED-WINDOW decision: " + "; ".join(problems))
                 elif later_present:
                     fail("f", groups[later_present[0]][0].seq, f"group {later_present[0]} was sent after {name} was skipped (rest of the boundary must not be sent)")
+                else:
+                    covered = True
+                continue
+            if covered:
                 continue
             if later_present:
                 fail("f", groups[later_present[0]][0].seq, f"group {name} of boundary {boundary} is missing without verified skip evidence")

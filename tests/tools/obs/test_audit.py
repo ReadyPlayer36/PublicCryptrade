@@ -1,12 +1,15 @@
 """PACE-5 audit checks (a)-(g), hardened to fail closed: abort handling, group metadata, verified skips, required counters."""
+import json
 from dataclasses import replace
 from fractions import Fraction as F
 
 import pytest
 
 from tests.fixtures.obs_fakes import audit_all
-from tools.obs.admission import AdmissionDecision
-from tools.obs.audit import GROUP_WINDOWS_MS, abort_condition_seq, audit_pace, validate_missed_window_decision
+from tools.obs.admission import AdmissionDecision, decide_admission
+from tools.obs.estimator import OffsetEstimator, TimeSample
+from tools.obs.audit import (GROUP_WINDOWS_MS, abort_condition_seq, audit_pace, server_time_from_body, time_samples_before,
+                             validate_decision_evidence, validate_missed_window_decision)
 from tools.obs.pacer import OBS01_PROFILE, RequestRecord
 from tools.obs.params import KLINES_PATH, MS, S, TIME_PATH
 from tools.obs.transport import CANCEL_FAILED, CONNECT_ERROR, DEADLINE
@@ -17,9 +20,19 @@ PATH = {"T": TIME_PATH, "S1": TIME_PATH, "S2": TIME_PATH, "K4h": KLINES_PATH, "K
         "SWEEP": KLINES_PATH, "PREREG": KLINES_PATH, "PROBE": KLINES_PATH}
 
 
-def rec(seq, start, end=None, *, status=200, error=None, role="PROBE", group=None, kind=None, boundary=None, path=None):
+THETA_NS = 1_700_000_000_000 * MS                      # test world: server time = monotonic + THETA
+
+
+def time_body(t_ns, server_ms=None):
+    """A recorded /api/v3/time body consistent with the test world at monotonic time t."""
+    return json.dumps({"serverTime": (t_ns + THETA_NS) // MS if server_ms is None else server_ms}).encode()
+
+
+def rec(seq, start, end=None, *, status=200, error=None, role="PROBE", group=None, kind=None, boundary=None, path=None, body=None):
+    if body is None:
+        body = time_body(start) if role in ("T", "S1", "S2") else b"[]"
     return RequestRecord(seq=seq, role=role, path=path or PATH.get(role, TIME_PATH), start_ns=start, end_ns=start if end is None else end,
-                         status=status, error=error, group_name=group, group_kind=kind, boundary_ms=boundary)
+                         status=status, error=error, group_name=group, group_kind=kind, boundary_ms=boundary, body=body)
 
 
 def seq_of(starts, **kw):
@@ -63,6 +76,26 @@ def decision_for(boundary, group, *, m_e_ns=100 * S, excess=F(1), width=F(100 * 
 
 def missed_window_decision(boundary=1000, group="g2", **over):
     return decision_for(boundary, group, **over)
+
+
+def evidence_case(group_name, m_e_ns=300 * S, names=("resync", "g0", "g1"), next_boundary_at=None):
+    """Records with real /time bodies plus the HONEST decision the estimator produces from them at m_e (a genuine MISSED-WINDOW)."""
+    def build(boundary):
+        recs = boundary_records(boundary, 0, names=names)
+        if next_boundary_at is not None:
+            recs += boundary_records(boundary + 600_000, next_boundary_at, names=("resync",))
+        return renumber(recs)
+
+    samples, _ = time_samples_before(build(0), m_e_ns)
+    estimator = OffsetEstimator()
+    for sample in samples:
+        estimator.add(sample)
+    estimate = estimator.estimate(m_e_ns)
+    offset_ms, tol_ms = GROUP_WINDOWS_MS[group_name]
+    boundary = int((m_e_ns + estimate.lo) // MS) - offset_ms - tol_ms - 5               # the group window closed 5 ms before the earliest server time
+    decision = decide_admission(estimator, m_e_ns=m_e_ns, boundary_ms=boundary, offset_ms=offset_ms, tol_ms=tol_ms)
+    assert decision.admitted is False
+    return build(boundary), decision, boundary
 
 
 # ---- clean runs ----
@@ -271,17 +304,27 @@ def test_f_a_missing_group_without_evidence_is_refused():
     assert "f" in result.checks() and any("without verified skip evidence" in f.detail for f in result.failures)
 
 
-def test_f_a_missed_window_skip_is_verified_by_a_consistent_decision_and_no_later_groups():
-    records = renumber(boundary_records(1000, 0, names=("resync", "g0", "g1")))
-    skips = {(1000, name): decision_for(1000, name) for name in ("g2", "g3", "ref")}
-    assert audit_all(records, skips=skips).ok
-    only_first = {(1000, "g2"): decision_for(1000, "g2")}
-    assert "f" in checks(records, skips=only_first)                                      # g3 and ref are still unverified
-    middle_gap = renumber(boundary_records(1000, 0, names=("resync", "g0", "g2", "g3", "ref")))
-    sent_after_skip = audit_all(middle_gap, skips={(1000, "g1"): decision_for(1000, "g1")})
-    assert [f.detail for f in sent_after_skip.failures if "was sent after" in f.detail]   # g2.. were sent although g1 was skipped
-    assert len(sent_after_skip.failures) == 1
-    assert audit_all(renumber(boundary_records(1000, 0, names=("resync", "g0", "g1", "g2", "g3", "ref")))).ok
+def test_f_a_missed_window_skip_is_verified_by_the_evidence_and_covers_the_rest_of_the_boundary():
+    records, decision, boundary = evidence_case("g2")
+    assert audit_all(records, skips={(boundary, "g2"): decision}).ok                   # g2 skipped; g3 and ref were never sent
+    assert "f" in checks(records)                                                      # without the evidence the missing groups are refused
+    # a genuine g1 skip decision (made at 20 s, between g0 and the next recorded request) while g2.. were nevertheless sent
+    names = ("resync", "g0", "g2", "g3", "ref")
+    m_e = 20 * S
+    estimator = _estimator_of(renumber(boundary_records(0, 0, names=names)), m_e)
+    boundary_g1 = int((m_e + estimator.estimate(m_e).lo) // MS) - 2000 - 2500 - 5
+    sent_later = renumber(boundary_records(boundary_g1, 0, names=names))
+    skip_g1 = decide_admission(estimator, m_e_ns=m_e, boundary_ms=boundary_g1, offset_ms=2000, tol_ms=2500)
+    assert skip_g1.admitted is False
+    result = audit_all(sent_later, skips={(boundary_g1, "g1"): skip_g1})
+    assert [f.detail for f in result.failures if "was sent after" in f.detail]          # g2.. were sent although g1 was skipped
+
+
+def _estimator_of(records, m_e_ns):
+    estimator = OffsetEstimator()
+    for sample in time_samples_before(records, m_e_ns)[0]:
+        estimator.add(sample)
+    return estimator
 
 
 def validate(decision, *, boundary=1000, group="g2", previous_end=50 * S):
@@ -390,27 +433,23 @@ def test_m_e_must_not_precede_the_completion_of_the_preceding_request():
 
 
 def test_audit_rejects_every_malformed_decision_and_accepts_the_consistent_one():
-    records = renumber(boundary_records(1000, 0, names=("resync", "g0", "g1")))
-    # boundary_records: resync at 0..., g0 at 12 s, g1 at 24 s: the preceding request ends at 24 s + 1.2 s; m_e = 100 s is later.
-    ok = {(1000, name): decision_for(1000, name) for name in ("g2", "g3", "ref")}
-    assert audit_all(records, skips=ok).ok
-    for name in ("g2", "g3", "ref"):
-        for mutate in (lambda d: replace(d, lower_server_ns=d.lower_server_ns + 1), lambda d: replace(d, limit_ns=d.limit_ns + 1),
-                       lambda d: replace(d, theta_lo=d.theta_hi + 1), lambda d: replace(d, admitted=True), lambda d: replace(d, m_e_ns=1)):
-            skips = dict(ok)
-            skips[(1000, name)] = mutate(ok[(1000, name)])
-            result = audit_all(records, skips=skips)
-            assert any("not a consistent MISSED-WINDOW decision" in f.detail for f in result.failures), (name, mutate)
+    records, honest, boundary = evidence_case("g2")
+    key = (boundary, "g2")
+    assert audit_all(records, skips={key: honest}).ok
+    for mutate in (lambda d: replace(d, lower_server_ns=d.lower_server_ns + 1), lambda d: replace(d, limit_ns=d.limit_ns + 1),
+                   lambda d: replace(d, theta_lo=d.theta_hi + 1), lambda d: replace(d, admitted=True), lambda d: replace(d, m_e_ns=1)):
+        result = audit_all(records, skips={key: mutate(honest)})
+        assert any("not a consistent MISSED-WINDOW decision" in f.detail for f in result.failures), mutate
 
 
 def test_audit_uses_the_completion_of_the_preceding_group_as_the_lower_limit_for_m_e():
-    records = renumber(boundary_records(1000, 0, names=("resync", "g0", "g1")))
-    last_end = records[-1].end_ns
-    early = decision_for(1000, "g2", m_e_ns=last_end - 1)
-    late = decision_for(1000, "g2", m_e_ns=last_end)
-    rest = {(1000, "g3"): decision_for(1000, "g3"), (1000, "ref"): decision_for(1000, "ref")}
-    assert any("earlier than the completion" in f.detail for f in audit_all(records, skips={**rest, (1000, "g2"): early}).failures)
-    assert audit_all(records, skips={**rest, (1000, "g2"): late}).ok
+    last_end = evidence_case("g2")[0][-1].end_ns
+    for m_e, ok in ((last_end - 1, False), (last_end + 600 * MS - 1, False), (last_end + 600 * MS, True)):
+        records, decision, boundary = evidence_case("g2", m_e_ns=m_e)              # a genuine decision at exactly this m_e
+        result = audit_all(records, skips={(boundary, "g2"): decision})
+        assert (not result.failures) is ok, (m_e, [f.detail for f in result.failures])
+        if m_e < last_end:
+            assert any("earlier than the completion of the preceding request" in f.detail for f in result.failures)   # the arithmetic check itself
 
 
 def test_skip_evidence_for_unknown_boundaries_or_groups_is_refused():
@@ -484,3 +523,203 @@ def test_g_all_counters_must_be_supplied_and_equal_the_number_of_records():
 def test_failures_are_reported_with_the_check_letter_and_sequence_number():
     result = audit_all(seq_of([0, 100 * MS]))
     assert not result.ok and result.failures[0].check == "c" and result.failures[0].seq == 2
+
+
+# ---- evidence-tied validation (re-audit finding 3) ----
+def forge(decision, delta_ns, *, lo=True, hi=True):
+    """A decision that is arithmetically SELF-CONSISTENT but whose theta is not what the recorded evidence produces."""
+    theta_lo = decision.theta_lo + (delta_ns if lo else 0)
+    theta_hi = decision.theta_hi + (delta_ns if hi else 0)
+    return replace(decision, theta_lo=theta_lo, theta_hi=theta_hi, lower_server_ns=decision.m_e_ns + theta_lo,
+                   upper_server_ns=decision.m_e_ns + theta_hi)
+
+
+def audit_problems(records, boundary, group, decision):
+    result = audit_all(records, skips={(boundary, group): decision})
+    return [f.detail for f in result.failures if f.check == "f"]
+
+
+CASES = [("g0", ("resync",)), ("g1", ("resync", "g0")), ("g2", ("resync", "g0", "g1")), ("g3", ("resync", "g0", "g1", "g2")),
+         ("ref", ("resync", "g0", "g1", "g2", "g3"))]
+
+
+@pytest.mark.parametrize("group,names", CASES)
+def test_an_honest_decision_matches_the_recorded_evidence_for_every_group(group, names):
+    records, decision, boundary = evidence_case(group, names=names)
+    assert validate(decision, boundary=boundary, group=group, previous_end=records[-1].end_ns) == []
+    assert audit_problems(records, boundary, group, decision) == []
+    assert audit_all(records, skips={(boundary, group): decision}).ok
+
+
+@pytest.mark.parametrize("delta_ns", [1, -1, 1000, -1_000_000, 123_456_789])
+def test_a_self_consistent_decision_with_fabricated_theta_is_rejected(delta_ns):
+    records, honest, boundary = evidence_case("g2")
+    forged = forge(honest, delta_ns)
+    assert validate(forged, boundary=boundary, group="g2", previous_end=records[-1].end_ns) == []      # passes every internal check ...
+    problems = audit_problems(records, boundary, "g2", forged)
+    assert any("theta_lo" in p and "does not match the evidence" in p for p in problems)               # ... but not the evidence
+    assert any("theta_hi" in p and "does not match the evidence" in p for p in problems)
+
+
+def test_each_theta_bound_is_checked_separately():
+    records, honest, boundary = evidence_case("g2")
+    only_lo = audit_problems(records, boundary, "g2", forge(honest, 1, hi=False))
+    assert any("theta_lo" in p for p in only_lo) and not any("theta_hi" in p for p in only_lo)
+    only_hi = audit_problems(records, boundary, "g2", forge(honest, 1, lo=False))
+    assert any("theta_hi" in p for p in only_hi) and not any("theta_lo" in p for p in only_hi)
+
+
+def test_a_decision_computed_from_a_subset_of_the_recorded_samples_is_rejected():
+    records, honest, boundary = evidence_case("g2")
+    samples, _ = time_samples_before(records, honest.m_e_ns)
+    assert len(samples) > 3
+    subset = OffsetEstimator()
+    subset.add(samples[0])                                                         # ignores most of the evidence
+    partial = decide_admission(subset, m_e_ns=honest.m_e_ns, boundary_ms=boundary, offset_ms=10_000, tol_ms=2500)
+    assert partial.admitted is False and (partial.theta_lo, partial.theta_hi) != (honest.theta_lo, honest.theta_hi)
+    assert any("does not match the evidence" in p for p in audit_problems(records, boundary, "g2", partial))
+
+
+def test_a_decision_that_uses_a_sample_which_was_never_recorded_is_rejected():
+    records, honest, boundary = evidence_case("g2")
+    samples, _ = time_samples_before(records, honest.m_e_ns)
+    phantom = OffsetEstimator()
+    for sample in samples:
+        phantom.add(sample)
+    phantom.add(TimeSample(299 * S, 299 * S, (299 * S + THETA_NS) // MS))                   # a perfectly plausible, but unrecorded, /time call
+    claimed = decide_admission(phantom, m_e_ns=honest.m_e_ns, boundary_ms=boundary, offset_ms=10_000, tol_ms=2500)
+    assert (claimed.theta_lo, claimed.theta_hi) != (honest.theta_lo, honest.theta_hi)
+    assert any("does not match the evidence" in p for p in audit_problems(records, boundary, "g2", claimed))
+
+
+def test_altered_recorded_responses_no_longer_support_the_decision():
+    records, honest, boundary = evidence_case("g2")
+    shifted = [replace(r, body=time_body(r.start_ns, server_ms=json.loads(r.body)["serverTime"] + 50)) if r.path == TIME_PATH else r for r in records]
+    problems = audit_problems(shifted, boundary, "g2", honest)
+    assert any("theta_lo" in p and "does not match the evidence" in p for p in problems)
+    contradicting = [replace(r, body=time_body(r.start_ns, server_ms=json.loads(r.body)["serverTime"] + 10_000)) if r.seq == 1 else r for r in records]
+    assert any("no offset estimate" in p for p in audit_problems(contradicting, boundary, "g2", honest))     # a contradicting response: empty intersection
+
+
+@pytest.mark.parametrize("bad_body", [b"", b"not json", b"[]", b'{"time": 5}', b'{"serverTime": "5"}', b'{"serverTime": true}', b'{"serverTime": -1}',
+                                      b'{"serverTime": 1.5}', b"\xff\xfe"])
+def test_a_time_response_without_a_usable_server_time_fails_closed(bad_body):
+    records, honest, boundary = evidence_case("g2")
+    broken = [replace(r, body=bad_body) if r.seq == 2 else r for r in records]
+    assert records[1].path == TIME_PATH
+    assert any("/time record seq 2 has no usable serverTime body" in p for p in audit_problems(broken, boundary, "g2", honest))
+
+
+def test_the_retention_rule_is_applied_by_the_audit_not_taken_from_the_decision():
+    records, _, boundary = evidence_case("g2")
+    unlimited = OffsetEstimator(retention_ns=10**18)
+    for sample in time_samples_before(records, 700 * S)[0]:
+        unlimited.add(sample)
+    claimed = decide_admission(unlimited, m_e_ns=700 * S, boundary_ms=boundary, offset_ms=10_000, tol_ms=2500)        # claims samples older than 600 s
+    assert claimed.admitted is False
+    assert any("no offset estimate" in p for p in audit_problems(records, boundary, "g2", claimed))                  # every sample has aged out
+
+
+def test_samples_after_m_e_do_not_influence_the_audit():
+    records, honest, boundary = evidence_case("g2")
+    late = records + [rec(len(records) + 1, 400 * S, role="T", group="resync", boundary=boundary + 600_000, body=time_body(400 * S, server_ms=5))]
+    assert not any("does not match" in p or "no offset estimate" in p for p in audit_problems(late, boundary, "g2", honest))
+
+
+def test_m_e_may_not_be_later_than_the_start_of_the_next_recorded_request():
+    records, decision, boundary = evidence_case("g2", m_e_ns=300 * S, next_boundary_at=200 * S)
+    problems = audit_problems(records, boundary, "g2", decision)
+    assert any("later than the start of the next recorded request" in p for p in problems)
+    records, decision, boundary = evidence_case("g2", m_e_ns=300 * S, next_boundary_at=300 * S)
+    assert not any("later than the start" in p for p in audit_problems(records, boundary, "g2", decision))           # equal is allowed
+
+
+def handmade_records(extra_old_offset_ms=0):
+    """/time(0) then 59 klines probes spaced 0.6 s: a full 60-request minute."""
+    records = [RequestRecord(1, "T", TIME_PATH, 0, 0, 200, None, "sync", None, None, time_body(0, server_ms=THETA_NS // MS + extra_old_offset_ms))]
+    for k in range(1, 60):
+        records.append(RequestRecord(k + 1, "PROBE", KLINES_PATH, k * 600 * MS, k * 600 * MS, 200, None, None, None, None, b"[]"))
+    return records
+
+
+def decision_at(records, m_e_ns, boundary_ms=0, group="g0"):
+    estimator = OffsetEstimator()
+    for sample in time_samples_before(records, m_e_ns)[0]:
+        estimator.add(sample)
+    offset_ms, tol_ms = GROUP_WINDOWS_MS[group]
+    return decide_admission(estimator, m_e_ns=m_e_ns, boundary_ms=boundary_ms, offset_ms=offset_ms, tol_ms=tol_ms)
+
+
+def test_m_e_may_not_precede_the_rolling_cap_release_recomputed_from_the_records():
+    from tools.obs.pacer import OBS02_PROFILE
+    records = handmade_records()
+    previous = records[-1]                                                           # start 35.4 s; 60 starts within 60 s
+    early = decision_at(records, 36 * S)                                             # completion and spacing (36.0 s) are satisfied ...
+    problems = validate_decision_evidence(early, records, previous_record=previous, profile=OBS02_PROFILE)
+    assert any("earlier than the earliest start the pacer rules allow" in p and "(60000000000)" in p for p in problems)    # ... the 60 s cap is not
+    released = decision_at(records, 60 * S)
+    assert not any("earlier than the earliest" in p for p in validate_decision_evidence(released, records, previous_record=previous, profile=OBS02_PROFILE))
+    just_before = decision_at(records, 60 * S - 1)
+    assert any("earlier than the earliest" in p for p in validate_decision_evidence(just_before, records, previous_record=previous, profile=OBS02_PROFILE))
+
+
+def test_the_completion_of_a_long_preceding_request_bounds_m_e_in_the_evidence_check():
+    from tools.obs.pacer import OBS02_PROFILE
+    first = RequestRecord(1, "T", TIME_PATH, 0, 10 * MS, 200, None, "sync", None, None, time_body(5 * MS))
+    previous = RequestRecord(2, "PROBE", KLINES_PATH, 1 * S, 6 * S, 200, None, None, None, None, b"[]")      # lasted 5 s: start + 0.6 s < end
+    records = [first, previous]
+    early = decision_at(records, 3 * S)                                              # after start + spacing (1.6 s), before the completion (6 s)
+    problems = validate_decision_evidence(early, records, previous_record=previous, profile=OBS02_PROFILE)
+    assert any("earlier than the earliest start the pacer rules allow" in p and f"({6 * S})" in p for p in problems)
+    on_time = decision_at(records, 6 * S)
+    assert not any("earlier than the earliest" in p for p in validate_decision_evidence(on_time, records, previous_record=previous, profile=OBS02_PROFILE))
+
+
+def test_the_fallback_window_rule_of_the_estimator_is_reproduced_by_the_audit():
+    from tools.obs.pacer import OBS02_PROFILE
+    old = RequestRecord(1, "T", TIME_PATH, 0, 10 * MS, 200, None, "sync", None, None, time_body(5 * MS))
+    recent_start = 100 * S
+    recent = RequestRecord(2, "T", TIME_PATH, recent_start, recent_start + 10 * MS, 200, None, "sync", None, None,
+                           time_body(recent_start + 5 * MS, server_ms=(recent_start + 5 * MS + THETA_NS) // MS + 900_000))     # contradicts the old sample
+    previous = RequestRecord(3, "PROBE", KLINES_PATH, 150 * S, 150 * S, 200, None, None, None, None, b"[]")
+    records = [old, recent, previous]
+    m_e = 151 * S
+    estimator = OffsetEstimator()
+    for sample in time_samples_before(records, m_e)[0]:
+        estimator.add(sample)
+    assert estimator.estimate(m_e).used_fallback and estimator.estimate(m_e, allow_fallback=False) is None
+    honest = decide_admission(estimator, m_e_ns=m_e, boundary_ms=0, offset_ms=0, tol_ms=2500)
+    assert honest.admitted is False
+    assert validate_decision_evidence(honest, records, previous_record=previous, profile=OBS02_PROFILE) == []
+    only_old = OffsetEstimator()
+    only_old.add(time_samples_before(records, m_e)[0][0])
+    wrong = decide_admission(only_old, m_e_ns=m_e, boundary_ms=0, offset_ms=0, tol_ms=2500)
+    assert any("does not match the evidence" in p for p in validate_decision_evidence(wrong, records, previous_record=previous, profile=OBS02_PROFILE))
+
+
+# ---- evidence extraction helpers ----
+@pytest.mark.parametrize("body,expected", [(b'{"serverTime": 1700000000123}', 1700000000123), (bytearray(b'{"serverTime": 0}'), 0), (b'{"serverTime":1,"x":2}', 1),
+                                           (b"", None), (b"{}", None), (b"[1]", None), (b'{"serverTime": null}', None), (b'{"serverTime": 1.0}', None),
+                                           (b'{"serverTime": false}', None), (b'{"serverTime": "1"}', None), (b'{"serverTime": -5}', None),
+                                           ("not bytes", None), (None, None), (b"\x00\xff", None)])
+def test_server_time_from_body(body, expected):
+    assert server_time_from_body(body) == expected
+
+
+def test_time_samples_are_taken_only_from_completed_200_time_responses_before_m_e():
+    ok = RequestRecord(1, "T", TIME_PATH, 0, 5 * MS, 200, None, "sync", None, None, time_body(0))
+    on_time = RequestRecord(2, "T", TIME_PATH, 10 * MS, 20 * MS, 200, None, "sync", None, None, time_body(10 * MS))
+    after = RequestRecord(3, "T", TIME_PATH, 30 * MS, 40 * MS, 200, None, "sync", None, None, time_body(30 * MS))
+    failed = RequestRecord(4, "T", TIME_PATH, 12 * MS, 18 * MS, None, "TIMEOUT", "sync", None, None, b"")
+    refused = RequestRecord(6, "T", TIME_PATH, 13 * MS, 15 * MS, 429, None, "sync", None, None, time_body(13 * MS))      # a valid-looking body, but not a 200
+    klines = RequestRecord(5, "PROBE", KLINES_PATH, 0, 1, 200, None, None, None, None, time_body(0))
+    samples, problems = time_samples_before([ok, on_time, after, failed, refused, klines], 20 * MS)
+    assert problems == [] and [(x.a_ns, x.b_ns) for x in samples] == [(0, 5 * MS), (10 * MS, 20 * MS)]        # end == m_e is included
+    assert [(x.a_ns, x.b_ns) for x in time_samples_before([ok, on_time, after], 19_999_999)[0]] == [(0, 5 * MS)]
+    assert time_samples_before([replace(ok, body=b"x")], 20 * MS) == ([], ["/time record seq 1 has no usable serverTime body"])
+
+
+def test_a_time_record_that_cannot_form_a_sample_is_reported_not_crashed_on():
+    backwards = RequestRecord(1, "T", TIME_PATH, 10 * MS, 5 * MS, 200, None, "sync", None, None, time_body(10 * MS))      # ends before it starts
+    samples, problems = time_samples_before([backwards], 20 * MS)
+    assert samples == [] and problems == ["/time record seq 1 cannot form an estimator sample"]

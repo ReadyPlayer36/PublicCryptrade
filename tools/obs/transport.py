@@ -17,7 +17,7 @@ from typing import Any, Callable, Protocol
 from urllib.parse import urlencode, urlsplit
 
 from tools.obs.clock import Clock, SystemClock
-from tools.obs.params import (CANCEL_GRACE_NS, CONNECT_TIMEOUT_S, HOST, READ_TIMEOUT_S, RESPONSE_HEADER_WHITELIST, S, SEND_TIMEOUT_S)
+from tools.obs.params import (CANCEL_GRACE_NS, CONNECT_TIMEOUT_S, HOST, READ_TIMEOUT_S, RESPONSE_HEADER_WHITELIST, SEND_TIMEOUT_S)
 from tools.obs.specs import RequestSpec, validate_spec
 from tools.obs.watchdog import Cancelled, CancellationFailed, CancellationState, run_with_deadline
 
@@ -154,11 +154,11 @@ class HttpTransport:
             def write() -> None:
                 if sock is None or conn.sock is None:             # closed by a cancellation: never write, never reconnect
                     raise Cancelled("connection closed before the request was written")
-                sock.settimeout(SEND_TIMEOUT_S)                   # the write holds the cancellation lock: keep it short
+                sock.settimeout(SEND_TIMEOUT_S)                   # a stuck write is bounded; cancel() also unblocks it at once
                 conn.request("GET", target, headers=dict(REQUEST_HEADERS))
                 sock.settimeout(READ_TIMEOUT_S)
 
-            if not state.guarded_send(deadline_allows, write):    # cancellation check + deadline check + write: one unbroken step
+            if not state.guarded_send(deadline_allows, write):    # cancellation check + deadline check, then the write
                 give_up(conn, "cancelled or past the deadline before the request was written")
             response = conn.getresponse()
             body = response.read(MAX_BODY_BYTES + 1)
@@ -168,12 +168,15 @@ class HttpTransport:
             return TransportResult(response.status, None, headers, body)
 
         def cancel() -> None:
+            """Never blocks. run_with_deadline has already flagged the shared state; this shuts the socket down, so a blocked read
+            or write wakes at once and anything the worker tries to write afterwards fails in the kernel: nothing is transmitted
+            after this returns."""
             conn = holder.get("conn")
             if conn is not None:
                 _close_quietly(conn)
 
         try:
-            outcome = run_with_deadline(call, cancel, deadline_s=remaining_ns / S, grace_s=self.grace_ns / S, state=state)
+            outcome = run_with_deadline(call, cancel, deadline_at_ns=deadline_at_ns, clock=self.clock, grace_ns=self.grace_ns, state=state)
         except CancellationFailed:
             self.disable(CANCEL_FAILED)                   # the orphaned worker can no longer send (state is cancelled)
             raise

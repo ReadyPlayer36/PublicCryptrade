@@ -17,7 +17,7 @@ from tools.obs.pacer import NonOkResponse, Pacer, PacerAborted
 from tools.obs.params import AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, CONNECT_TIMEOUT_S, DEADLINE_NS, HOST, MS, READ_TIMEOUT_S, S
 from tools.obs.specs import UnsafeRequest, klines_request, time_request
 from tools.obs.transport import (CANCEL_FAILED, CONNECT_ERROR, DEADLINE, MAX_BODY_BYTES, TIMEOUT, HttpTransport, TransportDisabled)
-from tools.obs.watchdog import Cancelled, CancellationFailed, CancellationState, run_with_deadline
+from tools.obs.watchdog import CancellationFailed, CancellationState, run_with_deadline
 
 KLINES = klines_request(symbol="BTCUSDT", interval="5m", start_ms=0, end_ms=299_999, limit=1, role="PROBE")
 CLOCK = SystemClock()
@@ -28,17 +28,26 @@ def go(transport, spec, *, deadline_ns=DEADLINE_NS):
     return transport.send(spec, deadline_at_ns=CLOCK.now_ns() + deadline_ns)
 
 
-# ---------------- watchdog and cancellation state ----------------
+# ---------------- watchdog (absolute deadline) and cancellation state ----------------
+def at(seconds):
+    """Absolute monotonic deadline `seconds` from now."""
+    return CLOCK.now_ns() + int(seconds * S)
+
+
+def run(fn, cancel, *, seconds, grace_s=1.0, state=None, **kw):
+    return run_with_deadline(fn, cancel, deadline_at_ns=at(seconds), clock=CLOCK, grace_ns=int(grace_s * S), state=state, **kw)
+
+
 def test_a_request_that_finishes_before_the_deadline_is_not_cancelled():
     cancelled = []
-    result = run_with_deadline(lambda: 42, lambda: cancelled.append(1), deadline_s=1.0)
+    result = run(lambda: 42, lambda: cancelled.append(1), seconds=1.0)
     assert (result.timed_out, result.value, result.error, cancelled) == (False, 42, None, [])
 
 
 def test_an_error_before_the_deadline_is_returned_not_raised():
     def boom():
         raise ValueError("x")
-    result = run_with_deadline(boom, lambda: None, deadline_s=1.0)
+    result = run(boom, lambda: None, seconds=1.0)
     assert not result.timed_out and isinstance(result.error, ValueError)
 
 
@@ -56,7 +65,7 @@ def test_a_blocked_request_is_cancelled_at_the_deadline_and_its_error_is_swallow
         release.set()
 
     t0 = time.monotonic()
-    result = run_with_deadline(blocked, cancel, deadline_s=0.15, grace_s=1.0, state=state)
+    result = run(blocked, cancel, seconds=0.15, grace_s=1.0, state=state)
     elapsed = time.monotonic() - t0
     assert result.timed_out and result.error is None and len(cancelled) == 1 and state.cancelled
     assert 0.15 <= cancelled[0] - t0 < 0.5 and 0.15 <= elapsed < 1.0
@@ -67,16 +76,106 @@ def test_a_request_that_ignores_the_cancellation_is_an_incident_and_the_state_st
     state = CancellationState()
     try:
         with pytest.raises(CancellationFailed):
-            run_with_deadline(lambda: release.wait(5), lambda: None, deadline_s=0.05, grace_s=0.1, state=state)
+            run(lambda: release.wait(5), lambda: None, seconds=0.05, grace_s=0.1, state=state)
         assert state.cancelled
     finally:
         release.set()
 
 
-def test_a_zero_or_negative_deadline_cancels_immediately():
+def test_a_deadline_in_the_past_cancels_immediately():
     release = threading.Event()
-    result = run_with_deadline(lambda: release.wait(5), release.set, deadline_s=-3.0, grace_s=1.0)
-    assert result.timed_out
+    t0 = time.monotonic()
+    result = run(lambda: release.wait(5), release.set, seconds=-3.0)
+    assert result.timed_out and time.monotonic() - t0 < 0.5
+
+
+class SlowStartThread(threading.Thread):
+    """A thread whose start() takes 0.2 s: simulated start-up latency."""
+
+    def start(self):
+        time.sleep(0.2)
+        super().start()
+
+
+class FlakyJoinThread(threading.Thread):
+    """join() returns immediately (spurious early wake-up) for the first calls, ignoring the timeout."""
+    early = 40
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.join_calls = []
+
+    def join(self, timeout=None):
+        self.join_calls.append(timeout)
+        if len(self.join_calls) <= self.early:
+            return
+        super().join(timeout)
+
+
+def cancel_time_since(anchor_ns, seconds, thread_factory, **kw):
+    release = threading.Event()
+    fired = []
+
+    def cancel():
+        fired.append(CLOCK.now_ns() - anchor_ns)
+        release.set()
+    result = run_with_deadline(lambda: release.wait(5), cancel, deadline_at_ns=anchor_ns + int(seconds * S), clock=CLOCK,
+                               grace_ns=1 * S, thread_factory=thread_factory, **kw)
+    assert result.timed_out and len(fired) == 1
+    return fired[0] / S
+
+
+def test_thread_start_up_latency_is_inside_the_absolute_deadline_not_added_to_it():
+    anchor = CLOCK.now_ns()
+    fired = cancel_time_since(anchor, 0.35, SlowStartThread)                      # 0.2 s are lost starting the thread
+    assert 0.35 <= fired < 0.45                                                   # a fixed 0.35 s join after the start would fire at >= 0.55 s
+
+
+@pytest.mark.parametrize("seconds", [0.1, 0.2, 0.3])
+def test_the_watchdog_fires_at_the_absolute_deadline_and_not_before(seconds):
+    anchor = CLOCK.now_ns()
+    fired = cancel_time_since(anchor, seconds, threading.Thread)
+    assert seconds <= fired < seconds + 0.05
+
+
+def test_spurious_early_join_returns_never_fire_the_cancel_early():
+    anchor = CLOCK.now_ns()
+    created = []
+
+    def factory(*a, **kw):
+        thread = FlakyJoinThread(*a, **kw)
+        created.append(thread)
+        return thread
+    fired = cancel_time_since(anchor, 0.25, factory)
+    assert 0.25 <= fired < 0.30
+    calls = created[0].join_calls
+    assert len(calls) > FlakyJoinThread.early and all(t is not None and t <= 0.25 for t in calls[:FlakyJoinThread.early])
+
+
+def test_each_wait_is_recomputed_from_the_clock_so_timeouts_shrink_as_time_passes():
+    anchor = CLOCK.now_ns()
+    created = []
+
+    def factory(*a, **kw):
+        thread = FlakyJoinThread(*a, **kw)
+        thread.early = 6
+        created.append(thread)
+        return thread
+    cancel_time_since(anchor, 0.3, factory)
+    calls = created[0].join_calls[:6]
+    assert all(a >= b for a, b in zip(calls, calls[1:])) and calls[0] > calls[-1]  # remaining time is re-read, never a fixed duration
+
+
+def test_the_cancellation_allowance_is_measured_from_the_moment_the_cancel_was_issued():
+    release = threading.Event()
+    anchor = CLOCK.now_ns()
+    try:
+        with pytest.raises(CancellationFailed):
+            run_with_deadline(lambda: release.wait(5), lambda: None, deadline_at_ns=anchor + int(0.1 * S), clock=CLOCK, grace_ns=int(0.15 * S))
+        waited = (CLOCK.now_ns() - anchor) / S
+        assert 0.25 <= waited < 0.4                                               # deadline (0.1 s) plus the allowance (0.15 s)
+    finally:
+        release.set()
 
 
 def test_cancellation_state_semantics():
@@ -99,9 +198,9 @@ def test_a_disallowed_send_cancels_the_state_for_good_and_does_not_write():
     assert state.guarded_send(lambda: True, lambda: sent.append(2)) is False and sent == []      # permanently refused
 
 
-def test_the_write_is_inside_the_critical_section_so_cancel_cannot_interleave():
+def test_cancel_is_never_blocked_by_a_write_in_progress():
     state = CancellationState()
-    in_write, release_write, cancel_returned = threading.Event(), threading.Event(), threading.Event()
+    in_write, release_write = threading.Event(), threading.Event()
     log = []
 
     def write():
@@ -112,29 +211,26 @@ def test_the_write_is_inside_the_critical_section_so_cancel_cannot_interleave():
     worker = threading.Thread(target=lambda: log.append(("sent", state.guarded_send(lambda: True, write))))
     worker.start()
     assert in_write.wait(2)
-
-    def canceller():
-        log.append(("cancel returned", state.cancel()))
-        cancel_returned.set()
-    threading.Thread(target=canceller).start()
-    assert not cancel_returned.wait(0.2)                              # cancel is blocked while the write is in progress
+    t0 = time.monotonic()
+    in_flight = state.cancel()                                        # the write is still blocked: cancel must return at once
+    assert time.monotonic() - t0 < 0.05 and in_flight is True and state.cancelled
+    assert "write finished" not in log
     release_write.set()
-    assert cancel_returned.wait(2)
     worker.join(2)
-    assert log.index("write finished") < log.index(("cancel returned", True))     # the write completed before cancel took effect
+    assert log == ["write finished", ("sent", True)]
 
 
-def test_an_exception_in_the_write_releases_the_lock_and_counts_as_sent():
+def test_an_exception_in_the_write_counts_as_sent():
     state = CancellationState()
 
     def failing():
         raise OSError("broken pipe")
     with pytest.raises(OSError):
         state.guarded_send(lambda: True, failing)
-    assert state.sending and state.cancel() is True                  # the lock was released; the request had been initiated
+    assert state.sending and state.cancel() is True                  # the request had been initiated
 
 
-def test_guarded_send_and_cancel_are_atomic_under_races():
+def test_guarded_send_races_never_write_after_a_refusal_and_always_write_after_acceptance():
     for _ in range(300):
         state = CancellationState()
         barrier = threading.Barrier(2)
@@ -152,7 +248,8 @@ def test_guarded_send_and_cancel_are_atomic_under_races():
         threads = [threading.Thread(target=worker), threading.Thread(target=canceller)]
         [t.start() for t in threads]
         [t.join(2) for t in threads]
-        assert out["sent"] == out["in_flight"] == bool(wrote)         # written and in flight, or cancelled first and never written
+        assert out["sent"] == bool(wrote) and state.cancelled
+        # (a cancel that raced past the checks is neutralised by the socket shutdown, covered by the transport tests below)
 
 
 def test_protocol_constants():
@@ -169,6 +266,7 @@ class FakeSock:
         self.timeout = None
         self.timeouts = []
         self.shut = False
+        self.shut_at = None
 
     def settimeout(self, value):
         self.timeout = value
@@ -176,6 +274,7 @@ class FakeSock:
 
     def shutdown(self, how):
         self.shut = True
+        self.shut_at = time.monotonic()
 
 
 class FakeResponse:
@@ -217,8 +316,13 @@ class FakeConnection:
                 self.connect()                                        # implicit reconnection
             else:
                 raise http.client.NotConnected()
-        if self.write_delay:
-            time.sleep(self.write_delay)
+        end = time.monotonic() + self.write_delay                      # a write that is "blocked": woken by the socket shutdown
+        while time.monotonic() < end:
+            if self.sock is not None and self.sock.shut:
+                raise BrokenPipeError("socket shut down during the write")
+            time.sleep(0.005)
+        if self.sock is not None and self.sock.shut:                   # the kernel refuses to send on a shut-down socket
+            raise BrokenPipeError("socket shut down")
         self.requests.append((method, url, headers))
         if self.error:
             raise self.error
@@ -585,67 +689,95 @@ def test_a_real_non_200_over_a_socket_stops_all_egress(loopback):
     assert audit_all(pacer.records, abort_seq=pacer.abort_seq, wrapper_count=transport.sent).ok
 
 
-# ---------------- send-boundary races, implicit reconnection, startup latency (re-audit findings 1 and 2) ----------------
-class ScriptedClock:
-    """now_ns() returns the scripted values in order, then repeats the last one (deterministic worker-start latency)."""
+# ---------------- send-boundary races, implicit reconnection, startup latency ----------------
+class WorkerClock:
+    """Real monotonic time for every thread except the request worker, which reads values scripted RELATIVE to the deadline
+    (negative = before it, positive = after it); the watchdog thread keeps real time."""
 
-    def __init__(self, values):
-        self.values = list(values)
-        self.calls = 0
+    def __init__(self, offsets_ns, deadline_at_ns):
+        self.offsets, self.deadline_at, self.calls = list(offsets_ns), deadline_at_ns, 0
 
     def now_ns(self):
-        value = self.values[min(self.calls, len(self.values) - 1)]
-        self.calls += 1
-        return value
+        if threading.current_thread().name == "obs-request":
+            value = self.deadline_at + self.offsets[min(self.calls, len(self.offsets) - 1)]
+            self.calls += 1
+            return value
+        return time.monotonic_ns()
 
     def sleep_until_ns(self, target_ns):
         raise AssertionError("not used")
 
 
-DEADLINE_AT = 1_000_000_000
+class HookClock:
+    """Real time, except that the N-th clock read made by the request worker first waits for a condition."""
+
+    def __init__(self, block_on_call, condition):
+        self.block_on_call, self.condition, self.worker_calls, self.blocked = block_on_call, condition, 0, False
+
+    def now_ns(self):
+        if threading.current_thread().name == "obs-request":
+            self.worker_calls += 1
+            if self.worker_calls == self.block_on_call:
+                self.blocked = True
+                end = time.monotonic() + 3
+                while not self.condition() and time.monotonic() < end:
+                    time.sleep(0.002)
+        return time.monotonic_ns()
+
+    def sleep_until_ns(self, target_ns):
+        raise AssertionError("not used")
 
 
-def scripted_transport(values, **factory_kw):
-    return HttpTransport(connection_factory=fake_factory(**factory_kw), clock=ScriptedClock(values))
+BEFORE, AFTER = -10 * S, 1                                              # offsets relative to the deadline
+
+
+def scripted_send(offsets, **factory_kw):
+    deadline_at = CLOCK.now_ns() + 30 * S
+    transport = HttpTransport(connection_factory=fake_factory(**factory_kw), clock=WorkerClock(offsets, deadline_at))
+    return transport, transport.send(time_request(role="S1"), deadline_at_ns=deadline_at)
 
 
 def test_a_normal_request_disables_implicit_reconnection_and_uses_short_write_timeout():
-    transport = scripted_transport([0, 0, 0, 0])
-    result = transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
+    transport, result = scripted_send([BEFORE])
     conn = FakeConnection.instances[0]
     assert (result.status, result.error) == (200, None)
     assert conn.auto_open == 0 and conn.connects == 1                              # a closed connection can no longer be reopened by request()
     from tools.obs.params import SEND_TIMEOUT_S
-    assert conn.sock.timeouts == [READ_TIMEOUT_S, SEND_TIMEOUT_S, READ_TIMEOUT_S]    # the write (under the lock) is time-bounded
+    assert conn.sock.timeouts == [READ_TIMEOUT_S, SEND_TIMEOUT_S, READ_TIMEOUT_S]    # the write is time-bounded
     assert SEND_TIMEOUT_S <= 0.25
 
 
 def test_worker_started_after_the_absolute_deadline_does_nothing():
-    transport = scripted_transport([0, DEADLINE_AT + 1])                           # 2nd clock read = the worker's first check
-    result = transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
+    transport, result = scripted_send([AFTER])                                     # the worker's first check: entry
     assert (result.status, result.error) == (None, DEADLINE)
     assert FakeConnection.instances == []                                          # not even a connection object was created
 
 
 def test_deadline_passing_before_connection_setup_creates_but_never_connects():
-    transport = scripted_transport([0, 0, DEADLINE_AT])                            # 3rd read = just before connection setup (>= deadline)
-    result = transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
+    transport, result = scripted_send([BEFORE, AFTER])                             # 2nd worker read = just before connection setup
     conn = FakeConnection.instances[0]
     assert (result.status, result.error) == (None, DEADLINE)
     assert conn.connects == 0 and conn.requests == [] and conn.closed
 
 
-def test_deadline_passing_during_setup_is_caught_inside_the_critical_section_before_the_write():
-    transport = scripted_transport([0, 0, 0, DEADLINE_AT + 7])                     # 4th read = immediately before the write, under the lock
-    result = transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
+def test_deadline_passing_during_setup_is_caught_immediately_before_the_write():
+    transport, result = scripted_send([BEFORE, BEFORE, AFTER])                     # 3rd worker read = immediately before the write
     conn = FakeConnection.instances[0]
     assert (result.status, result.error) == (None, DEADLINE)
     assert conn.connects == 1 and conn.requests == [] and conn.closed
     assert transport.disabled_reason is None                                       # a clean cancellation, not an incident
 
 
+def test_the_deadline_boundary_for_the_worker_is_inclusive():
+    deadline_at = CLOCK.now_ns() + 30 * S
+    ok = HttpTransport(connection_factory=fake_factory(), clock=WorkerClock([BEFORE, BEFORE, -1], deadline_at))
+    assert ok.send(time_request(role="S1"), deadline_at_ns=deadline_at).status == 200          # one ns before the deadline: allowed
+    late = HttpTransport(connection_factory=fake_factory(), clock=WorkerClock([BEFORE, BEFORE, 0], deadline_at))
+    assert late.send(time_request(role="S1"), deadline_at_ns=deadline_at).error == DEADLINE      # exactly at the deadline: not allowed
+
+
 def test_a_cancelled_state_alone_stops_setup_even_if_the_worker_clock_still_shows_time_left():
-    # The wall-time watchdog fires after 0.1 s while the (scripted) worker clock never advances: only the shared state can stop the worker.
+    # The watchdog fires after 0.2 s of real time while the worker's clock always shows time left: only the shared state can stop it.
     gate = threading.Event()
     created = []
 
@@ -655,36 +787,50 @@ def test_a_cancelled_state_alone_stops_setup_even_if_the_worker_clock_still_show
         created.append(conn)
         return conn
 
-    transport = HttpTransport(connection_factory=slow_factory, clock=ScriptedClock([0]), grace_ns=100 * MS)
+    deadline_at = CLOCK.now_ns() + int(0.2 * S)
+    transport = HttpTransport(connection_factory=slow_factory, clock=WorkerClock([-100 * S], deadline_at), grace_ns=100 * MS)
     with pytest.raises(CancellationFailed):
-        transport.send(time_request(role="S1"), deadline_at_ns=100 * MS)             # remaining 0.1 s on the scripted clock
+        transport.send(time_request(role="S1"), deadline_at_ns=deadline_at)
     gate.set()
     assert wait_for(lambda: bool(created) and created[0].closed)
     time.sleep(0.05)
     assert created[0].connects == 0 and created[0].requests == []                  # never connected: the state, not the clock, stopped it
 
 
-def test_the_deadline_boundary_is_inclusive_for_cancellation():
-    transport = scripted_transport([0, 0, 0, DEADLINE_AT - 1])                     # one ns before the deadline: still allowed
-    assert go_scripted(transport).status == 200
-    transport = scripted_transport([0, 0, 0, DEADLINE_AT])                         # exactly at the deadline: not allowed
-    assert go_scripted(transport).error == DEADLINE
-
-
-def go_scripted(transport):
-    return transport.send(time_request(role="S1"), deadline_at_ns=DEADLINE_AT)
-
-
-def test_a_cancellation_during_the_write_waits_for_the_write_and_never_reconnects():
-    transport = HttpTransport(connection_factory=fake_factory(write_delay=0.5), grace_ns=2 * S)
-    t0 = time.monotonic()
-    result = transport.send(time_request(role="S1"), deadline_at_ns=CLOCK.now_ns() + 200 * MS)
-    elapsed = time.monotonic() - t0
+# ---- cancellation is never starved by a write (re-audit finding 1) ----
+def test_a_blocked_write_is_interrupted_at_the_deadline_by_a_socket_shutdown():
+    transport = HttpTransport(connection_factory=fake_factory(write_delay=3.0), grace_ns=1 * S)
+    anchor = time.monotonic()
+    result = transport.send(time_request(role="S1"), deadline_at_ns=CLOCK.now_ns() + int(0.15 * S))
+    elapsed = time.monotonic() - anchor
     conn = FakeConnection.instances[0]
     assert (result.status, result.error) == (None, DEADLINE)
-    assert elapsed >= 0.5                                                          # cancel() had to wait for the write to finish
-    assert len(conn.requests) == 1 and conn.connects == 1 and len(FakeConnection.instances) == 1     # one write, no second request, no reconnect
-    assert conn.closed and conn.sock is not None                                   # the fake does not clear sock; the real close does
+    assert 0.15 <= elapsed < 0.6                                                   # not the 3 s the write would have taken
+    assert conn.sock.shut and 0.15 <= conn.sock.shut_at - anchor < 0.4             # the shutdown happened at the deadline
+    assert conn.requests == [] and conn.connects == 1 and len(FakeConnection.instances) == 1
+    assert transport.disabled_reason is None
+
+
+def test_cancel_proceeds_while_the_worker_is_inside_the_pre_write_check_and_nothing_is_transmitted():
+    # The worker is held inside its last pre-write clock read until the watchdog has shut the socket down. A cancel that had to
+    # wait for the worker (the previous lock design) would deadlock here; the lock-free cancel shuts the socket down first, so the
+    # write that follows cannot transmit.
+    holder = {}
+    clock = HookClock(block_on_call=3, condition=lambda: holder["conn"].sock is not None and holder["conn"].sock.shut)
+
+    def factory(scheme, host, port, timeout):
+        FakeConnection.instances = []
+        holder["conn"] = FakeConnection(scheme, host, port, timeout)
+        return holder["conn"]
+
+    transport = HttpTransport(connection_factory=factory, clock=clock, grace_ns=2 * S)
+    t0 = time.monotonic()
+    result = transport.send(time_request(role="S1"), deadline_at_ns=CLOCK.now_ns() + int(0.15 * S))
+    elapsed = time.monotonic() - t0
+    conn = holder["conn"]
+    assert clock.blocked and (result.status, result.error) == (None, DEADLINE)
+    assert conn.sock.shut and conn.requests == []                                  # the late write hit a shut-down socket: nothing was sent
+    assert 0.15 <= elapsed < 1.0 and conn.connects == 1                            # and no reconnection happened
 
 
 def test_a_connection_closed_between_setup_and_the_write_is_never_written_or_reopened():
@@ -737,9 +883,12 @@ def test_real_http_client_never_reconnects_after_a_cancellation_close(loopback):
     assert len(accepted) == 1 and loopback.time_hits == 0                          # one TCP connection, never a second, and no request
 
 
+DEADLINE_AT = 1_000_000_000
+
+
 def test_pacer_passes_the_start_anchored_deadline_down_to_the_worker_checks():
-    clock = ScriptedClock([0, 0, 0, 0, 0, 0])
+    clock = FakeClock(0)
     transport = HttpTransport(connection_factory=fake_factory(), clock=clock)
-    pacer = Pacer(FakeClock(), transport, deadline_ns=DEADLINE_AT)                 # pacer start_ns = 0 -> absolute deadline 1 s
+    pacer = Pacer(clock, transport, deadline_ns=DEADLINE_AT)                       # pacer start_ns = 0 -> absolute deadline 1 s
     record = pacer.execute(time_request(role="S1"))
     assert record.status == 200 and FakeConnection.instances[0].requests
