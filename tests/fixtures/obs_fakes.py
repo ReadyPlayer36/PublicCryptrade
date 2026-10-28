@@ -55,4 +55,5 @@ def audit_all(records, **kw):
     kw.setdefault("jsonl_count", len(records))
     kw.setdefault("wrapper_count", len(records))
     kw.setdefault("manifest_count", len(records))
+    kw.setdefault("timeline_end_ns", 10**15)                      # an audited run end far after every record (tests of the bound pass their own)
     return audit_pace(records, **kw)
