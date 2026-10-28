@@ -86,7 +86,8 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
                jsonl_count: int | None = None, wrapper_count: int | None = None, manifest_count: int | None = None,
                skips: Mapping[tuple[int, str], AdmissionDecision] | None = None,
                expected_boundaries: Sequence[int] | None = None,
-               boundary_skips: Mapping[int, str] | None = None) -> AuditResult:
+               boundary_skips: Mapping[int, str] | None = None,
+               timeline_end_ns: int | None = None) -> AuditResult:
     failures: list[AuditFailure] = []
 
     def fail(check: str, seq: int | None, detail: str) -> None:
@@ -107,6 +108,11 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
             fail("a", record.seq, "start times must be non-decreasing in seq")
     if not typed_ok:
         return AuditResult(tuple(failures))
+    if timeline_end_ns is not None:
+        if not _is_int(timeline_end_ns):
+            fail("a", None, "timeline_end_ns must be an integer")
+        elif records and timeline_end_ns < records[-1].end_ns:
+            fail("a", None, f"timeline_end_ns {timeline_end_ns} precedes the last record's completion ({records[-1].end_ns})")
     derived = abort_condition_seq(records)
     if derived is not None and len(records) > derived:
         fail("a", derived + 1, f"record exists after the abort condition at seq {derived} (non-200, 3 failures in a row, or failed cancellation)")
@@ -146,7 +152,8 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
             fail("e", record.seq, f"deadline cancellation took {duration} ns, expected between {DEADLINE_NS} and {AUDIT_MAX_DURATION_NS}")
 
     # (f) group metadata, group integrity, verified skips
-    _audit_groups(records, skips or {}, expected_boundaries, boundary_skips or {}, derived, abort_seq, profile, fail)
+    usable_end = timeline_end_ns if _is_int(timeline_end_ns) and (not records or timeline_end_ns >= records[-1].end_ns) else None   # a bad bound is no bound
+    _audit_groups(records, skips or {}, expected_boundaries, boundary_skips or {}, derived, abort_seq, profile, usable_end, fail)
 
     # (g) egress counters: all three are required
     for label, count in (("jsonl", jsonl_count), ("wrapper", wrapper_count), ("manifest", manifest_count)):
@@ -195,6 +202,10 @@ def validate_missed_window_decision(decision: object, *, boundary_ms: int, group
         problems.append("m_e_ns must be a non-negative integer")
     if not _is_int(decision.limit_ns):
         problems.append("limit_ns must be an integer")
+    if not _is_int(decision.decided_at_ns) or decision.decided_at_ns < 0:
+        problems.append("decided_at_ns must be a recorded non-negative integer decision timestamp")
+    elif _is_int(decision.m_e_ns) and decision.decided_at_ns > decision.m_e_ns:
+        problems.append("decided_at_ns is later than m_e_ns (the earliest start cannot precede the decision)")
     if theta_lo > theta_hi:
         problems.append("theta_lo exceeds theta_hi")
     if lower != m_e + theta_lo:
@@ -249,24 +260,41 @@ def time_samples_before(records: Sequence[RequestRecord], m_e_ns: int) -> tuple[
 
 
 def validate_decision_evidence(decision: AdmissionDecision, records: Sequence[RequestRecord], *, previous_record: RequestRecord,
-                               profile: PaceProfile) -> list[str]:
+                               profile: PaceProfile, timeline_end_ns: int | None = None) -> list[str]:
     """Tie an admission decision to the recorded evidence instead of trusting its arithmetic.
       * theta: the estimator (the approved implementation: exact rationals, drift widening from the request start, retention by
         completion time, 60 s fallback after an empty intersection) is re-run on the /time responses recorded before `m_e_ns`,
         and its theta_lo / theta_hi must equal the decision's claims EXACTLY;
-      * m_e_ns lies between the earliest instant the pacer rules allow after the preceding request (completion, spacing, rolling
-        caps, recomputed from the records) and the start of the next recorded request (the decision precedes it).
+      * decision time: the recorded `decided_at_ns` must lie between the completion of the preceding request and an AUDITED
+        UPPER BOUND: the start of the next recorded request, or, for a terminal skip (nothing was sent afterwards), the audited
+        `timeline_end_ns` of the run. A terminal skip with no such bound is rejected: its decision time would be unbounded;
+      * m_e_ns is exactly max(decided_at_ns, earliest pacer start), the earliest start being recomputed from the records
+        (completion, spacing, rolling caps) as the pacer computes it.
     The decision must already have passed `validate_missed_window_decision` (so its numbers are exact and consistent)."""
     problems: list[str] = []
     m_e = decision.m_e_ns
+    decided = decision.decided_at_ns
     prefix = list(records[: previous_record.seq])
     starts = [record.start_ns for record in prefix]
     earliest = max(previous_record.end_ns, previous_record.start_ns + profile.spacing_ns, release_ns(starts, profile.windows))
+    following = records[previous_record.seq] if previous_record.seq < len(records) else None
+    if following is not None:
+        upper, upper_name = following.start_ns, "the start of the next recorded request"
+    else:
+        upper, upper_name = timeline_end_ns, "the audited timeline end"
+    if upper is None:
+        problems.append("terminal skip: no audited timeline upper bound (timeline_end_ns) was supplied, so the decision time is unbounded")
+    elif decided > upper:
+        problems.append(f"decided_at_ns {decided} is later than {upper_name} ({upper})")
+    if decided < previous_record.end_ns:
+        problems.append(f"decided_at_ns {decided} precedes the completion of the preceding request ({previous_record.end_ns})")
+    expected = max(decided, earliest)
     if m_e < earliest:
         problems.append(f"m_e_ns {m_e} is earlier than the earliest start the pacer rules allow after the preceding request ({earliest})")
-    following = records[previous_record.seq] if previous_record.seq < len(records) else None
-    if following is not None and m_e > following.start_ns:
-        problems.append(f"m_e_ns {m_e} is later than the start of the next recorded request ({following.start_ns})")
+    elif m_e < decided:
+        problems.append(f"m_e_ns {m_e} precedes decided_at_ns {decided}")
+    elif m_e > expected:
+        problems.append(f"m_e_ns {m_e} is later than max(decided_at_ns, earliest pacer start) = {expected}")
     samples, sample_problems = time_samples_before(records, m_e)
     problems.extend(sample_problems)
     estimator = OffsetEstimator()
@@ -318,7 +346,7 @@ def _record_metadata_ok(record: RequestRecord, fail) -> bool:
     return ok
 
 
-def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, abort_seq, profile, fail) -> None:
+def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, abort_seq, profile, timeline_end_ns, fail) -> None:
     meta_ok = [_record_metadata_ok(record, fail) for record in records]
     aborted = derived is not None or abort_seq is not None
     last_boundary: int | None = None
@@ -394,7 +422,7 @@ def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, 
                 problems = validate_missed_window_decision(decision, boundary_ms=boundary, group_name=name,
                                                            previous_end_ns=previous.end_ns if previous is not None else None)
                 if not problems and previous is not None:
-                    problems = validate_decision_evidence(decision, records, previous_record=previous, profile=profile)
+                    problems = validate_decision_evidence(decision, records, previous_record=previous, profile=profile, timeline_end_ns=timeline_end_ns)
                 if problems:
                     fail("f", None, f"skip evidence for ({boundary}, {name}) is not a consistent MISSED-WINDOW decision: " + "; ".join(problems))
                 elif later_present:
