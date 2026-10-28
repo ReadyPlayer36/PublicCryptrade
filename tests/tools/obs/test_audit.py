@@ -69,7 +69,7 @@ def decision_for(boundary, group, *, m_e_ns=100 * S, excess=F(1), width=F(100 * 
     theta_lo = limit + excess - m_e_ns
     theta_hi = theta_lo + width
     values = dict(admitted=False, m_e_ns=m_e_ns, theta_lo=theta_lo, theta_hi=theta_hi, lower_server_ns=m_e_ns + theta_lo,
-                  upper_server_ns=m_e_ns + theta_hi, limit_ns=limit, reason="MISSED-WINDOW")
+                  upper_server_ns=m_e_ns + theta_hi, limit_ns=limit, reason="MISSED-WINDOW", decided_at_ns=m_e_ns)
     values.update(over)
     return AdmissionDecision(**values)
 
@@ -78,7 +78,7 @@ def missed_window_decision(boundary=1000, group="g2", **over):
     return decision_for(boundary, group, **over)
 
 
-def evidence_case(group_name, m_e_ns=300 * S, names=("resync", "g0", "g1"), next_boundary_at=None):
+def evidence_case(group_name, m_e_ns=300 * S, names=("resync", "g0", "g1"), next_boundary_at=None, decided_at_ns=None):
     """Records with real /time bodies plus the HONEST decision the estimator produces from them at m_e (a genuine MISSED-WINDOW)."""
     def build(boundary):
         recs = boundary_records(boundary, 0, names=names)
@@ -93,7 +93,7 @@ def evidence_case(group_name, m_e_ns=300 * S, names=("resync", "g0", "g1"), next
     estimate = estimator.estimate(m_e_ns)
     offset_ms, tol_ms = GROUP_WINDOWS_MS[group_name]
     boundary = int((m_e_ns + estimate.lo) // MS) - offset_ms - tol_ms - 5               # the group window closed 5 ms before the earliest server time
-    decision = decide_admission(estimator, m_e_ns=m_e_ns, boundary_ms=boundary, offset_ms=offset_ms, tol_ms=tol_ms)
+    decision = decide_admission(estimator, m_e_ns=m_e_ns, boundary_ms=boundary, offset_ms=offset_ms, tol_ms=tol_ms, decided_at_ns=decided_at_ns)
     assert decision.admitted is False
     return build(boundary), decision, boundary
 
@@ -629,7 +629,7 @@ def test_samples_after_m_e_do_not_influence_the_audit():
 def test_m_e_may_not_be_later_than_the_start_of_the_next_recorded_request():
     records, decision, boundary = evidence_case("g2", m_e_ns=300 * S, next_boundary_at=200 * S)
     problems = audit_problems(records, boundary, "g2", decision)
-    assert any("later than the start of the next recorded request" in p for p in problems)
+    assert any("decided_at_ns" in p and "later than the start of the next recorded request" in p for p in problems)
     records, decision, boundary = evidence_case("g2", m_e_ns=300 * S, next_boundary_at=300 * S)
     assert not any("later than the start" in p for p in audit_problems(records, boundary, "g2", decision))           # equal is allowed
 
@@ -690,11 +690,11 @@ def test_the_fallback_window_rule_of_the_estimator_is_reproduced_by_the_audit():
     assert estimator.estimate(m_e).used_fallback and estimator.estimate(m_e, allow_fallback=False) is None
     honest = decide_admission(estimator, m_e_ns=m_e, boundary_ms=0, offset_ms=0, tol_ms=2500)
     assert honest.admitted is False
-    assert validate_decision_evidence(honest, records, previous_record=previous, profile=OBS02_PROFILE) == []
+    assert validate_decision_evidence(honest, records, previous_record=previous, profile=OBS02_PROFILE, timeline_end_ns=200 * S) == []
     only_old = OffsetEstimator()
     only_old.add(time_samples_before(records, m_e)[0][0])
     wrong = decide_admission(only_old, m_e_ns=m_e, boundary_ms=0, offset_ms=0, tol_ms=2500)
-    assert any("does not match the evidence" in p for p in validate_decision_evidence(wrong, records, previous_record=previous, profile=OBS02_PROFILE))
+    assert any("does not match the evidence" in p for p in validate_decision_evidence(wrong, records, previous_record=previous, profile=OBS02_PROFILE, timeline_end_ns=200 * S))
 
 
 # ---- evidence extraction helpers ----
@@ -723,3 +723,108 @@ def test_a_time_record_that_cannot_form_a_sample_is_reported_not_crashed_on():
     backwards = RequestRecord(1, "T", TIME_PATH, 10 * MS, 5 * MS, 200, None, "sync", None, None, time_body(10 * MS))      # ends before it starts
     samples, problems = time_samples_before([backwards], 20 * MS)
     assert samples == [] and problems == ["/time record seq 1 cannot form an estimator sample"]
+
+
+
+# ---- terminal skips and the decision-time bound (re-audit finding 2) ----
+def terminal_problems(records, boundary, decision, **kw):
+    result = audit_all(records, skips={(boundary, "g2"): decision}, **kw)
+    return [f.detail for f in result.failures if f.check in ("f", "a")]
+
+
+def test_a_terminal_skip_without_an_audited_timeline_bound_is_rejected():
+    records, decision, boundary = evidence_case("g2")                               # nothing was sent after the skip: it is terminal
+    unbounded = terminal_problems(records, boundary, decision, timeline_end_ns=None)
+    assert any("no audited timeline upper bound" in p and "unbounded" in p for p in unbounded)
+    assert terminal_problems(records, boundary, decision, timeline_end_ns=decision.decided_at_ns) == []      # a bound, even a tight one, suffices
+    assert audit_all(records, skips={(boundary, "g2"): decision}, timeline_end_ns=decision.decided_at_ns).ok
+
+
+def test_the_decision_timestamp_must_not_exceed_the_audited_timeline_end():
+    records, decision, boundary = evidence_case("g2")
+    decided = decision.decided_at_ns
+    assert terminal_problems(records, boundary, decision, timeline_end_ns=decided + 1) == []
+    problems = terminal_problems(records, boundary, decision, timeline_end_ns=decided - 1)
+    assert any("later than the audited timeline end" in p for p in problems)
+    assert any("timeline_end_ns" in p and "precedes the last record" in p for p in terminal_problems(records, boundary, decision, timeline_end_ns=records[-1].end_ns - 1))
+
+
+@pytest.mark.parametrize("bad", [1.5e9, True, "300", -5])
+def test_the_timeline_end_itself_must_be_a_plain_integer_not_before_the_last_record(bad):
+    records, decision, boundary = evidence_case("g2")
+    result = audit_all(records, skips={(boundary, "g2"): decision}, timeline_end_ns=bad)
+    assert not result.ok and any(f.check == "a" and "timeline_end_ns" in f.detail for f in result.failures)
+
+
+def test_an_inflated_decision_time_cannot_hide_behind_a_consistent_theta():
+    # Honest theta for a decision "taken" at 400 s (inside the 600 s retention window, so the evidence supports it), while the audited
+    # run ended at 200 s: arithmetic and evidence-theta are consistent, but the decision time is beyond the end of the run.
+    records, decision, boundary = evidence_case("g2", m_e_ns=400 * S)
+    problems = terminal_problems(records, boundary, decision, timeline_end_ns=200 * S)
+    assert any("later than the audited timeline end" in p for p in problems)
+    assert terminal_problems(records, boundary, decision, timeline_end_ns=400 * S) == []                       # the same decision is fine once the run lasted that long
+
+
+def test_m_e_is_tied_exactly_to_the_decision_time_and_the_pacer_rules():
+    # previous request: S2 of g1 at 25.2 s (zero duration): earliest pacer start = 25.8 s
+    last_end = evidence_case("g2")[0][-1].end_ns
+    earliest = last_end + 600 * MS
+    base = dict(timeline_end_ns=500 * S)
+    for decided, m_e, ok, fragment in (
+        (last_end + 100 * MS, earliest, True, None),                                 # decided before the pacer allows a start: m_e = earliest
+        (last_end + 100 * MS, earliest - 1, False, "earlier than the earliest start"),
+        (last_end + 100 * MS, earliest + 1, False, "later than max(decided_at_ns, earliest pacer start)"),
+        (300 * S, 300 * S, True, None),                                              # decided long after: m_e = decided
+        (100 * S, 300 * S, False, "later than max(decided_at_ns, earliest pacer start)"),    # claims a later m_e than its own decision time implies
+        (last_end, earliest, True, None),                                            # decided exactly at the completion: allowed
+        (last_end - 1, earliest, False, "precedes the completion of the preceding request"),
+    ):
+        records, decision, boundary = evidence_case("g2", m_e_ns=m_e, decided_at_ns=decided)
+        problems = terminal_problems(records, boundary, decision, **base)
+        assert (problems == []) is ok, (decided, m_e, problems)
+        if fragment:
+            assert any(fragment in p for p in problems), (decided, m_e, problems)
+
+
+def test_a_non_terminal_skip_is_bounded_by_the_next_recorded_request_not_by_the_timeline():
+    records, decision, boundary = evidence_case("g2", m_e_ns=150 * S, next_boundary_at=200 * S)
+    bound_problems = [p for p in audit_problems(records, boundary, "g2", decision) if "later than" in p or "unbounded" in p]
+    assert bound_problems == []                                                      # decided at 150 s < the next request at 200 s
+    late_records, late_decision, late_boundary = evidence_case("g2", m_e_ns=250 * S, next_boundary_at=200 * S)
+    assert any("later than the start of the next recorded request" in p for p in audit_problems(late_records, late_boundary, "g2", late_decision))
+    assert not any("audited timeline" in p for p in audit_problems(late_records, late_boundary, "g2", late_decision))     # the generous timeline is irrelevant here
+
+
+@pytest.mark.parametrize("field,value,fragment", [("decided_at_ns", None, "decision timestamp"), ("decided_at_ns", 300.0 * S, "decision timestamp"),
+                                                  ("decided_at_ns", True, "decision timestamp"), ("decided_at_ns", -1, "decision timestamp"),
+                                                  ("decided_at_ns", 300 * S + 1, "later than m_e_ns")])
+def test_the_recorded_decision_timestamp_must_be_a_valid_integer_not_after_m_e(field, value, fragment):
+    records, honest, boundary = evidence_case("g2")
+    bad = replace(honest, **{field: value})
+    assert any(fragment in p for p in validate(bad, boundary=boundary, group="g2", previous_end=records[-1].end_ns))
+    assert any("not a consistent MISSED-WINDOW decision" in p for p in audit_problems(records, boundary, "g2", bad))
+
+
+def test_a_decision_without_a_recorded_timestamp_cannot_be_used_as_skip_evidence():
+    records, honest, boundary = evidence_case("g2")
+    legacy = AdmissionDecision(honest.admitted, honest.m_e_ns, honest.theta_lo, honest.theta_hi, honest.lower_server_ns,
+                               honest.upper_server_ns, honest.limit_ns, honest.reason)               # no decided_at_ns at all
+    assert legacy.decided_at_ns is None
+    assert any("decision timestamp" in p for p in audit_problems(records, boundary, "g2", legacy))
+
+
+def test_validate_decision_evidence_rejects_an_m_e_that_precedes_the_decision_time_when_called_directly():
+    from tools.obs.pacer import OBS02_PROFILE
+    records, honest, boundary = evidence_case("g2")
+    previous = records[-1]
+    inverted = replace(honest, decided_at_ns=honest.m_e_ns + 1)                      # never reaches the evidence check through the audit
+    problems = validate_decision_evidence(inverted, records, previous_record=previous, profile=OBS02_PROFILE, timeline_end_ns=10**15)
+    assert any("precedes decided_at_ns" in p for p in problems)
+    assert not any("precedes decided_at_ns" in p for p in validate_decision_evidence(honest, records, previous_record=previous,
+                                                                                       profile=OBS02_PROFILE, timeline_end_ns=10**15))
+
+
+def test_a_timeline_end_equal_to_the_last_completion_is_a_valid_bound_by_itself():
+    records = seq_of([0, 600 * MS, 1200 * MS])
+    assert audit_all(records, timeline_end_ns=records[-1].end_ns).ok
+    assert "a" in checks(records, timeline_end_ns=records[-1].end_ns - 1)
