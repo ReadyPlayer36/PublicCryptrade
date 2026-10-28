@@ -1,64 +1,117 @@
-# OBS harness building blocks: requirement map (protocol v0.5)
+OBS harness building blocks: requirement map (protocol v0.5)
+Scope of this commit (as authorized after the v0.5 sign-off): the offline-testable pieces of the OBS-01/OBS-02 harness. NOT included, and not runnable: a session runner, the OBS-01 probe runner, the pre-registration step, the evidence writer, the analysis function (stable-time and lag formula) or any --live entry point. No live request was made. Milestone 1 remains BLOCKED.
+New code lives in tools/obs/ (outside src/trading_app/, not imported by production code, standard library only). Tests: tests/tools/obs/, doubles tests/fixtures/obs_fakes.py, golden vectors tests/fixtures/vectors/obs_estimator_vectors.json with the independent generator generate_obs_vectors.py (it imports nothing from the harness; a test regenerates the vectors and compares).
+Protocol item
+Module
+Tests
+PACE-1, 2, 3, 4, 6 completion-aware single pacer, rolling caps, no early start, no catch-up, abort after 3 no-response requests
+pacer.py (Pacer, release_ns, window_count)
+test_pacer.py
+PACE-5 audit (a)-(g), OBS-01 profile, open-left/closed-right windows
+audit.py
+test_audit.py (GV-8)
+PACE-7 admission (strict inequality, only theta_lo decides)
+admission.py
+test_admission.py (GV-5)
+PACE-8 strict 17 s deadline anchored at the pacer's start_ns, socket-shutdown watchdog, shared cancellation state; 18 s audit backstop
+watchdog.py, transport.py, pacer.py, audit.py check (e)
+test_watchdog_transport.py (GV-9, DNS-stall, loopback), test_pacer.py
+5.2 estimator, v0.5 interval [s-b-delta(t-a), s+1ms-a+delta(t-a)], deadline D(X)=X-theta_lo, fixed point
+estimator.py
+test_estimator.py (GV-1 to GV-7, containment, 123.4 ms edge)
+5.3 SYNC adequacy (w <= W_max, empty intersection, 60 s fallback window)
+estimator.py
+test_estimator.py (GV-4, fallback)
+Allow-list safety (host, two paths, exact klines parameters, GET only, no redirects, no proxies, no credentials)
+specs.py, transport.py
+test_pacer.py, test_watchdog_transport.py, test_harness_safety.py
+Remediation of the six re-audit findings (this revision)
+#
+Finding
+Change
+Regression tests
+1
+Pacer serialization
+Pacer.execute takes a non-blocking single-flight lock; a call made while another is in flight (other thread, or re-entrant from inside the transport) raises ConcurrentExecution and changes nothing
+test_a_concurrent_execute_is_rejected_and_changes_nothing, test_a_reentrant_execute_from_inside_the_transport_is_rejected, test_many_threads_never_overlap_inside_the_transport
+2
+Non-200 abort
+Any status other than 200 appends the record, aborts the pacer (HTTP-<status>), disables the transport and raises NonOkResponse; the transport also disables itself on any non-200, so bypassing the pacer is refused (TransportDisabled)
+test_every_non_200_response_aborts_the_pacer_and_disables_the_transport (11 statuses), test_any_non_200_response_permanently_disables_the_transport, test_a_real_non_200_over_a_socket_stops_all_egress
+3
+DNS-safe cancellation
+CancellationState (atomic begin_send/cancel) is checked after connection creation, after connection setup and immediately before the request is written; the watchdog marks it cancelled at the deadline; a worker that wakes later can never connect or send; a cancellation that does not complete disables the transport permanently (CANCEL_FAILED) and the pacer records it, aborts and raises CancellationFailed
+test_stalled_dns_never_sends_after_the_cancellation_and_disables_the_transport, test_dns_that_returns_inside_the_allowance_is_a_clean_cancellation_without_a_send, test_a_worker_released_after_cancellation_never_connects_or_sends, test_begin_send_and_cancel_are_atomic_under_races, test_a_stalled_connect_inside_the_pacer_is_recorded_as_a_failed_cancellation_and_ends_the_run
+4
+Start-anchored deadline
+The pacer passes deadline_at_ns = start_ns + 17 s (absolute monotonic); the transport computes the remaining time from the same clock, so time spent before the transport is reached counts, and an already-passed deadline sends nothing
+test_the_deadline_passed_to_the_transport_is_start_ns_plus_17_seconds, test_the_deadline_is_anchored_at_the_recorded_start_even_after_a_late_wake, test_time_spent_before_the_transport_is_reached_counts_against_the_deadline, test_a_deadline_that_has_already_passed_sends_nothing
+5
+Hardened audit
+(a) the records themselves must end at the first non-200, third consecutive failure or failed cancellation, and the recorded abort position must match; (f) unknown group names, roles and kinds, role/path mismatches, inconsistent metadata, missing resync, and every skipped group must be VERIFIED (a consistent MISSED-WINDOW AdmissionDecision with no later group sent, a failed last request, or an abort at the end; expected_boundaries/boundary_skips verify whole boundaries); (g) jsonl_count, wrapper_count and manifest_count are all required and must be integers equal to the record count
+test_audit.py (50 tests)
+6
+Regression tests
+listed above; 196 tests in tests/tools/obs
 
-Scope of this commit (as authorized after the v0.5 sign-off): the offline-testable pieces of the OBS-01/OBS-02 harness. NOT included, and not runnable: a session runner, the OBS-01 probe runner, the pre-registration step, the evidence writer, the analysis function (stable-time and lag formula) or any `--live` entry point. No live request was made. Milestone 1 remains BLOCKED.
-
-New code lives in `tools/obs/` (outside `src/trading_app/`, not imported by production code, standard library only). Tests: `tests/tools/obs/`, doubles `tests/fixtures/obs_fakes.py`, golden vectors `tests/fixtures/vectors/obs_estimator_vectors.json` with the independent generator `generate_obs_vectors.py` (it imports nothing from the harness; a test regenerates the vectors and compares).
-
-| Protocol item | Module | Tests |
-|---|---|---|
-| PACE-1, 2, 3, 4, 6 completion-aware single pacer, rolling caps, no early start, no catch-up, abort after 3 no-response requests | `pacer.py` (`Pacer`, `release_ns`, `window_count`) | `test_pacer.py` |
-| PACE-5 audit (a)-(g), OBS-01 profile, open-left/closed-right windows | `audit.py` | `test_audit.py` (GV-8) |
-| PACE-7 admission (strict inequality, only `theta_lo` decides) | `admission.py` | `test_admission.py` (GV-5) |
-| PACE-8 strict 17 s deadline anchored at the pacer's `start_ns`, socket-shutdown watchdog, shared cancellation state; 18 s audit backstop | `watchdog.py`, `transport.py`, `pacer.py`, `audit.py` check (e) | `test_watchdog_transport.py` (GV-9, DNS-stall, loopback), `test_pacer.py` |
-| 5.2 estimator, v0.5 interval `[s-b-delta(t-a), s+1ms-a+delta(t-a)]`, deadline `D(X)=X-theta_lo`, fixed point | `estimator.py` | `test_estimator.py` (GV-1 to GV-7, containment, 123.4 ms edge) |
-| 5.3 SYNC adequacy (`w <= W_max`, empty intersection, 60 s fallback window) | `estimator.py` | `test_estimator.py` (GV-4, fallback) |
-| Allow-list safety (host, two paths, exact klines parameters, GET only, no redirects, no proxies, no credentials) | `specs.py`, `transport.py` | `test_pacer.py`, `test_watchdog_transport.py`, `test_harness_safety.py` |
-
-## Remediation of the six re-audit findings (this revision)
-
-| # | Finding | Change | Regression tests |
-|---|---|---|---|
-| 1 | Pacer serialization | `Pacer.execute` takes a non-blocking single-flight lock; a call made while another is in flight (other thread, or re-entrant from inside the transport) raises `ConcurrentExecution` and changes nothing | `test_a_concurrent_execute_is_rejected_and_changes_nothing`, `test_a_reentrant_execute_from_inside_the_transport_is_rejected`, `test_many_threads_never_overlap_inside_the_transport` |
-| 2 | Non-200 abort | Any status other than 200 appends the record, aborts the pacer (`HTTP-<status>`), disables the transport and raises `NonOkResponse`; the transport also disables itself on any non-200, so bypassing the pacer is refused (`TransportDisabled`) | `test_every_non_200_response_aborts_the_pacer_and_disables_the_transport` (11 statuses), `test_any_non_200_response_permanently_disables_the_transport`, `test_a_real_non_200_over_a_socket_stops_all_egress` |
-| 3 | DNS-safe cancellation | `CancellationState` (atomic `begin_send`/`cancel`) is checked after connection creation, after connection setup and immediately before the request is written; the watchdog marks it cancelled at the deadline; a worker that wakes later can never connect or send; a cancellation that does not complete disables the transport permanently (`CANCEL_FAILED`) and the pacer records it, aborts and raises `CancellationFailed` | `test_stalled_dns_never_sends_after_the_cancellation_and_disables_the_transport`, `test_dns_that_returns_inside_the_allowance_is_a_clean_cancellation_without_a_send`, `test_a_worker_released_after_cancellation_never_connects_or_sends`, `test_begin_send_and_cancel_are_atomic_under_races`, `test_a_stalled_connect_inside_the_pacer_is_recorded_as_a_failed_cancellation_and_ends_the_run` |
-| 4 | Start-anchored deadline | The pacer passes `deadline_at_ns = start_ns + 17 s` (absolute monotonic); the transport computes the remaining time from the same clock, so time spent before the transport is reached counts, and an already-passed deadline sends nothing | `test_the_deadline_passed_to_the_transport_is_start_ns_plus_17_seconds`, `test_the_deadline_is_anchored_at_the_recorded_start_even_after_a_late_wake`, `test_time_spent_before_the_transport_is_reached_counts_against_the_deadline`, `test_a_deadline_that_has_already_passed_sends_nothing` |
-| 5 | Hardened audit | (a) the records themselves must end at the first non-200, third consecutive failure or failed cancellation, and the recorded abort position must match; (f) unknown group names, roles and kinds, role/path mismatches, inconsistent metadata, missing resync, and every skipped group must be VERIFIED (a consistent MISSED-WINDOW `AdmissionDecision` with no later group sent, a failed last request, or an abort at the end; `expected_boundaries`/`boundary_skips` verify whole boundaries); (g) `jsonl_count`, `wrapper_count` and `manifest_count` are all required and must be integers equal to the record count | `test_audit.py` (50 tests) |
-| 6 | Regression tests | listed above; 196 tests in `tests/tools/obs` | |
-
-## Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
-
-| # | Finding | Change | Regression tests |
-|---|---|---|---|
-| 1 | `cancel()` must never be starved by an active write | The cancellation lock is gone. `CancellationState.cancel()` is lock-free (flag first), then the transport shuts the socket down: a blocked read or write wakes at once, and a write attempted afterwards fails in the kernel, so nothing is transmitted after `cancel()` returns. Ordering relied on: cancel sets the flag then reads the socket; the worker obtains its socket then reads the flag; `auto_open = 0` and the `conn.sock is None` check prevent any reconnect. | `test_cancel_is_never_blocked_by_a_write_in_progress`, `test_a_blocked_write_is_interrupted_at_the_deadline_by_a_socket_shutdown`, `test_cancel_proceeds_while_the_worker_is_inside_the_pre_write_check_and_nothing_is_transmitted` (the previous lock design would deadlock there) |
-| 2 | Watchdog against the absolute deadline | `run_with_deadline(fn, cancel, deadline_at_ns=..., clock=...)` re-reads the monotonic clock on every wait (`join(remaining)` recomputed each loop), so thread start-up latency and spurious early wake-ups cannot stretch or shorten the deadline; the cancellation allowance is measured from the moment the cancel was issued | `test_thread_start_up_latency_is_inside_the_absolute_deadline_not_added_to_it`, `test_the_watchdog_fires_at_the_absolute_deadline_and_not_before` (0.1/0.2/0.3 s, fires within 50 ms), `test_spurious_early_join_returns_never_fire_the_cancel_early`, `test_each_wait_is_recomputed_from_the_clock_so_timeouts_shrink_as_time_passes`, `test_the_cancellation_allowance_is_measured_from_the_moment_the_cancel_was_issued` |
-| 3 | Evidence-tied skip validation | `validate_decision_evidence` rebuilds the estimator input from the RECORDS (every `/api/v3/time` request with HTTP 200 that completed at or before `m_e_ns`, `serverTime` parsed from its recorded body; unusable body = failure), runs the approved `OffsetEstimator` (exact rationals, drift widening from the request start, 600 s retention by completion time, 60 s fallback) and requires `theta_lo` and `theta_hi` to EQUAL the decision's claims; it also brackets `m_e_ns` between the earliest start the pacer rules allow after the preceding request (completion, spacing, rolling caps recomputed from the records) and the start of the next recorded request. Behavior change: ONE verified MISSED-WINDOW decision for the first skipped group now covers the rest of that boundary (the harness evaluates admission once and then sends nothing more); later groups need no evidence of their own. | `test_a_self_consistent_decision_with_fabricated_theta_is_rejected`, `test_each_theta_bound_is_checked_separately`, `test_a_decision_computed_from_a_subset_of_the_recorded_samples_is_rejected`, `test_a_decision_that_uses_a_sample_which_was_never_recorded_is_rejected`, `test_altered_recorded_responses_no_longer_support_the_decision`, `test_a_time_response_without_a_usable_server_time_fails_closed` (9 bodies), `test_the_retention_rule_is_applied_by_the_audit_not_taken_from_the_decision`, `test_the_fallback_window_rule_of_the_estimator_is_reproduced_by_the_audit`, `test_samples_after_m_e_do_not_influence_the_audit`, bracket tests, and the honest-decision tests for all five groups |
-
-Note on independence: the audit uses the same `OffsetEstimator` implementation as the harness (one source of truth for the approved rules); its inputs, however, come only from the records, never from the decision, and the golden vectors GV-1 to GV-7 pin the estimator itself.
-
-
-Mutation check of the first revision: 61 mutants on `tools/obs` (own script, NOT the frozen 16-mutant matrix run), all killed; three survivors in the first pass were closed by tightening tests.
-
-## Second remediation round (three targeted findings)
-
-| # | Finding | Change | Regression tests |
-|---|---|---|---|
-| 1 | Atomic cancellation and send guard | `CancellationState.guarded_send(allowed, send)` runs the cancellation check, the absolute-deadline check and the request write (`conn.request`) inside ONE critical section shared with `cancel()`; `cancel()` therefore waits for an in-progress write (bounded by `SEND_TIMEOUT_S = 0.25 s`) and can never fall between the check and the write. `conn.auto_open = 0` is set right after `connect()` so `http.client` can never silently reconnect a closed connection, and the worker reads `conn.sock` once and refuses to write if it is gone | `test_the_write_is_inside_the_critical_section_so_cancel_cannot_interleave`, `test_guarded_send_and_cancel_are_atomic_under_races`, `test_a_cancellation_during_the_write_waits_for_the_write_and_never_reconnects`, `test_a_connection_closed_between_setup_and_the_write_is_never_written_or_reopened`, `test_real_http_client_never_reconnects_after_a_cancellation_close`, `test_a_normal_request_disables_implicit_reconnection_and_uses_short_write_timeout` |
-| 2 | Absolute deadline inside the worker | the worker re-reads the monotonic clock against the absolute deadline (`start_ns + 17 s`) at three points: on entry (thread start-up latency), before connection setup, and inside the critical section immediately before the write (`>=` the deadline means no send); any of them cancels the state for good | `test_worker_started_after_the_absolute_deadline_does_nothing`, `test_deadline_passing_before_connection_setup_creates_but_never_connects`, `test_deadline_passing_during_setup_is_caught_inside_the_critical_section_before_the_write`, `test_the_deadline_boundary_is_inclusive_for_cancellation`, `test_pacer_passes_the_start_anchored_deadline_down_to_the_worker_checks` |
-| 3 | Rigorous skipped-group admission validation | `validate_missed_window_decision` recomputes everything it can from the audit's own inputs: exact class and exact types; `lower_server_ns == m_e_ns + theta_lo` and `upper_server_ns == m_e_ns + theta_hi` exactly; `theta_lo <= theta_hi`; `limit_ns == (T + o + tol) x 1e6` from the boundary and the group's own window (`GROUP_WINDOWS_MS`); the strict inequality `lower_server_ns > limit_ns` (equality is not a skip); `m_e_ns` a non-negative integer not earlier than the completion of the preceding request of that boundary; skip evidence for unknown boundaries or groups is refused | `test_audit.py`: `test_the_strict_skip_inequality_equality_is_not_a_skip`, `test_derived_server_bounds_must_equal_m_e_plus_theta_exactly`, `test_limit_must_be_recomputed_from_the_boundary_and_the_group_window`, `test_non_exact_or_mistyped_numbers_are_rejected`, `test_m_e_must_not_precede_the_completion_of_the_preceding_request`, `test_audit_rejects_every_malformed_decision_and_accepts_the_consistent_one`, `test_a_decision_produced_by_the_real_admission_function_passes_the_audit` and others |
-
-Residual, for the runner stage: the audit now recomputes `theta` from the recorded `/time` bodies (third round, below); the runner must therefore store each `/time` response body in its request record (the pacer already does) and pass `skips` as `{(boundary_ms, first_skipped_group): decision}`.
-
-
-## Decisions and findings for the reviewer
-
-1. PACE-8 mechanism (finding). An experiment (loopback only) showed that calling `httpx.Client.close()` from another thread does NOT interrupt a blocked read, whereas `socket.shutdown(SHUT_RDWR)` does. The transport is therefore built on `http.client` and the watchdog shuts the socket down and then closes the connection. The protocol sentence "closes its connection" is satisfied; the mechanism is the shutdown. The pacer takes `end_ns` after the cancellation has finished.
-2. Cancellation limits. The connect phase has its own 5 s socket timeout (TLS handshake included). DNS resolution cannot be interrupted, so it is made harmless instead: nothing is ever sent after a cancellation (shared state, section above), and a cancellation that does not finish within the 1 s allowance disables the transport and ends the run (`INCIDENT-CANCEL`). Reviewer: accept?
-3. Outcome codes without an HTTP response: `DEADLINE` (watchdog), `TIMEOUT` (socket timeout), `CONNECT_ERROR` (anything else), `CANCEL_FAILED` (a cancellation that did not complete; always the last record, 17 s to 19 s). Check (e) requires a `DEADLINE` record to last between 17 s and 18 s.
-4. Group audit (f) harness decisions (the protocol did not spell these out): a group whose last request failed (no 200) may be a PREFIX of the defined role order; a resync group has 3 to 7 `/time` calls (3 plus up to 4 extra), or fewer only when its last call failed; skipped groups inside a boundary are allowed (MISSED-WINDOW), but order must never go backwards.
-5. Arithmetic. Decisions use exact rational arithmetic (`fractions.Fraction`); exported intervals are rounded outward to whole nanoseconds; deadlines are rounded up. The estimator retains samples with `b_j >= t - 600 s` evaluated at the decision time, and the deadline wake loop re-evaluates the retained set at each wake.
-6. The pacer starts at `max(earliest, target)` and never reorders; a wake that is late is recorded as late and judged only by V1 (not part of this commit).
-7. The default `HttpTransport` accepts only `https://data-api.binance.vision`; a loopback `http` base URL exists solely for offline tests.
-
-## Evidence summary (this commit, Python 3.12.3)
-
-See the evidence files delivered with this commit: full-suite JUnit and console output, coverage of `tools/obs`, the mutation log (29 mutants on the new code, own script, NOT the frozen 16-mutant matrix run), and the repository gate outputs.
+Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
+#
+Finding
+Change
+Regression tests
+1
+cancel() must never be starved by an active write
+The cancellation lock is gone. CancellationState.cancel() is lock-free (flag first), then the transport shuts the socket down: a blocked read or write wakes at once, and a write attempted afterwards fails in the kernel, so nothing is transmitted after cancel() returns. Ordering relied on: cancel sets the flag then reads the socket; the worker obtains its socket then reads the flag; auto_open = 0 and the conn.sock is None check prevent any reconnect.
+test_cancel_is_never_blocked_by_a_write_in_progress, test_a_blocked_write_is_interrupted_at_the_deadline_by_a_socket_shutdown, test_cancel_proceeds_while_the_worker_is_inside_the_pre_write_check_and_nothing_is_transmitted (the previous lock design would deadlock there)
+2
+Watchdog against the absolute deadline
+run_with_deadline(fn, cancel, deadline_at_ns=..., clock=...) re-reads the monotonic clock on every wait (join(remaining) recomputed each loop), so thread start-up latency and spurious early wake-ups cannot stretch or shorten the deadline; the cancellation allowance is measured from the moment the cancel was issued
+test_thread_start_up_latency_is_inside_the_absolute_deadline_not_added_to_it, test_the_watchdog_fires_at_the_absolute_deadline_and_not_before (0.1/0.2/0.3 s, fires within 50 ms), test_spurious_early_join_returns_never_fire_the_cancel_early, test_each_wait_is_recomputed_from_the_clock_so_timeouts_shrink_as_time_passes, test_the_cancellation_allowance_is_measured_from_the_moment_the_cancel_was_issued
+3
+Evidence-tied skip validation
+validate_decision_evidence rebuilds the estimator input from the RECORDS (every /api/v3/time request with HTTP 200 that completed at or before m_e_ns, serverTime parsed from its recorded body; unusable body = failure), runs the approved OffsetEstimator (exact rationals, drift widening from the request start, 600 s retention by completion time, 60 s fallback) and requires theta_lo and theta_hi to EQUAL the decision's claims; it also brackets m_e_ns between the earliest start the pacer rules allow after the preceding request (completion, spacing, rolling caps recomputed from the records) and the start of the next recorded request. Behavior change: ONE verified MISSED-WINDOW decision for the first skipped group now covers the rest of that boundary (the harness evaluates admission once and then sends nothing more); later groups need no evidence of their own.
+test_a_self_consistent_decision_with_fabricated_theta_is_rejected, test_each_theta_bound_is_checked_separately, test_a_decision_computed_from_a_subset_of_the_recorded_samples_is_rejected, test_a_decision_that_uses_a_sample_which_was_never_recorded_is_rejected, test_altered_recorded_responses_no_longer_support_the_decision, test_a_time_response_without_a_usable_server_time_fails_closed (9 bodies), test_the_retention_rule_is_applied_by_the_audit_not_taken_from_the_decision, test_the_fallback_window_rule_of_the_estimator_is_reproduced_by_the_audit, test_samples_after_m_e_do_not_influence_the_audit, bracket tests, and the honest-decision tests for all five groups
+Note on independence: the audit uses the same OffsetEstimator implementation as the harness (one source of truth for the approved rules); its inputs, however, come only from the records, never from the decision, and the golden vectors GV-1 to GV-7 pin the estimator itself.
+Fourth remediation round (send-boundary race proof, bounded terminal skips)
+#
+Finding
+Change
+Regression tests
+1
+Deterministic proof that nothing is transmitted after a cancellation that lands between the final checks and conn.request()
+Tests pause the worker after every transport check has passed and before anything is written (at the statement right before conn.request(), and at the entry of conn.request()), let the watchdog cancel while it is paused, and release the worker only after cancel() has COMPLETED (events decide the order, never sleeps). A loopback byte sink records what reaches the server. The cancellation's two mechanisms are disabled one at a time to separate EXECUTION PREVENTION from CLEANUP: production (both) transmits 0 bytes and request() is refused by the closed connection (NotConnected, no reconnect); socket shutdown alone (cleanup ignored) lets the write be attempted and the kernel refuses it (sendall error, 0 bytes); connection close alone refuses it before any send; with BOTH disabled the sink receives the request (control: the detector sees transmissions). A kernel-level test shows shutdown() alone prevents any send.
+test_cancellation_between_the_final_checks_and_conn_request_transmits_not_one_byte (2 pause points), test_the_socket_shutdown_alone_prevents_the_write_when_the_cleanup_is_disabled (2), test_closing_the_connection_alone_prevents_the_write_when_the_shutdown_is_disabled, test_control_with_both_mechanisms_disabled_the_request_is_transmitted (2), test_control_without_any_cancellation_the_pause_alone_changes_nothing, test_shutdown_alone_prevents_any_send_at_the_kernel_level, test_fake_transport_level_ordering_of_the_race_is_deterministic
+2
+Upper bound on m_e_ns for terminal skips
+AdmissionDecision now records decided_at_ns (the clock read of the decision; required, a decision without it is refused). The audit binds the decision time between the completion of the preceding request and an audited upper bound: the start of the next recorded request, or, for a terminal skip, the new timeline_end_ns argument (audited run end, must be an integer not before the last record); a terminal skip without that bound is rejected as unbounded. m_e_ns must equal max(decided_at_ns, earliest pacer start recomputed from the records) exactly, so an inflated or deflated m_e_ns cannot pass.
+test_a_terminal_skip_without_an_audited_timeline_bound_is_rejected, test_the_decision_timestamp_must_not_exceed_the_audited_timeline_end, test_an_inflated_decision_time_cannot_hide_behind_a_consistent_theta, test_m_e_is_tied_exactly_to_the_decision_time_and_the_pacer_rules, test_a_non_terminal_skip_is_bounded_by_the_next_recorded_request_not_by_the_timeline, test_the_recorded_decision_timestamp_must_be_a_valid_integer_not_after_m_e, test_a_decision_without_a_recorded_timestamp_cannot_be_used_as_skip_evidence, admission tests
+Runner requirement: when a group is skipped the runner must call decide_admission(..., decided_at_ns=<clock read>) and store the run's final monotonic instant as timeline_end_ns in the manifest.
+Mutation check of the first revision: 61 mutants on tools/obs (own script, NOT the frozen 16-mutant matrix run), all killed; three survivors in the first pass were closed by tightening tests.
+Second remediation round (three targeted findings)
+#
+Finding
+Change
+Regression tests
+1
+Atomic cancellation and send guard
+CancellationState.guarded_send(allowed, send) runs the cancellation check, the absolute-deadline check and the request write (conn.request) inside ONE critical section shared with cancel(); cancel() therefore waits for an in-progress write (bounded by SEND_TIMEOUT_S = 0.25 s) and can never fall between the check and the write. conn.auto_open = 0 is set right after connect() so http.client can never silently reconnect a closed connection, and the worker reads conn.sock once and refuses to write if it is gone
+test_the_write_is_inside_the_critical_section_so_cancel_cannot_interleave, test_guarded_send_and_cancel_are_atomic_under_races, test_a_cancellation_during_the_write_waits_for_the_write_and_never_reconnects, test_a_connection_closed_between_setup_and_the_write_is_never_written_or_reopened, test_real_http_client_never_reconnects_after_a_cancellation_close, test_a_normal_request_disables_implicit_reconnection_and_uses_short_write_timeout
+2
+Absolute deadline inside the worker
+the worker re-reads the monotonic clock against the absolute deadline (start_ns + 17 s) at three points: on entry (thread start-up latency), before connection setup, and inside the critical section immediately before the write (>= the deadline means no send); any of them cancels the state for good
+test_worker_started_after_the_absolute_deadline_does_nothing, test_deadline_passing_before_connection_setup_creates_but_never_connects, test_deadline_passing_during_setup_is_caught_inside_the_critical_section_before_the_write, test_the_deadline_boundary_is_inclusive_for_cancellation, test_pacer_passes_the_start_anchored_deadline_down_to_the_worker_checks
+3
+Rigorous skipped-group admission validation
+validate_missed_window_decision recomputes everything it can from the audit's own inputs: exact class and exact types; lower_server_ns == m_e_ns + theta_lo and upper_server_ns == m_e_ns + theta_hi exactly; theta_lo <= theta_hi; limit_ns == (T + o + tol) x 1e6 from the boundary and the group's own window (GROUP_WINDOWS_MS); the strict inequality lower_server_ns > limit_ns (equality is not a skip); m_e_ns a non-negative integer not earlier than the completion of the preceding request of that boundary; skip evidence for unknown boundaries or groups is refused
+test_audit.py: test_the_strict_skip_inequality_equality_is_not_a_skip, test_derived_server_bounds_must_equal_m_e_plus_theta_exactly, test_limit_must_be_recomputed_from_the_boundary_and_the_group_window, test_non_exact_or_mistyped_numbers_are_rejected, test_m_e_must_not_precede_the_completion_of_the_preceding_request, test_audit_rejects_every_malformed_decision_and_accepts_the_consistent_one, test_a_decision_produced_by_the_real_admission_function_passes_the_audit and others
+Residual, for the runner stage: the audit now recomputes theta from the recorded /time bodies (third round, below); the runner must therefore store each /time response body in its request record (the pacer already does) and pass skips as {(boundary_ms, first_skipped_group): decision}.
+Decisions and findings for the reviewer
+PACE-8 mechanism (finding). An experiment (loopback only) showed that calling httpx.Client.close() from another thread does NOT interrupt a blocked read, whereas socket.shutdown(SHUT_RDWR) does. The transport is therefore built on http.client and the watchdog shuts the socket down and then closes the connection. The protocol sentence "closes its connection" is satisfied; the mechanism is the shutdown. The pacer takes end_ns after the cancellation has finished.
+Cancellation limits. The connect phase has its own 5 s socket timeout (TLS handshake included). DNS resolution cannot be interrupted, so it is made harmless instead: nothing is ever sent after a cancellation (shared state, section above), and a cancellation that does not finish within the 1 s allowance disables the transport and ends the run (INCIDENT-CANCEL). Reviewer: accept?
+Outcome codes without an HTTP response: DEADLINE (watchdog), TIMEOUT (socket timeout), CONNECT_ERROR (anything else), CANCEL_FAILED (a cancellation that did not complete; always the last record, 17 s to 19 s). Check (e) requires a DEADLINE record to last between 17 s and 18 s.
+Group audit (f) harness decisions (the protocol did not spell these out): a group whose last request failed (no 200) may be a PREFIX of the defined role order; a resync group has 3 to 7 /time calls (3 plus up to 4 extra), or fewer only when its last call failed; skipped groups inside a boundary are allowed (MISSED-WINDOW), but order must never go backwards.
+Arithmetic. Decisions use exact rational arithmetic (fractions.Fraction); exported intervals are rounded outward to whole nanoseconds; deadlines are rounded up. The estimator retains samples with b_j >= t - 600 s evaluated at the decision time, and the deadline wake loop re-evaluates the retained set at each wake.
+The pacer starts at max(earliest, target) and never reorders; a wake that is late is recorded as late and judged only by V1 (not part of this commit).
+The default HttpTransport accepts only https://data-api.binance.vision; a loopback http base URL exists solely for offline tests.
+Evidence summary (this commit, Python 3.12.3)
+See the evidence files delivered with this commit: full-suite JUnit and console output, coverage of tools/obs, the mutation log (29 mutants on the new code, own script, NOT the frozen 16-mutant matrix run), and the repository gate outputs.
