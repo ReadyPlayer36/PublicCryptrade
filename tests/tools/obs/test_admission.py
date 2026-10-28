@@ -70,3 +70,15 @@ def test_no_usable_estimate_raises_instead_of_guessing():
     estimator.add(TimeSample(0, 100 * MS, 1_700_000_000_100))
     with pytest.raises(SyncInadequate):                                           # the only sample is older than the retention window
         decide_admission(estimator, m_e_ns=700 * S, boundary_ms=1_700_000_100_000, offset_ms=0, tol_ms=2500)
+
+
+def test_the_decision_records_the_instant_it_was_taken():
+    explicit = decide(M_E + 1, decided_at_ns=M_E - 7)
+    assert explicit.decided_at_ns == M_E - 7 and explicit.m_e_ns == M_E + 1
+    assert decide(M_E + 1).decided_at_ns == M_E + 1                               # by default the decision is taken at m_e itself
+    assert decide(M_E, decided_at_ns=M_E).decided_at_ns == M_E
+
+
+def test_a_decision_cannot_be_taken_after_the_earliest_start_it_is_about():
+    with pytest.raises(ValueError):
+        decide(M_E, decided_at_ns=M_E + 1)
