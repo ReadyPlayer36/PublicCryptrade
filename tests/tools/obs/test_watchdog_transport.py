@@ -14,7 +14,8 @@ import pytest
 from tests.fixtures.obs_fakes import FakeClock, audit_all
 from tools.obs.clock import SystemClock
 from tools.obs.pacer import NonOkResponse, Pacer, PacerAborted
-from tools.obs.params import AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, CONNECT_TIMEOUT_S, DEADLINE_NS, HOST, MS, READ_TIMEOUT_S, S
+from tools.obs.params import (AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, CONNECT_TIMEOUT_S, DEADLINE_NS, HOST, MS, READ_TIMEOUT_S, S,
+                              SEND_TIMEOUT_S)
 from tools.obs.specs import UnsafeRequest, klines_request, time_request
 from tools.obs.transport import (CANCEL_FAILED, CONNECT_ERROR, DEADLINE, MAX_BODY_BYTES, TIMEOUT, HttpTransport, TransportDisabled)
 from tools.obs.watchdog import CancellationFailed, CancellationState, run_with_deadline
@@ -892,3 +893,285 @@ def test_pacer_passes_the_start_anchored_deadline_down_to_the_worker_checks():
     pacer = Pacer(clock, transport, deadline_ns=DEADLINE_AT)                       # pacer start_ns = 0 -> absolute deadline 1 s
     record = pacer.execute(time_request(role="S1"))
     assert record.status == 200 and FakeConnection.instances[0].requests
+
+
+# ---------------- deterministic send-boundary race (re-audit finding 1) ----------------
+# The worker is paused AFTER every check has passed and BEFORE `conn.request()` (the pause is the `sock.settimeout(SEND_TIMEOUT_S)` call,
+# the first statement of the write), the watchdog cancels while it is paused, and the worker is released only once the cancellation has
+# taken effect. No sleeps decide the order: events do. The assertions separate EXECUTION PREVENTION (the write is attempted after the
+# cancellation and cannot transmit) from CLEANUP (closing the connection afterwards).
+class EventLog:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.events = []
+
+    def add(self, name):
+        with self._lock:
+            self.events.append(name)
+
+    def names(self):
+        with self._lock:
+            return list(self.events)
+
+
+class PausingSock:
+    """Proxy for the real socket: records every call, pauses the worker at the start of the write, and can turn the cancellation's
+    `shutdown` and/or `close` into no-ops so that each layer can be tested on its own."""
+
+    def __init__(self, sock, log, *, noop_shutdown=False, noop_close=False, pause=True):
+        self._sock, self.log = sock, log
+        self.noop_shutdown, self.noop_close, self.pause = noop_shutdown, noop_close, pause
+        self.shutdown_event, self.release = threading.Event(), threading.Event()
+        self._paused_once = False
+        self.pause_hook = None
+
+    def settimeout(self, value):
+        if self.pause_hook is not None and value == SEND_TIMEOUT_S and not self._paused_once:      # the statement right before conn.request()
+            self._paused_once = True
+            self.pause_hook()
+        return self._sock.settimeout(value)
+
+    def shutdown(self, how):
+        self.log.add("shutdown")
+        try:
+            if not self.noop_shutdown:
+                return self._sock.shutdown(how)
+        finally:
+            self.shutdown_event.set()
+
+    def close(self):
+        self.log.add("close")
+        if not self.noop_close:
+            return self._sock.close()
+
+    def sendall(self, data):
+        self.log.add("sendall_attempt")
+        try:
+            result = self._sock.sendall(data)
+        except BaseException as exc:
+            self.log.add(f"sendall_error:{type(exc).__name__}")
+            raise
+        self.log.add("sendall_ok")
+        return result
+
+    def dispose(self):
+        """Test hygiene: really close the underlying socket (the scenarios below may have disabled the cancellation's own close)."""
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._sock, name)
+
+
+class SinkHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        sink = self.server.sink
+        index = len(sink.received)
+        sink.received.append(b"")
+        self.request.settimeout(0.05)
+        data, end = b"", time.monotonic() + 6
+        while time.monotonic() < end and not sink.stop.is_set():
+            try:
+                chunk = self.request.recv(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            if not chunk:
+                break
+            data += chunk
+            sink.received[index] = data
+            if b"\r\n\r\n" in data:
+                try:
+                    self.request.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                except OSError:
+                    pass
+                break
+        sink.received[index] = data
+        sink.ended.set()
+
+
+class SinkServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+@pytest.fixture
+def sink():
+    server = SinkServer(("127.0.0.1", 0), SinkHandler)
+    server.sink = server
+    server.received, server.ended, server.stop = [], threading.Event(), threading.Event()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server
+    server.stop.set()
+    server.shutdown()
+    server.server_close()
+    thread.join(2)
+
+
+def run_paused_send(sink, *, pause, deadline_s, point="inside_request", noop_shutdown=False, noop_conn_close=False):
+    """One transport.send() whose worker is paused after every transport check has passed and before anything is written.
+    point="before_request": paused at `sock.settimeout(SEND_TIMEOUT_S)`, the statement right before `conn.request()`.
+    point="inside_request": paused at the entry of `conn.request()` itself (the call was made, nothing written yet).
+    pause="until_cancelled": released only once the watchdog's cancel() has COMPLETED (shutdown, then conn.close); pause=True: released by a timer.
+    The two cancellation mechanisms can be disabled independently: `noop_shutdown` (socket.shutdown) and `noop_conn_close`
+    (conn.close, the cleanup that also drops the socket from the connection object)."""
+    log, holder = EventLog(), {}
+
+    cancel_done = threading.Event()
+
+    def wait_for_release():
+        proxy = holder["proxy"]
+        log.add("paused")
+        assert (cancel_done if pause == "until_cancelled" else proxy.release).wait(5)
+        log.add("resumed")
+
+    class PausedConnection(http.client.HTTPConnection):
+        def connect(self):
+            super().connect()
+            proxy = PausingSock(self.sock, log, noop_shutdown=noop_shutdown, pause=False)
+            if point == "before_request":
+                proxy.pause_hook = wait_for_release
+            holder["proxy"] = self.sock = proxy
+
+        def close(self):
+            try:
+                if noop_conn_close:
+                    log.add("conn_close_ignored")
+                else:
+                    super().close()
+            finally:
+                cancel_done.set()                                            # conn.close() is the last step of the transport's cancel()
+
+        def request(self, method, url, body=None, headers={}, **kw):
+            log.add("request_called")
+            if point == "inside_request":
+                wait_for_release()
+            try:
+                return super().request(method, url, body, headers, **kw)
+            except BaseException as exc:
+                log.add(f"request_error:{type(exc).__name__}")
+                raise
+
+    transport = HttpTransport(base_url=f"http://127.0.0.1:{sink.server_address[1]}", grace_ns=3 * S,
+                              connection_factory=lambda scheme, host, port, timeout: PausedConnection(host, port, timeout=timeout))
+    if pause is True:
+        threading.Timer(0.4, lambda: holder["proxy"].release.set()).start()          # no-cancellation control: released by a timer
+    try:
+        result = transport.send(time_request(role="S1"), deadline_at_ns=CLOCK.now_ns() + int(deadline_s * S))
+    finally:
+        holder["proxy"].dispose()
+    return result, log, holder["proxy"], transport
+
+
+def wait_sink_end(sink):
+    assert sink.ended.wait(4)
+    time.sleep(0.05)
+
+
+@pytest.mark.parametrize("point", ["before_request", "inside_request"])
+def test_cancellation_between_the_final_checks_and_conn_request_transmits_not_one_byte(sink, point):
+    # PRODUCTION cancellation (shutdown, then conn.close). The worker is released after the cancellation took effect.
+    result, log, proxy, transport = run_paused_send(sink, pause="until_cancelled", deadline_s=0.25, point=point)
+    events = log.names()
+    assert (result.status, result.error) == (None, DEADLINE) and transport.disabled_reason is None
+    assert events.index("paused") < events.index("shutdown") < events.index("resumed")          # cancelled WHILE paused
+    if point == "inside_request":
+        assert "request_error:NotConnected" in events                        # request() was running; refused by the closed connection (no reconnect)
+    else:
+        assert "request_called" not in events                                # the statement before request() already failed on the closed socket
+    assert "sendall_attempt" not in events and "sendall_ok" not in events
+    wait_sink_end(sink)
+    assert sink.received == [b""]                                            # one connection, not a single byte of the request, no second connection
+
+
+@pytest.mark.parametrize("point", ["before_request", "inside_request"])
+def test_the_socket_shutdown_alone_prevents_the_write_when_the_cleanup_is_disabled(sink, point):
+    # The connection-level cleanup is ignored, so conn.request() proceeds to the real socket: the write IS attempted after the
+    # cancellation and is refused by the shut-down socket. Prevention (shutdown) is distinct from cleanup (close).
+    result, log, proxy, transport = run_paused_send(sink, pause="until_cancelled", deadline_s=0.25, point=point, noop_conn_close=True)
+    events = log.names()
+    assert (result.status, result.error) == (None, DEADLINE) and "conn_close_ignored" in events
+    assert events.index("shutdown") < events.index("resumed") < events.index("sendall_attempt")
+    assert any(e.startswith("sendall_error:") for e in events) and "sendall_ok" not in events
+    wait_sink_end(sink)
+    assert sink.received == [b""]
+
+
+def test_closing_the_connection_alone_prevents_the_write_when_the_shutdown_is_disabled(sink):
+    result, log, proxy, transport = run_paused_send(sink, pause="until_cancelled", deadline_s=0.25, point="inside_request", noop_shutdown=True)
+    events = log.names()
+    assert (result.status, result.error) == (None, DEADLINE)
+    assert "request_error:NotConnected" in events and "sendall_attempt" not in events
+    wait_sink_end(sink)
+    assert sink.received == [b""]
+
+
+@pytest.mark.parametrize("point", ["before_request", "inside_request"])
+def test_control_with_both_mechanisms_disabled_the_request_is_transmitted(sink, point):
+    # Neither shutdown nor close takes effect: the checks that ran BEFORE the pause cannot stop the write, and the sink receives the
+    # request. This proves the detector sees transmissions and which mechanisms actually prevent them.
+    result, log, proxy, transport = run_paused_send(sink, pause="until_cancelled", deadline_s=0.25, point=point, noop_shutdown=True, noop_conn_close=True)
+    events = log.names()
+    assert "sendall_ok" in events and events.index("shutdown") < events.index("sendall_attempt")
+    wait_sink_end(sink)
+    assert sink.received[0].startswith(b"GET /api/v3/time HTTP/1.1\r\n")
+
+
+def test_control_without_any_cancellation_the_pause_alone_changes_nothing(sink):
+    result, log, proxy, transport = run_paused_send(sink, pause=True, deadline_s=30)
+    assert (result.status, result.error) == (200, None) and "shutdown" not in log.names()
+    wait_sink_end(sink)
+    assert sink.received[0].startswith(b"GET /api/v3/time HTTP/1.1\r\n")
+
+
+def test_shutdown_alone_prevents_any_send_at_the_kernel_level(sink):
+    # Execution prevention is a kernel property of shutdown(), independent of cleanup (close): this is why cancel() shuts down first.
+    raw = socket.create_connection(("127.0.0.1", sink.server_address[1]))
+    raw.shutdown(socket.SHUT_RDWR)
+    with pytest.raises(OSError):
+        raw.sendall(b"GET /api/v3/time HTTP/1.1\r\n\r\n")
+    raw.close()
+    wait_sink_end(sink)
+    assert sink.received == [b""]
+
+
+def test_fake_transport_level_ordering_of_the_race_is_deterministic():
+    # No sockets: the same pause between the final checks and the write, with an explicit order of events.
+    log = EventLog()
+
+    class PausingFake(FakeSock):
+        shutdown_seen = None
+
+        def settimeout(self, value):
+            if value == SEND_TIMEOUT_S:
+                log.add("paused")
+                end = time.monotonic() + 5
+                while not self.shut and time.monotonic() < end:
+                    time.sleep(0.002)
+                log.add("resumed")
+            super().settimeout(value)
+
+        def shutdown(self, how):
+            log.add("shutdown")
+            super().shutdown(how)
+
+    class RacingConnection(FakeConnection):
+        def connect(self):
+            super().connect()
+            self.sock = PausingFake()
+
+        def request(self, method, url, headers):
+            log.add("request_called")
+            super().request(method, url, headers)
+
+    transport = HttpTransport(connection_factory=lambda s, h, p, t: RacingConnection(s, h, p, t), grace_ns=2 * S)
+    result = transport.send(time_request(role="S1"), deadline_at_ns=CLOCK.now_ns() + int(0.2 * S))
+    conn = FakeConnection.instances[-1]
+    names = log.names()
+    assert (result.status, result.error) == (None, DEADLINE)
+    assert names.index("paused") < names.index("shutdown") < names.index("resumed") < names.index("request_called")   # attempted AFTER the cancellation
+    assert conn.requests == []                                                                                      # ... and nothing was transmitted
