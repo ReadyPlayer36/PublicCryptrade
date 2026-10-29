@@ -539,6 +539,20 @@ def audit_problems(records, boundary, group, decision):
     return [f.detail for f in result.failures if f.check == "f"]
 
 
+def direct(decision, records, previous, *, boundary=0, group="g2", timeline_end_ns=10**15, profile=None):
+    """validate_decision_evidence with an HONEST recorder's verified log (decision logged right after `previous`)."""
+    from tools.obs.eventlog import EventLogWriter, verify_event_log
+    from tools.obs.pacer import OBS02_PROFILE
+    writer = EventLogWriter()
+    writer.append_decision(boundary_ms=boundary, group_name=group, decided_at_ns=decision.decided_at_ns, m_e_ns=decision.m_e_ns,
+                           records=records[: previous.seq])
+    if timeline_end_ns is not None:
+        writer.append_timeline_end(timeline_end_ns=timeline_end_ns, records=records)
+    log = verify_event_log(writer.events, writer.head_digest, records)
+    return validate_decision_evidence(decision, records, previous_record=previous, profile=profile or OBS02_PROFILE, verified_log=log,
+                                      boundary_ms=boundary, group_name=group)
+
+
 CASES = [("g0", ("resync",)), ("g1", ("resync", "g0")), ("g2", ("resync", "g0", "g1")), ("g3", ("resync", "g0", "g1", "g2")),
          ("ref", ("resync", "g0", "g1", "g2", "g3"))]
 
@@ -655,12 +669,12 @@ def test_m_e_may_not_precede_the_rolling_cap_release_recomputed_from_the_records
     records = handmade_records()
     previous = records[-1]                                                           # start 35.4 s; 60 starts within 60 s
     early = decision_at(records, 36 * S)                                             # completion and spacing (36.0 s) are satisfied ...
-    problems = validate_decision_evidence(early, records, previous_record=previous, profile=OBS02_PROFILE)
+    problems = direct(early, records, previous)
     assert any("earlier than the earliest start the pacer rules allow" in p and "(60000000000)" in p for p in problems)    # ... the 60 s cap is not
     released = decision_at(records, 60 * S)
-    assert not any("earlier than the earliest" in p for p in validate_decision_evidence(released, records, previous_record=previous, profile=OBS02_PROFILE))
+    assert not any("earlier than the earliest" in p for p in direct(released, records, previous))
     just_before = decision_at(records, 60 * S - 1)
-    assert any("earlier than the earliest" in p for p in validate_decision_evidence(just_before, records, previous_record=previous, profile=OBS02_PROFILE))
+    assert any("earlier than the earliest" in p for p in direct(just_before, records, previous))
 
 
 def test_the_completion_of_a_long_preceding_request_bounds_m_e_in_the_evidence_check():
@@ -669,10 +683,10 @@ def test_the_completion_of_a_long_preceding_request_bounds_m_e_in_the_evidence_c
     previous = RequestRecord(2, "PROBE", KLINES_PATH, 1 * S, 6 * S, 200, None, None, None, None, b"[]")      # lasted 5 s: start + 0.6 s < end
     records = [first, previous]
     early = decision_at(records, 3 * S)                                              # after start + spacing (1.6 s), before the completion (6 s)
-    problems = validate_decision_evidence(early, records, previous_record=previous, profile=OBS02_PROFILE)
+    problems = direct(early, records, previous)
     assert any("earlier than the earliest start the pacer rules allow" in p and f"({6 * S})" in p for p in problems)
     on_time = decision_at(records, 6 * S)
-    assert not any("earlier than the earliest" in p for p in validate_decision_evidence(on_time, records, previous_record=previous, profile=OBS02_PROFILE))
+    assert not any("earlier than the earliest" in p for p in direct(on_time, records, previous))
 
 
 def test_the_fallback_window_rule_of_the_estimator_is_reproduced_by_the_audit():
@@ -690,11 +704,11 @@ def test_the_fallback_window_rule_of_the_estimator_is_reproduced_by_the_audit():
     assert estimator.estimate(m_e).used_fallback and estimator.estimate(m_e, allow_fallback=False) is None
     honest = decide_admission(estimator, m_e_ns=m_e, boundary_ms=0, offset_ms=0, tol_ms=2500)
     assert honest.admitted is False
-    assert validate_decision_evidence(honest, records, previous_record=previous, profile=OBS02_PROFILE, timeline_end_ns=200 * S) == []
+    assert direct(honest, records, previous, timeline_end_ns=200 * S) == []
     only_old = OffsetEstimator()
     only_old.add(time_samples_before(records, m_e)[0][0])
     wrong = decide_admission(only_old, m_e_ns=m_e, boundary_ms=0, offset_ms=0, tol_ms=2500)
-    assert any("does not match the evidence" in p for p in validate_decision_evidence(wrong, records, previous_record=previous, profile=OBS02_PROFILE, timeline_end_ns=200 * S))
+    assert any("does not match the evidence" in p for p in direct(wrong, records, previous, timeline_end_ns=200 * S))
 
 
 # ---- evidence extraction helpers ----
@@ -735,7 +749,7 @@ def terminal_problems(records, boundary, decision, **kw):
 def test_a_terminal_skip_without_an_audited_timeline_bound_is_rejected():
     records, decision, boundary = evidence_case("g2")                               # nothing was sent after the skip: it is terminal
     unbounded = terminal_problems(records, boundary, decision, timeline_end_ns=None)
-    assert any("no audited timeline upper bound" in p and "unbounded" in p for p in unbounded)
+    assert any("no recorded TIMELINE_END event" in p and "unbounded" in p for p in unbounded)
     assert terminal_problems(records, boundary, decision, timeline_end_ns=decision.decided_at_ns) == []      # a bound, even a tight one, suffices
     assert audit_all(records, skips={(boundary, "g2"): decision}, timeline_end_ns=decision.decided_at_ns).ok
 
@@ -753,7 +767,8 @@ def test_the_decision_timestamp_must_not_exceed_the_audited_timeline_end():
 def test_the_timeline_end_itself_must_be_a_plain_integer_not_before_the_last_record(bad):
     records, decision, boundary = evidence_case("g2")
     result = audit_all(records, skips={(boundary, "g2"): decision}, timeline_end_ns=bad)
-    assert not result.ok and any(f.check == "a" and "timeline_end_ns" in f.detail for f in result.failures)
+    assert not result.ok                                                               # an unusable bound is never accepted as a bound
+    assert any(f.check == "a" and "event log rejected" in f.detail for f in result.failures) or any("unbounded" in f.detail for f in result.failures)
 
 
 def test_an_inflated_decision_time_cannot_hide_behind_a_consistent_theta():
@@ -818,10 +833,9 @@ def test_validate_decision_evidence_rejects_an_m_e_that_precedes_the_decision_ti
     records, honest, boundary = evidence_case("g2")
     previous = records[-1]
     inverted = replace(honest, decided_at_ns=honest.m_e_ns + 1)                      # never reaches the evidence check through the audit
-    problems = validate_decision_evidence(inverted, records, previous_record=previous, profile=OBS02_PROFILE, timeline_end_ns=10**15)
+    problems = direct(inverted, records, previous, timeline_end_ns=10**15)
     assert any("precedes decided_at_ns" in p for p in problems)
-    assert not any("precedes decided_at_ns" in p for p in validate_decision_evidence(honest, records, previous_record=previous,
-                                                                                       profile=OBS02_PROFILE, timeline_end_ns=10**15))
+    assert not any("precedes decided_at_ns" in p for p in direct(honest, records, previous, timeline_end_ns=10**15))
 
 
 def test_a_timeline_end_equal_to_the_last_completion_is_a_valid_bound_by_itself():
