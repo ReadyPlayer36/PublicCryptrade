@@ -18,7 +18,7 @@ from typing import Mapping, Sequence
 from tools.obs.admission import AdmissionDecision
 from tools.obs.estimator import OffsetEstimator, TimeSample
 from tools.obs.eventlog import EventLogError, VerifiedEventLog, records_digest, verify_event_log
-from tools.obs.runstore import AuthenticatedManifest, ManifestError, load_run, manifest_trust_error
+from tools.obs.runstore import AuthenticatedManifest, ManifestError, ManifestTrustError, load_run, validate_and_snapshot_manifest
 from tools.obs.pacer import OBS02_PROFILE, PaceProfile, RequestRecord, release_ns, window_count
 from tools.obs.params import AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, DEADLINE_NS, KLINES_PATH, MAX_CONSECUTIVE_NO_RESPONSE, MS, TIME_PATH
 from tools.obs.transport import CANCEL_FAILED, DEADLINE
@@ -103,14 +103,17 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
     timeline_end_ns: int | None = None
     if event_log is not None or manifest is not None:
         try:
-            trust_error = manifest_trust_error(manifest)                       # before any manifest attribute is read
-            if trust_error is not None:
-                raise EventLogError(trust_error)
-            if manifest.record_count != len(records) or manifest.records_digest != records_digest(records):
+            try:
+                snapshot = validate_and_snapshot_manifest(manifest)               # before any manifest attribute is used
+            except ManifestTrustError as exc:
+                raise EventLogError(str(exc)) from exc
+            if isinstance(event_log, (list, tuple)):
+                event_log = tuple(event_log)                                      # freeze the log the same way: check and use see one object
+            if snapshot.record_count != len(records) or snapshot.records_digest != records_digest(records):
                 raise EventLogError("the records do not match the authenticated manifest (record count or digest)")
-            if event_log is None or manifest.event_count != len(event_log):
+            if event_log is None or snapshot.event_count != len(event_log):
                 raise EventLogError("the event log does not match the authenticated manifest event count")
-            verified = verify_event_log(event_log, manifest.event_log_head, records)
+            verified = verify_event_log(event_log, snapshot.event_log_head, records)
         except EventLogError as exc:
             fail("a", None, f"event log rejected: {exc}")
         else:
@@ -524,5 +527,9 @@ def audit_run(run_dir, *, pinned_manifest_sha256: object, wrapper_count: int | N
     except ManifestError as exc:
         return AuditResult((AuditFailure("a", None, f"run rejected: {exc}"),))
     kwargs.setdefault("jsonl_count", len(run.records))
-    kwargs.setdefault("manifest_count", run.manifest.record_count)
+    try:
+        snapshot = validate_and_snapshot_manifest(run.manifest)
+    except ManifestTrustError as exc:
+        return AuditResult((AuditFailure("a", None, f"run rejected: {exc}"),))
+    kwargs.setdefault("manifest_count", snapshot.record_count)
     return audit_pace(run.records, event_log=run.events, manifest=run.manifest, wrapper_count=wrapper_count, **kwargs)

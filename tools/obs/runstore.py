@@ -79,14 +79,49 @@ _NOT_SUPPLIED = "no authenticated run manifest was supplied (the head digest mus
 _MUTATED = "the manifest's authenticated fields were mutated in place after issue (object.__setattr__ tampering)"
 
 
-def _trusted_seal(candidate: object) -> str:
-    """SHA-256 over the canonical current values of _TRUSTED_FIELDS. A missing attribute or a value that cannot be
-    canonically encoded yields a value that never equals an issued seal (the caller treats the error as mutation)."""
+@dataclass(frozen=True)
+class ManifestSnapshot:
+    """Immutable copy of the seven authenticated manifest fields, taken at the moment the seal was verified. Every later
+    decision in the audit reads THESE values, never the (mutable) AuthenticatedManifest instance, so check and use operate
+    on the same immutable data. It is a plain value object: it is not a loader-issued manifest and cannot be passed as one."""
+    record_count: int
+    records_file_sha256: str
+    records_digest: str
+    event_count: int
+    events_file_sha256: str
+    event_log_head: str
+    manifest_sha256: str
+
+
+class ManifestTrustError(ManifestError):
+    """The candidate is not a genuine, unmodified loader-issued manifest."""
+
+
+_INT_FIELDS = ("record_count", "event_count")
+
+
+def _read_trusted_values(candidate: object) -> tuple | None:
+    """Read each authenticated field exactly ONCE and return the values as a tuple, or None if any is missing or not an exact
+    int/str. Both the seal and the snapshot are built from this one tuple, never from a second read."""
     try:
-        values = [[name, getattr(candidate, name)] for name in _TRUSTED_FIELDS]
-        return _sha256(_canonical(values).encode())
-    except (AttributeError, TypeError, ValueError):
-        return "unsealable"
+        values = tuple(getattr(candidate, name) for name in _TRUSTED_FIELDS)
+    except AttributeError:
+        return None
+    for name, value in zip(_TRUSTED_FIELDS, values):
+        if type(value) is not (int if name in _INT_FIELDS else str):
+            return None
+    return values
+
+
+def _seal_of(values: tuple) -> str:
+    return _sha256(_canonical([[name, value] for name, value in zip(_TRUSTED_FIELDS, values)]).encode())
+
+
+def _trusted_seal(candidate: object) -> str:
+    """SHA-256 over the canonical current values of _TRUSTED_FIELDS (a missing or wrongly typed field yields a value that
+    never equals an issued seal)."""
+    values = _read_trusted_values(candidate)
+    return "unsealable" if values is None else _seal_of(values)
 
 
 def _register(manifest: "AuthenticatedManifest") -> None:
@@ -94,19 +129,30 @@ def _register(manifest: "AuthenticatedManifest") -> None:
     _SEALS[manifest] = _trusted_seal(manifest)
 
 
-def manifest_trust_error(candidate: object) -> str | None:
-    """None when `candidate` is a genuine, unmodified loader-issued manifest; otherwise the reason it is not trusted. The
-    type and identity checks read no attribute of the candidate; the seal check reads only the authenticated fields."""
+def validate_and_snapshot_manifest(candidate: object) -> ManifestSnapshot:
+    """Verify identity (weak registry) and the off-instance seal, and return an immutable snapshot of the authenticated
+    fields; raise ManifestTrustError otherwise. The fields are read once, the seal is recomputed from those very values and
+    the snapshot is built from them, so what was checked is exactly what is returned (no time-of-check/time-of-use gap)."""
     if type(candidate) is not AuthenticatedManifest:
-        return _NOT_SUPPLIED
+        raise ManifestTrustError(_NOT_SUPPLIED)
     try:
         issued = candidate in _ISSUED
     except TypeError:
         issued = False
     if not issued:
-        return _NOT_SUPPLIED
-    if _SEALS.get(candidate) != _trusted_seal(candidate):
-        return _MUTATED
+        raise ManifestTrustError(_NOT_SUPPLIED)
+    values = _read_trusted_values(candidate)
+    if values is None or _SEALS.get(candidate) != _seal_of(values):
+        raise ManifestTrustError(_MUTATED)
+    return ManifestSnapshot(*values)
+
+
+def manifest_trust_error(candidate: object) -> str | None:
+    """None when `candidate` is a genuine, unmodified loader-issued manifest; otherwise the reason it is not trusted."""
+    try:
+        validate_and_snapshot_manifest(candidate)
+    except ManifestTrustError as exc:
+        return str(exc)
     return None
 
 
