@@ -94,6 +94,13 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
     they match events of a hash-chained event log that verifies against the head digest of an AUTHENTICATED run manifest
     (tools.obs.runstore.load_manifest: pinned SHA-256, strict parse, self-digest; never a scalar) and against the records
     themselves (tools.obs.eventlog). A log without an authenticated manifest is rejected. An unverifiable log is a failure of check (a) and counts as no log."""
+    # Freeze every caller-owned input ONCE, before anything is checked: the digest check, the event-log binding, the decision
+    # matching and every traversal below read these immutable objects, never the caller's (possibly concurrently mutated)
+    # list or mapping. RequestRecord is a frozen dataclass of immutable fields, so a tuple of them is a stable snapshot.
+    records = tuple(records)
+    skips = None if skips is None else dict(skips)
+    expected_boundaries = None if expected_boundaries is None else tuple(expected_boundaries)
+    boundary_skips = None if boundary_skips is None else dict(boundary_skips)
     failures: list[AuditFailure] = []
 
     def fail(check: str, seq: int | None, detail: str) -> None:
