@@ -52,7 +52,7 @@ Hardened audit
 test_audit.py (50 tests)
 6
 Regression tests
-listed above; 196 tests in tests/tools/obs
+listed above; 364 tests in tests/tools/obs
 
 Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
 #
@@ -115,3 +115,17 @@ The pacer starts at max(earliest, target) and never reorders; a wake that is lat
 The default HttpTransport accepts only https://data-api.binance.vision; a loopback http base URL exists solely for offline tests.
 Evidence summary (this commit, Python 3.12.3)
 See the evidence files delivered with this commit: full-suite JUnit and console output, coverage of tools/obs, the mutation log (29 mutants on the new code, own script, NOT the frozen 16-mutant matrix run), and the repository gate outputs.
+
+Fifth remediation round (evidence-bound admission provenance)
+#
+Finding
+Change
+Regression tests
+1
+decided_at_ns and the terminal timeline_end_ns were bare scalars; a fabricated pair that was arithmetically consistent would pass
+New tools/obs/eventlog.py: an append-only log (EventLogWriter) of DECISION and TIMELINE_END events. Each entry carries records_before and records_digest (SHA-256 of exactly those request records, bodies hashed) and prev_hash / entry_hash (SHA-256 of canonical JSON), so editing, dropping, inserting or reordering an event breaks the chain, and a log from another run fails the record binding. verify_event_log(events, manifest_head_digest, records) rebuilds the chain, matches the manifest head, and returns a VerifiedEventLog that cannot be constructed elsewhere. audit_pace(event_log=, event_log_head=) replaces the timeline_end_ns scalar (passing it is now a TypeError); validate_decision_evidence requires the verified log and the (boundary, group): decided_at_ns and m_e_ns must equal the ONE recorded DECISION event, logged right after the preceding request (records_before == previous seq), and the terminal bound is the log's TIMELINE_END event (which must cover every record). A missing log, event, terminal event, or any mismatch fails closed (check a or f).
+tests/tools/obs/test_provenance.py: test_audit_pace_has_no_bare_timeline_end_parameter, test_a_consistent_decision_without_any_log_is_rejected, test_a_consistent_decision_absent_from_a_valid_log_is_rejected, test_a_fabricated_but_arithmetically_consistent_decision_time_is_rejected, test_a_fabricated_timeline_end_is_rejected_even_when_consistent_with_the_decision, test_a_tampered_field_is_rejected, test_a_tampered_entry_rehashed_by_the_forger_breaks_the_chain_and_the_manifest_digest, test_dropping_inserting_or_reordering_events_is_rejected, test_a_truncated_log_that_loses_its_terminal_event_is_rejected, test_a_terminal_skip_without_a_timeline_end_event_is_unbounded_and_rejected, test_a_decision_event_with_a_different_m_e_or_decision_time_is_rejected, test_a_decision_event_logged_for_another_group_or_boundary_does_not_bind_this_decision, test_a_log_from_a_different_run_is_rejected_by_the_record_binding, test_the_chain_hash_is_the_documented_sha256_of_canonical_json, and others
+Supersedes item 2 of the fourth round: the "new timeline_end_ns argument" no longer exists; the bound comes from the verified TIMELINE_END event. Tests that exercised the scalar (test_audit.py) now go through an honest recorder in tests/fixtures/obs_fakes.py (recorded_events / verified_log_for); audit_all(timeline_end_ns=...) is a test convenience that logs the value, never a scalar passed to the audit.
+Runner requirement (replaces the fourth-round note): when a group is skipped the runner calls decide_admission(..., decided_at_ns=<clock read>) and immediately EventLogWriter.append_decision(...) with the records completed so far; at the end of the run it appends TIMELINE_END, and stores writer.events and writer.head_digest in the manifest. The head digest must be recorded where the operator cannot rewrite it afterwards (limit: whoever controls records, log and head together can forge a consistent triple).
+Mutation check (own spot check, not the frozen 16-mutant matrix): disabling the decided_at_ns equality check, the missing-event check, or the head-digest comparison makes 4 tests fail each; all were restored.
+
