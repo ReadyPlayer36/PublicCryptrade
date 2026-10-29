@@ -10,7 +10,9 @@ The audit never receives the head digest as a scalar. It receives an `Authentica
 `load_manifest`: the manifest file's bytes must match a SHA-256 PINNED OUT OF BAND (recorded where the run operator cannot
 rewrite it after the run: a committed evidence file, a ticket, a signed release note), the JSON must be strict (no duplicate
 keys, exact key set, exact types), and the self-digest must verify. Anything missing, malformed or mismatching raises
-`ManifestError` (fail closed). No key material of any kind is used or stored.
+`ManifestError` (fail closed). Provenance is by identity: `is_loader_issued` is True only for the instances load_manifest
+minted (a weak registry), so dataclasses.replace() / object.__new__ forgeries are rejected. Persisted records and events are
+validated strictly (no coercion; booleans, floats and wrong shapes are rejected). No key material of any kind is used or stored.
 
 Limit (stated, not hidden): authentication is exactly as independent as the pinned digest. Whoever can rewrite the run
 directory AND the place the digest is pinned can forge a consistent run.
@@ -22,6 +24,7 @@ import hashlib
 import json
 import os
 import re
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -43,7 +46,14 @@ class ManifestError(ValueError):
     """The run manifest or a persisted run artifact is missing, malformed or fails authentication."""
 
 
-@dataclass(frozen=True)
+# Process-level registry of manifests minted by load_manifest. A frozen dataclass can be copied with dataclasses.replace()
+# (which re-passes every init field, the private token included) or built with object.__new__, so neither the token nor
+# isinstance() proves provenance. Membership here does: eq=False makes the instances hash and compare BY IDENTITY, so a copy
+# that merely has equal field values is not a member.
+_ISSUED: "weakref.WeakSet[AuthenticatedManifest]" = weakref.WeakSet()
+
+
+@dataclass(frozen=True, eq=False)
 class AuthenticatedManifest:
     record_count: int
     records_file_sha256: str
@@ -57,6 +67,17 @@ class AuthenticatedManifest:
     def __post_init__(self) -> None:
         if self._token is not _TOKEN:
             raise ManifestError("an AuthenticatedManifest can only be produced by load_manifest")
+
+
+def is_loader_issued(candidate: object) -> bool:
+    """True only for the exact instance objects minted by load_manifest (identity membership; copies, replace() results,
+    object.__new__ instances, subclasses and non-manifests are all False). Never touches the candidate's attributes."""
+    if type(candidate) is not AuthenticatedManifest:
+        return False
+    try:
+        return candidate in _ISSUED
+    except TypeError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -167,8 +188,10 @@ def load_manifest(path: str | os.PathLike, *, pinned_sha256: object) -> Authenti
             raise ManifestError(f"the manifest field {key} must be 64 lowercase hex characters")
     if data["manifest_digest"] != _manifest_self_digest(data):
         raise ManifestError("the manifest self-digest does not verify (a field was edited)")
-    return AuthenticatedManifest(data["record_count"], data["records_file_sha256"], data["records_digest"], data["event_count"],
-                                 data["events_file_sha256"], data["event_log_head"], _sha256(raw), _TOKEN)
+    manifest = AuthenticatedManifest(data["record_count"], data["records_file_sha256"], data["records_digest"], data["event_count"],
+                                     data["events_file_sha256"], data["event_log_head"], _sha256(raw), _TOKEN)
+    _ISSUED.add(manifest)
+    return manifest
 
 
 def _jsonl(raw: bytes, what: str, keys: set) -> list[dict]:
@@ -183,6 +206,85 @@ def _jsonl(raw: bytes, what: str, keys: set) -> list[dict]:
     return out
 
 
+def _req_int(value: object, what: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ManifestError(f"{what} must be an integer, got {type(value).__name__}")
+    return value
+
+
+def _req_range(value: object, what: str, low: int, high: int) -> int:
+    number = _req_int(value, what)
+    if not low <= number <= high:
+        raise ManifestError(f"{what} {number} is outside [{low}, {high}]")
+    return number
+
+
+def _req_str(value: object, what: str) -> str:
+    if not isinstance(value, str):
+        raise ManifestError(f"{what} must be a string, got {type(value).__name__}")
+    return value
+
+
+def _req_hex64(value: object, what: str) -> str:
+    if not isinstance(value, str) or not _HEX64.fullmatch(value):
+        raise ManifestError(f"{what} must be 64 lowercase hex characters")
+    return value
+
+
+def _opt(check, value: object, what: str, *args):
+    return None if value is None else check(value, what, *args)
+
+
+def _req_headers(value: object, what: str) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, list):
+        raise ManifestError(f"{what} must be a list of [name, value] pairs")
+    pairs = []
+    for position, pair in enumerate(value):
+        if not isinstance(pair, list) or len(pair) != 2:
+            raise ManifestError(f"{what}[{position}] must be a two-element [name, value] list")
+        pairs.append((_req_str(pair[0], f"{what}[{position}] name"), _req_str(pair[1], f"{what}[{position}] value")))
+    return tuple(pairs)
+
+
+def _req_fields(value: object, what: str) -> tuple[tuple[str, int | str], ...]:
+    if not isinstance(value, list):
+        raise ManifestError(f"{what} must be a list of [key, value] pairs")
+    pairs = []
+    for position, pair in enumerate(value):
+        if not isinstance(pair, list) or len(pair) != 2:
+            raise ManifestError(f"{what}[{position}] must be a two-element [key, value] list")
+        item = pair[1]
+        if not (isinstance(item, str) or _is_int(item)):
+            raise ManifestError(f"{what}[{position}] value must be an integer or string, got {type(item).__name__}")
+        pairs.append((_req_str(pair[0], f"{what}[{position}] key"), item))
+    return tuple(pairs)
+
+
+_I64 = 2**63 - 1
+
+
+def _record_from_json(obj: dict, line: int) -> RequestRecord:
+    tag = f"records.jsonl line {line}"
+    try:
+        body = base64.b64decode(_req_str(obj["body_b64"], f"{tag} body_b64"), validate=True)
+    except ValueError as exc:
+        raise ManifestError(f"{tag}: invalid body: {exc}") from exc
+    return RequestRecord(
+        _req_range(obj["seq"], f"{tag} seq", 0, _I64), _req_str(obj["role"], f"{tag} role"), _req_str(obj["path"], f"{tag} path"),
+        _req_range(obj["start_ns"], f"{tag} start_ns", 0, _I64), _req_range(obj["end_ns"], f"{tag} end_ns", 0, _I64),
+        _opt(_req_range, obj["status"], f"{tag} status", 100, 599), _opt(_req_str, obj["error"], f"{tag} error"),
+        _opt(_req_str, obj["group_name"], f"{tag} group_name"), _opt(_req_str, obj["group_kind"], f"{tag} group_kind"),
+        _opt(_req_range, obj["boundary_ms"], f"{tag} boundary_ms", 0, _I64), body, _req_headers(obj["headers"], f"{tag} headers"))
+
+
+def _event_from_json(obj: dict, line: int) -> LogEvent:
+    tag = f"events.jsonl line {line}"
+    return LogEvent(
+        _req_range(obj["index"], f"{tag} index", 0, _I64), _req_str(obj["kind"], f"{tag} kind"), _req_fields(obj["fields"], f"{tag} fields"),
+        _req_range(obj["records_before"], f"{tag} records_before", 0, _I64), _req_hex64(obj["records_digest"], f"{tag} records_digest"),
+        _req_hex64(obj["prev_hash"], f"{tag} prev_hash"), _req_hex64(obj["entry_hash"], f"{tag} entry_hash"))
+
+
 def load_run(run_dir: str | os.PathLike, *, pinned_manifest_sha256: object) -> LoadedRun:
     """Load records, events and the authenticated manifest from disk; every file must match the manifest."""
     directory = Path(run_dir)
@@ -192,22 +294,13 @@ def load_run(run_dir: str | os.PathLike, *, pinned_manifest_sha256: object) -> L
         raise ManifestError("records.jsonl does not match the manifest digest (altered or substituted)")
     if _sha256(events_raw) != manifest.events_file_sha256:
         raise ManifestError("events.jsonl does not match the manifest digest (altered or substituted log)")
-    records = []
-    for obj in _jsonl(records_raw, "records.jsonl", _RECORD_KEYS):
-        try:
-            body = base64.b64decode(obj["body_b64"], validate=True)
-            headers = tuple((str(a), str(b)) for a, b in obj["headers"])
-        except (ValueError, TypeError) as exc:
-            raise ManifestError(f"records.jsonl: invalid body or headers: {exc}") from exc
-        records.append(RequestRecord(obj["seq"], obj["role"], obj["path"], obj["start_ns"], obj["end_ns"], obj["status"], obj["error"],
-                                     obj["group_name"], obj["group_kind"], obj["boundary_ms"], body, headers))
-    events = []
-    for obj in _jsonl(events_raw, "events.jsonl", _EVENT_KEYS):
-        try:
-            fields = tuple((str(k), v) for k, v in obj["fields"])
-        except (ValueError, TypeError) as exc:
-            raise ManifestError(f"events.jsonl: invalid fields: {exc}") from exc
-        events.append(LogEvent(obj["index"], obj["kind"], fields, obj["records_before"], obj["records_digest"], obj["prev_hash"], obj["entry_hash"]))
+    try:
+        records = [_record_from_json(obj, n) for n, obj in enumerate(_jsonl(records_raw, "records.jsonl", _RECORD_KEYS), 1)]
+        events = [_event_from_json(obj, n) for n, obj in enumerate(_jsonl(events_raw, "events.jsonl", _EVENT_KEYS), 1)]
+    except ManifestError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, OverflowError) as exc:      # normalise anything unforeseen into the controlled error
+        raise ManifestError(f"persisted run artifact is malformed: {exc!r}") from exc
     if len(records) != manifest.record_count or len(events) != manifest.event_count:
         raise ManifestError("record or event count does not match the manifest")
     return LoadedRun(tuple(records), tuple(events), manifest)
