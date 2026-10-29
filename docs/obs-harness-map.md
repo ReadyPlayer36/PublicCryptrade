@@ -52,7 +52,7 @@ Hardened audit
 test_audit.py (50 tests)
 6
 Regression tests
-listed above; 397 tests in tests/tools/obs
+listed above; 473 tests in tests/tools/obs
 
 Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
 #
@@ -140,4 +140,19 @@ New tools/obs/runstore.py. write_run persists records.jsonl, events.jsonl and ma
 tests/tools/obs/test_run_manifest_e2e.py (31 tests): test_a_complete_run_round_trips_through_disk_and_passes_the_audit, test_the_head_digest_comes_only_from_the_authenticated_manifest, test_a_missing_manifest_or_artifact_fails_closed, test_a_missing_or_malformed_pinned_digest_fails_closed, test_a_wrong_pin_fails_closed, test_a_malformed_manifest_is_rejected_even_with_a_matching_pin (7 shapes), test_editing_the_manifest_without_the_pin_is_detected, test_editing_a_manifest_field_breaks_the_self_digest_even_if_the_forger_re_pins, test_a_fully_re_digested_forged_manifest_is_rejected_by_the_original_pin, test_altering_the_head_digest_to_fit_a_substituted_log_is_rejected, test_any_byte_change_in_a_persisted_file_is_detected (2 files), test_a_records_file_from_another_run_is_rejected, test_a_truncated_jsonl_file_is_rejected_even_when_re_pinned, test_dropping_the_terminal_event_from_a_persisted_run_is_rejected, test_a_persisted_run_without_a_recorded_decision_cannot_justify_a_skip, test_a_persisted_run_without_a_timeline_end_cannot_bound_a_terminal_skip
 Test convenience: tests/fixtures/obs_fakes.py audit_all(event_log_head=...) persists that head as a manifest and loads it through the real loader; it never reaches the audit as a scalar.
 Not covered (stated): AdmissionDecision objects (skips) are still passed by the caller and are checked against the logged DECISION events, not persisted; the pin's own storage (where it is recorded and who can rewrite it) is an operational control outside this code. Mutation spot check (own, not the frozen 16-mutant run): disabling the pin match, the records-file digest, the events-file digest, the manifest self-digest or the isinstance check on the manifest makes 1 to 7 tests fail each; all were restored.
+
+Seventh remediation round (manifest trust boundary and strict persisted types)
+#
+Finding
+Change
+Regression tests
+1
+isinstance() and the private token on AuthenticatedManifest could be bypassed: dataclasses.replace() re-passes every init field, and object.__new__ skips __init__
+tools/obs/runstore.py: a process-level weak registry _ISSUED (weakref.WeakSet) that load_manifest alone fills, and is_loader_issued(candidate), true only for the exact instances minted by the loader (type must be exactly AuthenticatedManifest; non-weakref-able candidates are False; no attribute is read). The dataclass is now frozen with eq=False so instances hash and compare by identity: with value equality a replace() copy would hash and compare equal to the genuine instance and the WeakSet lookup would accept it. tools/obs/audit.py uses is_loader_issued(manifest) before touching the manifest. Note: the registry lives in runstore.py (there is no tools/obs/manifest.py in the repository).
+tests/tools/obs/test_manifest_trust_and_types.py: test_forged_or_copied_manifests_are_not_loader_issued_and_the_audit_rejects_them (replace, replace with change, object.__new__, subclass, copy.copy, copy.deepcopy, look-alike namespace, dict, None, int), test_a_forged_manifest_carrying_a_matching_head_is_rejected_even_though_every_field_is_equal, test_the_check_happens_before_any_attribute_access
+2
+load_run coerced raw JSON (str() on headers and fields) and passed unvalidated numbers, so booleans and floats could enter RequestRecord and LogEvent
+tools/obs/runstore.py: _req_int (rejects bool and non-int), _req_range, _req_str, _req_hex64, _req_headers and _req_fields (exact two-element list shapes, string names and values, int or string field values), with per-field ranges (seq, timestamps, boundary and counts in 0..2^63-1, status 100..599). load_run builds every record and event through them; any unforeseen ValueError, TypeError, KeyError, AttributeError or OverflowError is normalised to ManifestError, which audit_run reports as a check (a) failure.
+tests/tools/obs/test_manifest_trust_and_types.py: 35 wrong-type or out-of-range record cases and 23 event cases (each re-pinned so only the validators can object), test_valid_artifacts_load_with_exact_types_and_no_coercion, test_headers_with_content_survive_a_round_trip_exactly
+Mutation spot check (own, not the frozen 16-mutant run): reverting the audit to isinstance, switching the dataclass back to value equality, removing the registry add, dropping the bool rejection, or coercing headers with str() makes 7, 5, 81, 6 and 3 tests fail respectively; all restored.
 
