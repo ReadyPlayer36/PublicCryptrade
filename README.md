@@ -1,7 +1,7 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `impl-obs-harness`, based on commit `5d1d712c495c7d3adc664c593e7a41f8fcf78594`
-(tree `71cb6e6a85fe459d428c299a9d64347b13bf54e4`). A commit cannot contain its own SHA, so the
+Branch `impl-obs-harness`, based on commit `8724a2a33bb3235c2c2ad0b8cc6bd0dfd145db99`
+(tree `4f53bad124e17a8fb31a7dfbd0d3691a6aa22552`). A commit cannot contain its own SHA, so the
 SHA of this revision is reported in the submission message, not here. Production code and the
 observation harness are actively implemented under `src/trading_app/` and `tools/obs/`; the
 Stage-1 frozen specification and its approval record are preserved unchanged.
@@ -10,12 +10,12 @@ credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — working tree on top of base commit `5d1d712`,
+Offline verification of this revision — working tree on top of base commit `8724a2a`,
 Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
 (`pip install -e ".[dev]"`):
 
-- Full suite: **1200 passed, 0 failed, 0 skipped** in 74.5 s with `filterwarnings = ["error"]`
-  (base `5d1d712`: 1182 passed; this revision adds 18 tests, all in
+- Full suite: **1211 passed, 0 failed, 0 skipped** in 67.7 s with `filterwarnings = ["error"]`
+  (base `8724a2a`: 1200 passed; this revision adds 11 tests, all in
   `tests/tools/obs/test_manifest_trust_and_types.py`). Results apply to the identified revision
   and test environment; they do not establish live acceptance.
 - Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
@@ -44,7 +44,12 @@ Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
   issue). `manifest_trust_error` rejects in-place mutation or deletion of any of those fields
   (e.g. `object.__setattr__`) before the audit reads the manifest. Residual limit: code that can
   write the module-level registries (`_ISSUED`, `_SEALS`) can still forge trust; this is
-  tamper-evidence inside an honest process, not a sandbox. See `docs/obs-harness-map.md`, "Sixth remediation round".
+  tamper-evidence inside an honest process, not a sandbox.
+  Fix 8: no time-of-check/time-of-use gap. `validate_and_snapshot_manifest` reads the seven
+  authenticated fields once, recomputes the seal from those very values, and returns an immutable
+  `ManifestSnapshot`; `audit_pace` (and `audit_run`) decide only on the snapshot, never on the
+  mutable instance, and freeze a list event log into a tuple. Not covered: the `records`
+  sequence itself is not snapshotted. See `docs/obs-harness-map.md`, "Sixth remediation round".
 - Source scan (previous revision, not re-run here): `grep -rn "NotImplementedError" src/`
   returned 0 matches; this change touches no file under `src/`.
 - Traceability: not re-run for this change. Acceptance remains blocked by absent live/CI
