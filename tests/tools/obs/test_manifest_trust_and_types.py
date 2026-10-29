@@ -189,3 +189,82 @@ def test_headers_with_content_survive_a_round_trip_exactly(tmp_path):
     pin = runstore.write_run(tmp_path / "hdr", records, events)
     loaded = load_run(tmp_path / "hdr", pinned_manifest_sha256=pin)
     assert loaded.records[0].headers == (("Retry-After", "5"), ("X-Mbx-Used-Weight", "12")) and loaded.records[0].body == b"\x00\xffbody"
+
+
+# ---- Fix 7b: in-place mutation of a genuine, loader-issued manifest (object.__setattr__) ----
+from tools.obs.eventlog import EventLogWriter
+from tools.obs.runstore import _SEALS, _TRUSTED_FIELDS, manifest_trust_error
+
+MUTATED = "mutated in place after issue"
+NOT_SUPPLIED = "no authenticated run manifest was supplied"
+
+
+def test_a_genuine_manifest_has_no_trust_error_and_its_seal_lives_off_the_instance(run):
+    *_, manifest = run
+    assert manifest_trust_error(manifest) is None and is_loader_issued(manifest)
+    assert manifest in _SEALS and not any("seal" in name for name in vars(manifest))             # nothing on the instance to overwrite
+
+
+@pytest.mark.parametrize("field", _TRUSTED_FIELDS)
+def test_object_setattr_on_any_authenticated_field_is_detected(run, field):
+    run_dir, pin, records, events, skips, manifest = run
+    original = getattr(manifest, field)
+    replacement = original + 1 if isinstance(original, int) else "f" * 64
+    object.__setattr__(manifest, field, replacement)
+    assert is_loader_issued(manifest) is False
+    assert MUTATED in manifest_trust_error(manifest)
+    result = audit_with(records, events, skips, manifest)
+    assert not result.ok and MUTATED in text(result)
+
+
+@pytest.mark.parametrize("replacement", [None, 1.5, True, b"bytes", object()])
+def test_replacing_a_trusted_field_with_any_other_type_is_detected(run, replacement):
+    run_dir, pin, records, events, skips, manifest = run
+    object.__setattr__(manifest, "event_log_head", replacement)
+    assert manifest_trust_error(manifest) is not None and MUTATED in manifest_trust_error(manifest)
+
+
+def test_deleting_a_trusted_field_in_place_is_detected(run):
+    run_dir, pin, records, events, skips, manifest = run
+    object.__delattr__(manifest, "records_digest")
+    assert MUTATED in manifest_trust_error(manifest)
+
+
+def test_a_mutated_manifest_cannot_authenticate_a_fabricated_event_log(run):
+    """The attack: build a different, internally valid log and point the genuine manifest's head at it in place."""
+    run_dir, pin, records, events, skips, manifest = run
+    fabricated = EventLogWriter()
+    for event in events:
+        if event.kind == "DECISION":
+            fabricated.append_decision(boundary_ms=event.get("boundary_ms"), group_name=event.get("group_name"),
+                                       decided_at_ns=event.get("decided_at_ns") + 1, m_e_ns=event.get("m_e_ns"), records=records[: event.records_before])
+        else:
+            fabricated.append_timeline_end(timeline_end_ns=event.get("timeline_end_ns"), records=records)
+    control = audit_with(records, fabricated.events, skips, manifest)                              # unmutated: the head does not fit
+    assert not control.ok and "manifest digest" in text(control)
+    object.__setattr__(manifest, "event_log_head", fabricated.head_digest)                         # now the head fits the fabricated log ...
+    object.__setattr__(manifest, "event_count", len(fabricated.events))
+    result = audit_with(records, fabricated.events, skips, manifest)
+    assert not result.ok and MUTATED in text(result)                                               # ... but the manifest is no longer trusted
+
+
+def test_the_gate_runs_before_any_manifest_attribute_is_read(run):
+    run_dir, pin, records, events, skips, manifest = run
+    object.__setattr__(manifest, "record_count", 10**6)                                            # would otherwise trip the record-count check
+    result = audit_with(records, events, skips, manifest)
+    assert MUTATED in text(result) and "records do not match" not in text(result)
+
+
+def test_forgeries_still_report_the_not_supplied_reason(run):
+    run_dir, pin, records, events, skips, manifest = run
+    for forged in (dataclasses.replace(manifest), None, 7, SimpleNamespace()):
+        assert NOT_SUPPLIED in manifest_trust_error(forged)
+
+
+def test_restoring_the_original_value_leaves_the_manifest_unchanged_and_trusted(run):
+    run_dir, pin, records, events, skips, manifest = run
+    original = manifest.event_count
+    object.__setattr__(manifest, "event_count", original + 1)
+    assert not is_loader_issued(manifest)
+    object.__setattr__(manifest, "event_count", original)                                          # the seal covers VALUES: no net change
+    assert is_loader_issued(manifest) and audit_with(records, events, skips, manifest).ok
