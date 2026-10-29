@@ -1,7 +1,7 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `impl-obs-harness`, based on commit `b0bc3e36ba2bd72e28eb050424b125c9d3cf2d79`
-(tree `99e459664fcfd34a4ce650e5edda98f18b618a4c`). A commit cannot contain its own SHA, so the
+Branch `impl-obs-harness`, based on commit `323e8b03e3df7a5a5b5a0b9b08b89d1d6a4462fb`
+(tree `acbe7da399cad3a3ae378e3f6aaed93a67223ccb`). A commit cannot contain its own SHA, so the
 SHA of this revision is reported in the submission message, not here. Production code and the
 observation harness are actively implemented under `src/trading_app/` and `tools/obs/`; the
 Stage-1 frozen specification and its approval record are preserved unchanged.
@@ -10,13 +10,13 @@ credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — working tree on top of base commit `b0bc3e3`,
+Offline verification of this revision — working tree on top of base commit `323e8b0`,
 Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
 (`pip install -e ".[dev]"`):
 
-- Full suite: **1239 passed, 0 failed, 0 skipped** in 70.4 s with `filterwarnings = ["error"]`
-  (base `b0bc3e3`: 1211 passed; this revision adds 28 tests, all in
-  `tests/tools/obs/test_records_snapshot.py`). Results apply to the identified revision and test
+- Full suite: **1266 passed, 0 failed, 0 skipped** in 77.3 s with `filterwarnings = ["error"]`
+  (base `323e8b0`: 1239 passed; this revision adds 27 tests, all in
+  `tests/tools/obs/test_snapshot_failure.py`). Results apply to the identified revision and test
   environment; they do not establish live acceptance.
 - Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
   `tools/validate_matrix.py` (104 acceptance rows, 58 item bindings, 18 mutation killers) and
@@ -52,7 +52,12 @@ Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
   Fix 9: `audit_pace` freezes its caller-owned inputs once at entry (`records` into a tuple of
   frozen `RequestRecord`s; `skips` and `boundary_skips` into dicts; `expected_boundaries` into a
   tuple), and the digest check, event-log binding, decision matching and every traversal read
-  only those frozen copies, so a list mutated during the audit cannot change its outcome. See `docs/obs-harness-map.md`, "Sixth remediation round".
+  only those frozen copies, so a list mutated during the audit cannot change its outcome.
+  Fix 10: building those snapshots runs caller-controlled code, so it sits inside a fail-closed
+  boundary: any `Exception` raised while copying `records`, `skips`, `boundary_skips`,
+  `expected_boundaries` or a list/tuple `event_log` becomes a controlled check (a) failure
+  ("input snapshot failed for <input>: <type>: <message>"); `KeyboardInterrupt` and `SystemExit`
+  still propagate. See `docs/obs-harness-map.md`, "Sixth remediation round".
 - Source scan (previous revision, not re-run here): `grep -rn "NotImplementedError" src/`
   returned 0 matches; this change touches no file under `src/`.
 - Traceability: not re-run for this change. Acceptance remains blocked by absent live/CI
