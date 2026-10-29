@@ -1,7 +1,7 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `obs-harness-provenance`, based on commit `ab11cf5df41e36ba22e8e5e7ca28f3dec4cdda2c`
-(tree `fbc18a00ea5b0b7745da2e6488acf3c93166c07e`). A commit cannot contain its own SHA, so the
+Branch `impl-obs-harness`, based on commit `4afe5824441e08750ba2562fd0aba4b3266cec93`
+(tree `4e15a7a4e1facb22d443d59b58d747b73de2d40a`). A commit cannot contain its own SHA, so the
 SHA of this revision is reported in the submission message, not here. Production code and the
 observation harness are actively implemented under `src/trading_app/` and `tools/obs/`; the
 Stage-1 frozen specification and its approval record are preserved unchanged.
@@ -10,26 +10,32 @@ credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — working tree on top of base commit `ab11cf5`
-(tree `fbc18a00ea5b0b7745da2e6488acf3c93166c07e`), Python 3.12.3, in a fresh virtual
-environment installed from `pyproject.toml` (`pip install -e ".[dev]"`):
+Offline verification of this revision — working tree on top of base commit `4afe582`,
+Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
+(`pip install -e ".[dev]"`):
 
-- Full suite: **1073 passed, 0 failed, 0 skipped** in 67.5 s (base `ab11cf5` alone:
-  1041 passed; this revision adds 32 tests: 30 in
-  `tests/tools/obs/test_provenance.py` and 2 existing harness-safety checks, no credentials/orders/
-  private endpoints and no wall clock, which now also cover `tools/obs/eventlog.py`) with `filterwarnings = ["error"]`. Results apply to the
-  identified revision and test environment; they do not establish live acceptance.
+- Full suite: **1106 passed, 0 failed, 0 skipped** in 64.2 s with `filterwarnings = ["error"]`
+  (base `4afe582`: 1073 passed; this revision adds 33 tests: 31 in
+  `tests/tools/obs/test_run_manifest_e2e.py` and 2 existing harness-safety checks, no
+  credentials/orders/private endpoints and no wall clock, which now also cover
+  `tools/obs/runstore.py`). Results apply to the identified revision and test environment; they
+  do not establish live acceptance.
 - Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
   `tools/validate_matrix.py` (104 acceptance rows, 58 item bindings, 18 mutation killers) and
   `tools/spec_check.py` (13 passed). Not re-run for this change and therefore not claimed here:
   `tools/red_reason_gate.py`, `tools/concurrency_evidence.py`, `pip-audit`, traceability audit.
-  Their earlier results (previous revision) are not restated.
-- Evidence-bound provenance (new): `decided_at_ns` and the terminal `timeline_end_ns` are no
-  longer accepted as bare scalars. `tools/obs/eventlog.py` provides a SHA-256 hash-chained
-  event log whose entries are bound to a digest of the recorded requests; `audit_pace` verifies
-  it against the manifest head digest before trusting any timestamp. This is tamper-evident,
-  not tamper-proof: the head digest must be stored where the run's operator cannot rewrite it.
-  See `docs/obs-harness-map.md`, "Fifth remediation round".
+- Evidence-bound provenance: `decided_at_ns` and the terminal `timeline_end_ns` are never bare
+  scalars. `tools/obs/eventlog.py` is a SHA-256 hash-chained event log bound to a digest of the
+  recorded requests. `tools/obs/runstore.py` persists a run (`records.jsonl`, `events.jsonl`,
+  `manifest.json`, each written once) and provides the manifest loader: `load_manifest` /
+  `load_run` authenticate `manifest.json` against a SHA-256 **pinned out of band**, parse it
+  strictly (no duplicate or extra keys, exact types) and verify its self-digest, and every file's
+  digest must match the manifest. `audit_pace` no longer has a head-digest parameter: it takes
+  an `AuthenticatedManifest`, constructible only by the loader, and `audit_run(run_dir,
+  pinned_manifest_sha256=...)` audits a persisted run end to end. A missing, malformed, altered
+  or unpinned manifest, or a substituted log or records file, is an audit failure (check a).
+  Limit: this is tamper-evident, not tamper-proof; it is exactly as independent as the pinned
+  digest, and no key material is used. See `docs/obs-harness-map.md`, "Sixth remediation round".
 - Source scan (previous revision, not re-run here): `grep -rn "NotImplementedError" src/`
   returned 0 matches; this change touches no file under `src/`.
 - Traceability: not re-run for this change. Acceptance remains blocked by absent live/CI
