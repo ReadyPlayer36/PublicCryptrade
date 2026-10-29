@@ -1,7 +1,7 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `impl-obs-harness`, based on commit `4afe5824441e08750ba2562fd0aba4b3266cec93`
-(tree `4e15a7a4e1facb22d443d59b58d747b73de2d40a`). A commit cannot contain its own SHA, so the
+Branch `impl-obs-harness`, based on commit `b0420ab7a89cc13ec555119f34150497ebe8f140`
+(tree `3558aba2a5ac6a80439567e2fd68ee4c83f17f10`). A commit cannot contain its own SHA, so the
 SHA of this revision is reported in the submission message, not here. Production code and the
 observation harness are actively implemented under `src/trading_app/` and `tools/obs/`; the
 Stage-1 frozen specification and its approval record are preserved unchanged.
@@ -10,16 +10,14 @@ credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — working tree on top of base commit `4afe582`,
+Offline verification of this revision — working tree on top of base commit `b0420ab`,
 Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
 (`pip install -e ".[dev]"`):
 
-- Full suite: **1106 passed, 0 failed, 0 skipped** in 64.2 s with `filterwarnings = ["error"]`
-  (base `4afe582`: 1073 passed; this revision adds 33 tests: 31 in
-  `tests/tools/obs/test_run_manifest_e2e.py` and 2 existing harness-safety checks, no
-  credentials/orders/private endpoints and no wall clock, which now also cover
-  `tools/obs/runstore.py`). Results apply to the identified revision and test environment; they
-  do not establish live acceptance.
+- Full suite: **1182 passed, 0 failed, 0 skipped** in 72.7 s with `filterwarnings = ["error"]`
+  (base `b0420ab`: 1106 passed; this revision adds 76 tests, all in
+  `tests/tools/obs/test_manifest_trust_and_types.py`). Results apply to the identified revision
+  and test environment; they do not establish live acceptance.
 - Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
   `tools/validate_matrix.py` (104 acceptance rows, 58 item bindings, 18 mutation killers) and
   `tools/spec_check.py` (13 passed). Not re-run for this change and therefore not claimed here:
@@ -35,7 +33,12 @@ Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
   pinned_manifest_sha256=...)` audits a persisted run end to end. A missing, malformed, altered
   or unpinned manifest, or a substituted log or records file, is an audit failure (check a).
   Limit: this is tamper-evident, not tamper-proof; it is exactly as independent as the pinned
-  digest, and no key material is used. See `docs/obs-harness-map.md`, "Sixth remediation round".
+  digest, and no key material is used. Fix 7: `AuthenticatedManifest` provenance is by identity
+  (`is_loader_issued`, a weak registry filled only by `load_manifest`; the class uses `eq=False`
+  so a copy with equal values is not a member), so `dataclasses.replace()`, `object.__new__`,
+  `copy`, subclasses and look-alikes are rejected before any attribute is read; persisted records
+  and events are validated strictly (`_req_int/_req_range/_req_str/_req_hex64/_req_headers`: no
+  coercion, booleans, floats and wrong shapes rejected as `ManifestError`). See `docs/obs-harness-map.md`, "Sixth remediation round".
 - Source scan (previous revision, not re-run here): `grep -rn "NotImplementedError" src/`
   returned 0 matches; this change touches no file under `src/`.
 - Traceability: not re-run for this change. Acceptance remains blocked by absent live/CI
