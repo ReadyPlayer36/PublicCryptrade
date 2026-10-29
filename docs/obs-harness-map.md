@@ -52,7 +52,7 @@ Hardened audit
 test_audit.py (50 tests)
 6
 Regression tests
-listed above; 473 tests in tests/tools/obs
+listed above; 491 tests in tests/tools/obs
 
 Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
 #
@@ -155,4 +155,15 @@ load_run coerced raw JSON (str() on headers and fields) and passed unvalidated n
 tools/obs/runstore.py: _req_int (rejects bool and non-int), _req_range, _req_str, _req_hex64, _req_headers and _req_fields (exact two-element list shapes, string names and values, int or string field values), with per-field ranges (seq, timestamps, boundary and counts in 0..2^63-1, status 100..599). load_run builds every record and event through them; any unforeseen ValueError, TypeError, KeyError, AttributeError or OverflowError is normalised to ManifestError, which audit_run reports as a check (a) failure.
 tests/tools/obs/test_manifest_trust_and_types.py: 35 wrong-type or out-of-range record cases and 23 event cases (each re-pinned so only the validators can object), test_valid_artifacts_load_with_exact_types_and_no_coercion, test_headers_with_content_survive_a_round_trip_exactly
 Mutation spot check (own, not the frozen 16-mutant run): reverting the audit to isinstance, switching the dataclass back to value equality, removing the registry add, dropping the bool rejection, or coercing headers with str() makes 7, 5, 81, 6 and 3 tests fail respectively; all restored.
+
+Seventh-b remediation round (off-instance seal against in-place mutation)
+#
+Finding
+Change
+Regression tests
+1
+A genuine, loader-issued AuthenticatedManifest could be mutated in place with object.__setattr__, keeping its registry identity while changing event_log_head and the counts
+tools/obs/runstore.py: _TRUSTED_FIELDS (record_count, records_file_sha256, records_digest, event_count, events_file_sha256, event_log_head, manifest_sha256) and _SEALS, a weak-key dictionary OUTSIDE the instance holding SHA-256 over the canonical current values of those fields, written by _register() at issue (load_manifest). manifest_trust_error(candidate) returns the not-supplied message for a wrong type or a non-issued instance (no attribute is read), the mutated-in-place message when the stored seal differs from the recomputed one (a missing attribute or a non-encodable value counts as mutation), else None; is_loader_issued is manifest_trust_error(...) is None. tools/obs/audit.py audit_pace calls manifest_trust_error first and raises EventLogError with its text, before any manifest attribute is read.
+tests/tools/obs/test_manifest_trust_and_types.py: test_object_setattr_on_any_authenticated_field_is_detected (7 fields), test_replacing_a_trusted_field_with_any_other_type_is_detected, test_deleting_a_trusted_field_in_place_is_detected, test_a_mutated_manifest_cannot_authenticate_a_fabricated_event_log, test_the_gate_runs_before_any_manifest_attribute_is_read, test_a_genuine_manifest_has_no_trust_error_and_its_seal_lives_off_the_instance, test_forgeries_still_report_the_not_supplied_reason, test_restoring_the_original_value_leaves_the_manifest_unchanged_and_trusted
+Stated limits: the seal covers VALUES, so restoring a field to its original value leaves no net change (pinned by a test); the registries are module-level, so code that can write _ISSUED or _SEALS directly can still forge trust. Mutation spot check (own, not the frozen 16-mutant run): disabling the seal comparison, storing a wrong seal, dropping event_log_head from the sealed fields, or removing the audit gate makes 16, 84, 6 and 27 tests fail; all restored.
 
