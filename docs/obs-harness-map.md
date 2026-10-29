@@ -52,7 +52,7 @@ Hardened audit
 test_audit.py (50 tests)
 6
 Regression tests
-listed above; 502 tests in tests/tools/obs
+listed above; 530 tests in tests/tools/obs
 
 Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
 #
@@ -177,4 +177,15 @@ audit_pace validated the manifest and then re-read attributes from the mutable i
 tools/obs/runstore.py: ManifestSnapshot (frozen dataclass of the seven authenticated fields) and validate_and_snapshot_manifest(candidate), which checks exact type, WeakSet identity and the off-instance seal and returns the snapshot, raising ManifestTrustError (a ManifestError) otherwise. Each field is read exactly once (_read_trusted_values, which also requires exact int/str types); the seal is recomputed from those same values and the snapshot is built from them, so what was checked is what is returned. manifest_trust_error and is_loader_issued are wrappers. tools/obs/audit.py audit_pace uses only snapshot.record_count, records_digest, event_count and event_log_head, and converts a list event log to a tuple; audit_run takes manifest_count from a snapshot.
 tests/tools/obs/test_manifest_trust_and_types.py: test_the_audit_uses_only_the_snapshot_even_if_the_instance_changes_after_validation (all authenticated fields are changed right after the check; the audit still passes), test_tampering_after_validation_cannot_rescue_a_fabricated_log_either, test_the_snapshot_is_an_immutable_copy_of_exactly_the_seven_authenticated_fields, test_a_snapshot_cannot_be_passed_off_as_an_authenticated_manifest, test_validation_raises_for_forgeries_and_for_mutation, test_a_wrongly_typed_field_is_never_snapshotted, test_audit_run_reads_the_manifest_counts_from_the_snapshot_and_rejects_a_mutated_instance, test_audit_run_fails_closed_when_the_instance_changes_between_its_two_validations
 Stated limits: audit_run validates twice (its own snapshot for manifest_count, then audit_pace), so a change between the two fails closed rather than being tolerated. The records sequence and the event log's LogEvent objects are not snapshotted (LogEvent is frozen; the list is frozen into a tuple). Mutation spot check (own, not the frozen 16-mutant run): reading event_log_head, record_count/records_digest or event_count from the raw manifest instead of the snapshot, or dropping the seal comparison, makes 2, 1, 1 and 14 tests fail; replacing audit_run's manifest_count with a raw read is behaviourally equivalent (audit_pace re-validates and fails closed), so no test can distinguish it.
+
+Ninth remediation round (records snapshot at the audit boundary)
+#
+Finding
+Change
+Regression tests
+1
+audit_pace took the records as a mutable sequence: a list changed between the digest check and later decisions could change the audit outcome
+tools/obs/audit.py audit_pace: first statements freeze the inputs: records = tuple(records) (RequestRecord is a frozen dataclass of immutable fields, bytes body and tuple headers, so the tuple is a stable snapshot), skips = dict(skips), boundary_skips = dict(boundary_skips), expected_boundaries = tuple(expected_boundaries). Every later use, including records_digest(records), verify_event_log, the integrity and pacing checks, _audit_groups and validate_decision_evidence, reads these frozen objects. A generator of records is consumed exactly once.
+tests/tools/obs/test_records_snapshot.py (28 tests): test_a_list_mutated_after_the_audit_began_cannot_change_the_outcome (4 hook points inside the audit, namely after the manifest snapshot, after the digest check, after the event-log verification and after the abort derivation, times 6 mutations: clear, append, reverse, delete first, tamper last record, replace with empty; the outcome and failures equal the unmutated baseline), test_the_snapshot_preserves_a_failing_verdict_too, test_mutating_the_list_before_the_audit_is_still_caught_by_the_digest, test_skips_and_boundary_mappings_are_frozen_at_entry_too, test_a_generator_of_records_is_consumed_exactly_once
+Stated limits: the mutation is simulated deterministically by hooks that run inside the audit (no real threads are used, so a genuine data race is not exercised); records are protected by immutability of their fields, so a caller who mutates a record's contents through object.__setattr__ before the call is caught only by the manifest digest. Mutation spot check (own, not the frozen 16-mutant run): removing the records snapshot makes 26 tests fail; removing the skips snapshot makes 1 fail; both restored.
 
