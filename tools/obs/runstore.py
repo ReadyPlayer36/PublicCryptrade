@@ -69,15 +69,51 @@ class AuthenticatedManifest:
             raise ManifestError("an AuthenticatedManifest can only be produced by load_manifest")
 
 
-def is_loader_issued(candidate: object) -> bool:
-    """True only for the exact instance objects minted by load_manifest (identity membership; copies, replace() results,
-    object.__new__ instances, subclasses and non-manifests are all False). Never touches the candidate's attributes."""
-    if type(candidate) is not AuthenticatedManifest:
-        return False
+# Off-instance seal. Identity membership alone does not stop `object.__setattr__(genuine, "event_log_head", ...)`, which
+# mutates a loader-issued instance in place. At issue the loader records, OUTSIDE the instance, a SHA-256 over the canonical
+# values of every authenticated field; the audit gate recomputes it from the instance's current values, so any in-place
+# change (or deletion) of a trusted field is detected before the manifest is used.
+_TRUSTED_FIELDS = ("record_count", "records_file_sha256", "records_digest", "event_count", "events_file_sha256", "event_log_head", "manifest_sha256")
+_SEALS: "weakref.WeakKeyDictionary[AuthenticatedManifest, str]" = weakref.WeakKeyDictionary()
+_NOT_SUPPLIED = "no authenticated run manifest was supplied (the head digest must come from load_manifest)"
+_MUTATED = "the manifest's authenticated fields were mutated in place after issue (object.__setattr__ tampering)"
+
+
+def _trusted_seal(candidate: object) -> str:
+    """SHA-256 over the canonical current values of _TRUSTED_FIELDS. A missing attribute or a value that cannot be
+    canonically encoded yields a value that never equals an issued seal (the caller treats the error as mutation)."""
     try:
-        return candidate in _ISSUED
+        values = [[name, getattr(candidate, name)] for name in _TRUSTED_FIELDS]
+        return _sha256(_canonical(values).encode())
+    except (AttributeError, TypeError, ValueError):
+        return "unsealable"
+
+
+def _register(manifest: "AuthenticatedManifest") -> None:
+    _ISSUED.add(manifest)
+    _SEALS[manifest] = _trusted_seal(manifest)
+
+
+def manifest_trust_error(candidate: object) -> str | None:
+    """None when `candidate` is a genuine, unmodified loader-issued manifest; otherwise the reason it is not trusted. The
+    type and identity checks read no attribute of the candidate; the seal check reads only the authenticated fields."""
+    if type(candidate) is not AuthenticatedManifest:
+        return _NOT_SUPPLIED
+    try:
+        issued = candidate in _ISSUED
     except TypeError:
-        return False
+        issued = False
+    if not issued:
+        return _NOT_SUPPLIED
+    if _SEALS.get(candidate) != _trusted_seal(candidate):
+        return _MUTATED
+    return None
+
+
+def is_loader_issued(candidate: object) -> bool:
+    """True only for the exact instance objects minted by load_manifest whose authenticated fields are unchanged since issue
+    (copies, replace() results, object.__new__ instances, subclasses, non-manifests and in-place-mutated instances are False)."""
+    return manifest_trust_error(candidate) is None
 
 
 @dataclass(frozen=True)
@@ -190,7 +226,7 @@ def load_manifest(path: str | os.PathLike, *, pinned_sha256: object) -> Authenti
         raise ManifestError("the manifest self-digest does not verify (a field was edited)")
     manifest = AuthenticatedManifest(data["record_count"], data["records_file_sha256"], data["records_digest"], data["event_count"],
                                      data["events_file_sha256"], data["event_log_head"], _sha256(raw), _TOKEN)
-    _ISSUED.add(manifest)
+    _register(manifest)
     return manifest
 
 
