@@ -17,6 +17,7 @@ from typing import Mapping, Sequence
 
 from tools.obs.admission import AdmissionDecision
 from tools.obs.estimator import OffsetEstimator, TimeSample
+from tools.obs.eventlog import EventLogError, VerifiedEventLog, verify_event_log
 from tools.obs.pacer import OBS02_PROFILE, PaceProfile, RequestRecord, release_ns, window_count
 from tools.obs.params import AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, DEADLINE_NS, KLINES_PATH, MAX_CONSECUTIVE_NO_RESPONSE, MS, TIME_PATH
 from tools.obs.transport import CANCEL_FAILED, DEADLINE
@@ -87,11 +88,29 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
                skips: Mapping[tuple[int, str], AdmissionDecision] | None = None,
                expected_boundaries: Sequence[int] | None = None,
                boundary_skips: Mapping[int, str] | None = None,
-               timeline_end_ns: int | None = None) -> AuditResult:
+               event_log: Sequence[object] | None = None, event_log_head: str | None = None) -> AuditResult:
+    """`decided_at_ns` and the terminal `timeline_end_ns` are never accepted as bare scalars: they are trusted only when
+    they match events of a hash-chained event log that verifies against `event_log_head` (the manifest digest) and against
+    the records themselves (tools.obs.eventlog). An unverifiable log is a failure of check (a) and counts as no log."""
     failures: list[AuditFailure] = []
 
     def fail(check: str, seq: int | None, detail: str) -> None:
         failures.append(AuditFailure(check, seq, detail))
+
+    verified: VerifiedEventLog | None = None
+    timeline_end_ns: int | None = None
+    if event_log is not None or event_log_head is not None:
+        try:
+            verified = verify_event_log(event_log, event_log_head, records)
+        except EventLogError as exc:
+            fail("a", None, f"event log rejected: {exc}")
+        else:
+            end_event = verified.timeline_end
+            if end_event is not None:
+                timeline_end_ns = end_event.get("timeline_end_ns")
+                if end_event.records_before != len(records):
+                    fail("a", None, f"TIMELINE_END was logged after {end_event.records_before} records but {len(records)} exist")
+                    timeline_end_ns = None
 
     # (a) integrity
     typed_ok = True
@@ -153,7 +172,7 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
 
     # (f) group metadata, group integrity, verified skips
     usable_end = timeline_end_ns if _is_int(timeline_end_ns) and (not records or timeline_end_ns >= records[-1].end_ns) else None   # a bad bound is no bound
-    _audit_groups(records, skips or {}, expected_boundaries, boundary_skips or {}, derived, abort_seq, profile, usable_end, fail)
+    _audit_groups(records, skips or {}, expected_boundaries, boundary_skips or {}, derived, abort_seq, profile, usable_end, fail, verified)
 
     # (g) egress counters: all three are required
     for label, count in (("jsonl", jsonl_count), ("wrapper", wrapper_count), ("manifest", manifest_count)):
@@ -260,7 +279,7 @@ def time_samples_before(records: Sequence[RequestRecord], m_e_ns: int) -> tuple[
 
 
 def validate_decision_evidence(decision: AdmissionDecision, records: Sequence[RequestRecord], *, previous_record: RequestRecord,
-                               profile: PaceProfile, timeline_end_ns: int | None = None) -> list[str]:
+                               profile: PaceProfile, verified_log: VerifiedEventLog | None, boundary_ms: int, group_name: str) -> list[str]:
     """Tie an admission decision to the recorded evidence instead of trusting its arithmetic.
       * theta: the estimator (the approved implementation: exact rationals, drift widening from the request start, retention by
         completion time, 60 s fallback after an empty intersection) is re-run on the /time responses recorded before `m_e_ns`,
@@ -268,12 +287,35 @@ def validate_decision_evidence(decision: AdmissionDecision, records: Sequence[Re
       * decision time: the recorded `decided_at_ns` must lie between the completion of the preceding request and an AUDITED
         UPPER BOUND: the start of the next recorded request, or, for a terminal skip (nothing was sent afterwards), the audited
         `timeline_end_ns` of the run. A terminal skip with no such bound is rejected: its decision time would be unbounded;
+      * provenance: `decided_at_ns` and m_e_ns must equal the fields of the ONE recorded DECISION event for (boundary, group) in
+        a verified, hash-chained event log, logged right after the preceding request completed (records_before ==
+        previous_record.seq); the terminal upper bound is that log's TIMELINE_END event, never a caller-supplied scalar. A
+        missing log, a missing event or any mismatch fails, however consistent the arithmetic is;
       * m_e_ns is exactly max(decided_at_ns, earliest pacer start), the earliest start being recomputed from the records
         (completion, spacing, rolling caps) as the pacer computes it.
     The decision must already have passed `validate_missed_window_decision` (so its numbers are exact and consistent)."""
     problems: list[str] = []
     m_e = decision.m_e_ns
     decided = decision.decided_at_ns
+    timeline_end_ns: int | None = None
+    if not isinstance(verified_log, VerifiedEventLog):
+        problems.append("decided_at_ns is not bound to recorded evidence: no verified event log was supplied")
+    else:
+        event = verified_log.decision_event(boundary_ms, group_name)
+        if event is None:
+            problems.append(f"no recorded DECISION event for ({boundary_ms}, {group_name}): decided_at_ns {decided} is unrecorded")
+        else:
+            if event.get("decided_at_ns") != decided:
+                problems.append(f"decided_at_ns {decided} does not match the recorded decision event ({event.get('decided_at_ns')})")
+            if event.get("m_e_ns") != m_e:
+                problems.append(f"m_e_ns {m_e} does not match the recorded decision event ({event.get('m_e_ns')})")
+            if event.records_before != previous_record.seq:
+                problems.append(f"the decision was recorded after {event.records_before} records, not right after record {previous_record.seq}")
+        end_event = verified_log.timeline_end
+        if end_event is not None and end_event.records_before == len(records):
+            candidate = end_event.get("timeline_end_ns")
+            if _is_int(candidate) and (not records or candidate >= records[-1].end_ns):
+                timeline_end_ns = candidate
     prefix = list(records[: previous_record.seq])
     starts = [record.start_ns for record in prefix]
     earliest = max(previous_record.end_ns, previous_record.start_ns + profile.spacing_ns, release_ns(starts, profile.windows))
@@ -283,7 +325,7 @@ def validate_decision_evidence(decision: AdmissionDecision, records: Sequence[Re
     else:
         upper, upper_name = timeline_end_ns, "the audited timeline end"
     if upper is None:
-        problems.append("terminal skip: no audited timeline upper bound (timeline_end_ns) was supplied, so the decision time is unbounded")
+        problems.append("terminal skip: no recorded TIMELINE_END event bounds the run, so the decision time is unbounded")
     elif decided > upper:
         problems.append(f"decided_at_ns {decided} is later than {upper_name} ({upper})")
     if decided < previous_record.end_ns:
@@ -346,7 +388,7 @@ def _record_metadata_ok(record: RequestRecord, fail) -> bool:
     return ok
 
 
-def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, abort_seq, profile, timeline_end_ns, fail) -> None:
+def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, abort_seq, profile, timeline_end_ns, fail, verified_log=None) -> None:
     meta_ok = [_record_metadata_ok(record, fail) for record in records]
     aborted = derived is not None or abort_seq is not None
     last_boundary: int | None = None
@@ -422,7 +464,8 @@ def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, 
                 problems = validate_missed_window_decision(decision, boundary_ms=boundary, group_name=name,
                                                            previous_end_ns=previous.end_ns if previous is not None else None)
                 if not problems and previous is not None:
-                    problems = validate_decision_evidence(decision, records, previous_record=previous, profile=profile, timeline_end_ns=timeline_end_ns)
+                    problems = validate_decision_evidence(decision, records, previous_record=previous, profile=profile, verified_log=verified_log,
+                                                          boundary_ms=boundary, group_name=name)
                 if problems:
                     fail("f", None, f"skip evidence for ({boundary}, {name}) is not a consistent MISSED-WINDOW decision: " + "; ".join(problems))
                 elif later_present:
