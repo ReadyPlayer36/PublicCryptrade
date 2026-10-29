@@ -1,33 +1,40 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `impl-obs-harness` (tip `b303ce6`). Production code and the observation
-harness are actively implemented under `src/trading_app/` and `tools/obs/`; the
+Branch `obs-harness-provenance`, based on commit `ab11cf5df41e36ba22e8e5e7ca28f3dec4cdda2c`
+(tree `fbc18a00ea5b0b7745da2e6488acf3c93166c07e`). A commit cannot contain its own SHA, so the
+SHA of this revision is reported in the submission message, not here. Production code and the
+observation harness are actively implemented under `src/trading_app/` and `tools/obs/`; the
 Stage-1 frozen specification and its approval record are preserved unchanged.
 Milestone 1 remains `BLOCKED`: live acceptance is not authorized, and no API
 credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — commit `b303ce60be884108655b5d7dcc58db71ac4fac45`,
-tree `e556935dd3f917ff871291fdfda7d75279ecee56`, Python 3.12.3, pytest 9.1.1,
-in a fresh environment installed from `pyproject.toml`:
+Offline verification of this revision — working tree on top of base commit `ab11cf5`
+(tree `fbc18a00ea5b0b7745da2e6488acf3c93166c07e`), Python 3.12.3, in a fresh virtual
+environment installed from `pyproject.toml` (`pip install -e ".[dev]"`):
 
-- Full suite: **1012 passed, 0 failed, 0 skipped** in 72.7 s with
-  `filterwarnings = ["error"]`. Results apply to the identified revision and
-  test environment; they do not establish live acceptance.
-- Source scan: `grep -rn "NotImplementedError" src/` returns **0 matches** across
-  15 files / 1988 lines. The absence of stubs is established by that scan, not
-  inferred from the green suite.
-- Blocking gates pass at this revision: collection, `tools/check_freeze.py`,
-  `tools/validate_matrix.py` (104 acceptance rows, 58 item bindings,
-  18 mutation killers), `tools/spec_check.py`, `tools/red_reason_gate.py`, and
-  `tools/concurrency_evidence.py` (3 runs plus verification).
-- `pip-audit` on that dependency set (2026-10-28 UTC): no known vulnerabilities.
-- Traceability audit: `structural=0` defects; **14 unique acceptance rows** lack
-  evidence (**15 findings** — `INSTALL-01` is reported twice): `OBS-01..03`,
-  `LIVE-01..05`, `CI-01`, `DEP-01/02`, `INSTALL-01`, `EVID-01`, `PY-01`.
-  Missing evidence is an evidence gap, not 15 software defects; acceptance stays
-  blocked by absent live/CI evidence, not by a test failure.
+- Full suite: **1073 passed, 0 failed, 0 skipped** in 67.5 s (base `ab11cf5` alone:
+  1041 passed; this revision adds 32 tests: 30 in
+  `tests/tools/obs/test_provenance.py` and 2 existing harness-safety checks, no credentials/orders/
+  private endpoints and no wall clock, which now also cover `tools/obs/eventlog.py`) with `filterwarnings = ["error"]`. Results apply to the
+  identified revision and test environment; they do not establish live acceptance.
+- Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
+  `tools/validate_matrix.py` (104 acceptance rows, 58 item bindings, 18 mutation killers) and
+  `tools/spec_check.py` (13 passed). Not re-run for this change and therefore not claimed here:
+  `tools/red_reason_gate.py`, `tools/concurrency_evidence.py`, `pip-audit`, traceability audit.
+  Their earlier results (previous revision) are not restated.
+- Evidence-bound provenance (new): `decided_at_ns` and the terminal `timeline_end_ns` are no
+  longer accepted as bare scalars. `tools/obs/eventlog.py` provides a SHA-256 hash-chained
+  event log whose entries are bound to a digest of the recorded requests; `audit_pace` verifies
+  it against the manifest head digest before trusting any timestamp. This is tamper-evident,
+  not tamper-proof: the head digest must be stored where the run's operator cannot rewrite it.
+  See `docs/obs-harness-map.md`, "Fifth remediation round".
+- Source scan (previous revision, not re-run here): `grep -rn "NotImplementedError" src/`
+  returned 0 matches; this change touches no file under `src/`.
+- Traceability: not re-run for this change. Acceptance remains blocked by absent live/CI
+  evidence (OBS-01..03, LIVE-01..05, CI-01, DEP-01/02, INSTALL-01, EVID-01, PY-01), which is an
+  evidence gap, not a test failure.
 
 ## Test design
 
