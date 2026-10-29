@@ -97,10 +97,23 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
     # Freeze every caller-owned input ONCE, before anything is checked: the digest check, the event-log binding, the decision
     # matching and every traversal below read these immutable objects, never the caller's (possibly concurrently mutated)
     # list or mapping. RequestRecord is a frozen dataclass of immutable fields, so a tuple of them is a stable snapshot.
-    records = tuple(records)
-    skips = None if skips is None else dict(skips)
-    expected_boundaries = None if expected_boundaries is None else tuple(expected_boundaries)
-    boundary_skips = None if boundary_skips is None else dict(boundary_skips)
+    # Snapshot construction runs caller-controlled code (iterators, __iter__, mapping access) and can itself raise if the caller
+    # mutates a container while it is being copied. Any such failure is a controlled audit failure, never an escaping exception
+    # (fail closed). Only Exception is caught: KeyboardInterrupt / SystemExit still propagate.
+    try:
+        name = "records"
+        records = tuple(records)
+        name = "skips"
+        skips = None if skips is None else dict(skips)
+        name = "expected_boundaries"
+        expected_boundaries = None if expected_boundaries is None else tuple(expected_boundaries)
+        name = "boundary_skips"
+        boundary_skips = None if boundary_skips is None else dict(boundary_skips)
+        name = "event_log"
+        if isinstance(event_log, (list, tuple)):
+            event_log = tuple(event_log)
+    except Exception as exc:                                                          # noqa: BLE001 - deliberate fail-closed boundary
+        return AuditResult((AuditFailure("a", None, f"input snapshot failed for {name}: {type(exc).__name__}: {exc}"),))
     failures: list[AuditFailure] = []
 
     def fail(check: str, seq: int | None, detail: str) -> None:
@@ -114,8 +127,6 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
                 snapshot = validate_and_snapshot_manifest(manifest)               # before any manifest attribute is used
             except ManifestTrustError as exc:
                 raise EventLogError(str(exc)) from exc
-            if isinstance(event_log, (list, tuple)):
-                event_log = tuple(event_log)                                      # freeze the log the same way: check and use see one object
             if snapshot.record_count != len(records) or snapshot.records_digest != records_digest(records):
                 raise EventLogError("the records do not match the authenticated manifest (record count or digest)")
             if event_log is None or snapshot.event_count != len(event_log):
