@@ -52,7 +52,7 @@ Hardened audit
 test_audit.py (50 tests)
 6
 Regression tests
-listed above; 530 tests in tests/tools/obs
+listed above; 557 tests in tests/tools/obs
 
 Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
 #
@@ -188,4 +188,15 @@ audit_pace took the records as a mutable sequence: a list changed between the di
 tools/obs/audit.py audit_pace: first statements freeze the inputs: records = tuple(records) (RequestRecord is a frozen dataclass of immutable fields, bytes body and tuple headers, so the tuple is a stable snapshot), skips = dict(skips), boundary_skips = dict(boundary_skips), expected_boundaries = tuple(expected_boundaries). Every later use, including records_digest(records), verify_event_log, the integrity and pacing checks, _audit_groups and validate_decision_evidence, reads these frozen objects. A generator of records is consumed exactly once.
 tests/tools/obs/test_records_snapshot.py (28 tests): test_a_list_mutated_after_the_audit_began_cannot_change_the_outcome (4 hook points inside the audit, namely after the manifest snapshot, after the digest check, after the event-log verification and after the abort derivation, times 6 mutations: clear, append, reverse, delete first, tamper last record, replace with empty; the outcome and failures equal the unmutated baseline), test_the_snapshot_preserves_a_failing_verdict_too, test_mutating_the_list_before_the_audit_is_still_caught_by_the_digest, test_skips_and_boundary_mappings_are_frozen_at_entry_too, test_a_generator_of_records_is_consumed_exactly_once
 Stated limits: the mutation is simulated deterministically by hooks that run inside the audit (no real threads are used, so a genuine data race is not exercised); records are protected by immutability of their fields, so a caller who mutates a record's contents through object.__setattr__ before the call is caught only by the manifest digest. Mutation spot check (own, not the frozen 16-mutant run): removing the records snapshot makes 26 tests fail; removing the skips snapshot makes 1 fail; both restored.
+
+Tenth remediation round (fail-closed snapshot construction)
+#
+Finding
+Change
+Regression tests
+1
+The input snapshots (tuple(records), dict(skips), ...) were built outside any error handling, so a container that failed while being copied could raise out of audit_pace
+tools/obs/audit.py audit_pace: all snapshot conversions (records, skips, expected_boundaries, boundary_skips and a list/tuple event_log) run in one try block that catches Exception and returns AuditResult with a single check (a) failure naming the input and the exception ("input snapshot failed for <input>: <type>: <message>"). Exception is used deliberately because the copy executes arbitrary caller code (iterators, __iter__, mapping access); KeyboardInterrupt and SystemExit are not caught. The event-log conversion moved from the manifest block into this boundary, so a failing list subclass is handled too.
+tests/tools/obs/test_snapshot_failure.py (27 tests): records failing during the copy (6 exception types), skips and boundary_skips mappings failing during key iteration (6 types each), a mapping entry vanishing between listing and reading, expected_boundaries and event_log failing mid-copy, a generator that raises part-way, a container that mutates itself while copied, KeyboardInterrupt still propagating, and a control that ordinary inputs audit normally
+Stated limits: the failures are simulated with containers that raise from __iter__ or __getitem__; plain list and dict copies are atomic in CPython and cannot be made to fail by another thread, so these tests cover the controlled-failure path, not a genuine race. A custom container whose copy is slow or never ends is not bounded by this change. Mutation spot check (own, not the frozen 16-mutant run): narrowing the handler to RuntimeError makes 19 tests fail; moving the event-log conversion out of the boundary makes 3 fail; both restored.
 
