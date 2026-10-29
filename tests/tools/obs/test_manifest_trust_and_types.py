@@ -268,3 +268,129 @@ def test_restoring_the_original_value_leaves_the_manifest_unchanged_and_trusted(
     assert not is_loader_issued(manifest)
     object.__setattr__(manifest, "event_count", original)                                          # the seal covers VALUES: no net change
     assert is_loader_issued(manifest) and audit_with(records, events, skips, manifest).ok
+
+
+# ---- Fix 8: check and use operate on one immutable snapshot (no TOCTOU) ----
+from tools.obs import audit as audit_module
+from tools.obs.runstore import ManifestSnapshot, ManifestTrustError, validate_and_snapshot_manifest
+
+
+def test_the_snapshot_is_an_immutable_copy_of_exactly_the_seven_authenticated_fields(run):
+    *_, manifest = run
+    snapshot = validate_and_snapshot_manifest(manifest)
+    assert [f.name for f in dataclasses.fields(snapshot)] == list(_TRUSTED_FIELDS)
+    assert all(getattr(snapshot, name) == getattr(manifest, name) for name in _TRUSTED_FIELDS)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        snapshot.event_log_head = "f" * 64
+    object.__setattr__(manifest, "event_log_head", "e" * 64)                           # later tampering with the instance ...
+    assert snapshot.event_log_head != "e" * 64                                         # ... does not reach the snapshot
+    assert type(snapshot) is ManifestSnapshot and not is_loader_issued(snapshot)
+
+
+def test_a_snapshot_cannot_be_passed_off_as_an_authenticated_manifest(run):
+    run_dir, pin, records, events, skips, manifest = run
+    snapshot = validate_and_snapshot_manifest(manifest)
+    result = audit_with(records, events, skips, snapshot)
+    assert not result.ok and NOT_SUPPLIED in text(result)
+    with pytest.raises(ManifestTrustError, match=NOT_SUPPLIED):
+        validate_and_snapshot_manifest(snapshot)
+
+
+@pytest.mark.parametrize("kind", ["dataclasses.replace", "object.__new__", "none"])
+def test_validation_raises_for_forgeries_and_for_mutation(run, kind):
+    *_, manifest = run
+    with pytest.raises(ManifestTrustError, match=NOT_SUPPLIED):
+        validate_and_snapshot_manifest(forgeries(manifest)[kind])
+    object.__setattr__(manifest, "record_count", manifest.record_count + 1)
+    with pytest.raises(ManifestTrustError, match=MUTATED):
+        validate_and_snapshot_manifest(manifest)
+
+
+def test_a_wrongly_typed_field_is_never_snapshotted(run):
+    *_, manifest = run
+    object.__setattr__(manifest, "event_count", True)                                  # bool is not an exact int
+    with pytest.raises(ManifestTrustError, match=MUTATED):
+        validate_and_snapshot_manifest(manifest)
+
+
+def test_the_audit_uses_only_the_snapshot_even_if_the_instance_changes_after_validation(run, monkeypatch):
+    """The TOCTOU attack: the manifest is genuine and sealed when checked, then mutated before the audit would re-read it."""
+    run_dir, pin, records, events, skips, manifest = run
+    real = audit_module.validate_and_snapshot_manifest
+    mutated_after_check = []
+
+    def validate_then_tamper(candidate):
+        snapshot = real(candidate)                                                       # the check passes on the genuine manifest ...
+        object.__setattr__(candidate, "event_log_head", "d" * 64)                        # ... then every authenticated field is changed
+        object.__setattr__(candidate, "record_count", 10**6)
+        object.__setattr__(candidate, "records_digest", "c" * 64)
+        object.__setattr__(candidate, "event_count", 10**6)
+        mutated_after_check.append(candidate)
+        return snapshot
+
+    monkeypatch.setattr(audit_module, "validate_and_snapshot_manifest", validate_then_tamper)
+    result = audit_with(records, events, skips, manifest)
+    assert mutated_after_check and mutated_after_check[0].event_log_head == "d" * 64    # the tampering really happened
+    assert result.ok, text(result)                                                       # the audit decided on the snapshot alone
+
+
+def test_tampering_after_validation_cannot_rescue_a_fabricated_log_either(run, monkeypatch):
+    """Same race, attacker side: after the check, point the instance at a fabricated log's head. The audit must still compare
+    against the snapshot's (original) head and reject the fabricated log."""
+    run_dir, pin, records, events, skips, manifest = run
+    fabricated = EventLogWriter()
+    for event in events:
+        if event.kind == "DECISION":
+            fabricated.append_decision(boundary_ms=event.get("boundary_ms"), group_name=event.get("group_name"),
+                                       decided_at_ns=event.get("decided_at_ns") + 1, m_e_ns=event.get("m_e_ns"), records=records[: event.records_before])
+        else:
+            fabricated.append_timeline_end(timeline_end_ns=event.get("timeline_end_ns"), records=records)
+    real = audit_module.validate_and_snapshot_manifest
+
+    def validate_then_tamper(candidate):
+        snapshot = real(candidate)
+        object.__setattr__(candidate, "event_log_head", fabricated.head_digest)
+        return snapshot
+
+    monkeypatch.setattr(audit_module, "validate_and_snapshot_manifest", validate_then_tamper)
+    result = audit_with(records, fabricated.events, skips, manifest)
+    assert not result.ok and "manifest digest" in text(result)
+
+
+def test_a_list_event_log_is_frozen_into_a_tuple_for_the_audit(run):
+    run_dir, pin, records, events, skips, manifest = run
+    assert audit_with(records, list(events), skips, manifest).ok
+
+
+def test_audit_run_reads_the_manifest_counts_from_the_snapshot_and_rejects_a_mutated_instance(run, monkeypatch):
+    run_dir, pin, records, events, skips, manifest = run
+    real_load = audit_module.load_run
+
+    def load_then_tamper(*args, **kwargs):
+        loaded = real_load(*args, **kwargs)
+        object.__setattr__(loaded.manifest, "record_count", loaded.manifest.record_count + 5)   # mutated before the snapshot is taken
+        return loaded
+
+    monkeypatch.setattr(audit_module, "load_run", load_then_tamper)
+    result = audit_run(run_dir, pinned_manifest_sha256=pin, wrapper_count=len(records), skips=skips)
+    assert not result.ok and "run rejected" in text(result) and MUTATED in text(result)
+
+
+def test_audit_run_fails_closed_when_the_instance_changes_between_its_two_validations(run, monkeypatch):
+    """audit_run snapshots once for the manifest count and audit_pace validates again; a change between the two is caught by
+    the second validation (fail closed), never silently accepted."""
+    run_dir, pin, records, events, skips, manifest = run
+    real = audit_module.validate_and_snapshot_manifest
+    calls = []
+
+    def validate_then_tamper_once(candidate):
+        first = not calls
+        calls.append(candidate)                                                          # count entries, including the one that raises
+        snapshot = real(candidate)
+        if first:
+            object.__setattr__(candidate, "record_count", candidate.record_count + 5)
+        return snapshot
+
+    monkeypatch.setattr(audit_module, "validate_and_snapshot_manifest", validate_then_tamper_once)
+    result = audit_run(run_dir, pinned_manifest_sha256=pin, wrapper_count=len(records), skips=skips)
+    assert len(calls) == 2 and not result.ok and MUTATED in text(result)
