@@ -1,7 +1,7 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `impl-obs-harness`, based on commit `8724a2a33bb3235c2c2ad0b8cc6bd0dfd145db99`
-(tree `4f53bad124e17a8fb31a7dfbd0d3691a6aa22552`). A commit cannot contain its own SHA, so the
+Branch `impl-obs-harness`, based on commit `b0bc3e36ba2bd72e28eb050424b125c9d3cf2d79`
+(tree `99e459664fcfd34a4ce650e5edda98f18b618a4c`). A commit cannot contain its own SHA, so the
 SHA of this revision is reported in the submission message, not here. Production code and the
 observation harness are actively implemented under `src/trading_app/` and `tools/obs/`; the
 Stage-1 frozen specification and its approval record are preserved unchanged.
@@ -10,14 +10,14 @@ credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — working tree on top of base commit `8724a2a`,
+Offline verification of this revision — working tree on top of base commit `b0bc3e3`,
 Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
 (`pip install -e ".[dev]"`):
 
-- Full suite: **1211 passed, 0 failed, 0 skipped** in 67.7 s with `filterwarnings = ["error"]`
-  (base `8724a2a`: 1200 passed; this revision adds 11 tests, all in
-  `tests/tools/obs/test_manifest_trust_and_types.py`). Results apply to the identified revision
-  and test environment; they do not establish live acceptance.
+- Full suite: **1239 passed, 0 failed, 0 skipped** in 70.4 s with `filterwarnings = ["error"]`
+  (base `b0bc3e3`: 1211 passed; this revision adds 28 tests, all in
+  `tests/tools/obs/test_records_snapshot.py`). Results apply to the identified revision and test
+  environment; they do not establish live acceptance.
 - Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
   `tools/validate_matrix.py` (104 acceptance rows, 58 item bindings, 18 mutation killers) and
   `tools/spec_check.py` (13 passed). Not re-run for this change and therefore not claimed here:
@@ -48,8 +48,11 @@ Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
   Fix 8: no time-of-check/time-of-use gap. `validate_and_snapshot_manifest` reads the seven
   authenticated fields once, recomputes the seal from those very values, and returns an immutable
   `ManifestSnapshot`; `audit_pace` (and `audit_run`) decide only on the snapshot, never on the
-  mutable instance, and freeze a list event log into a tuple. Not covered: the `records`
-  sequence itself is not snapshotted. See `docs/obs-harness-map.md`, "Sixth remediation round".
+  mutable instance, and freeze a list event log into a tuple.
+  Fix 9: `audit_pace` freezes its caller-owned inputs once at entry (`records` into a tuple of
+  frozen `RequestRecord`s; `skips` and `boundary_skips` into dicts; `expected_boundaries` into a
+  tuple), and the digest check, event-log binding, decision matching and every traversal read
+  only those frozen copies, so a list mutated during the audit cannot change its outcome. See `docs/obs-harness-map.md`, "Sixth remediation round".
 - Source scan (previous revision, not re-run here): `grep -rn "NotImplementedError" src/`
   returned 0 matches; this change touches no file under `src/`.
 - Traceability: not re-run for this change. Acceptance remains blocked by absent live/CI
