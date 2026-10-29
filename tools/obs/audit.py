@@ -17,7 +17,8 @@ from typing import Mapping, Sequence
 
 from tools.obs.admission import AdmissionDecision
 from tools.obs.estimator import OffsetEstimator, TimeSample
-from tools.obs.eventlog import EventLogError, VerifiedEventLog, verify_event_log
+from tools.obs.eventlog import EventLogError, VerifiedEventLog, records_digest, verify_event_log
+from tools.obs.runstore import AuthenticatedManifest, ManifestError, load_run
 from tools.obs.pacer import OBS02_PROFILE, PaceProfile, RequestRecord, release_ns, window_count
 from tools.obs.params import AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, DEADLINE_NS, KLINES_PATH, MAX_CONSECUTIVE_NO_RESPONSE, MS, TIME_PATH
 from tools.obs.transport import CANCEL_FAILED, DEADLINE
@@ -88,10 +89,11 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
                skips: Mapping[tuple[int, str], AdmissionDecision] | None = None,
                expected_boundaries: Sequence[int] | None = None,
                boundary_skips: Mapping[int, str] | None = None,
-               event_log: Sequence[object] | None = None, event_log_head: str | None = None) -> AuditResult:
+               event_log: Sequence[object] | None = None, manifest: AuthenticatedManifest | None = None) -> AuditResult:
     """`decided_at_ns` and the terminal `timeline_end_ns` are never accepted as bare scalars: they are trusted only when
-    they match events of a hash-chained event log that verifies against `event_log_head` (the manifest digest) and against
-    the records themselves (tools.obs.eventlog). An unverifiable log is a failure of check (a) and counts as no log."""
+    they match events of a hash-chained event log that verifies against the head digest of an AUTHENTICATED run manifest
+    (tools.obs.runstore.load_manifest: pinned SHA-256, strict parse, self-digest; never a scalar) and against the records
+    themselves (tools.obs.eventlog). A log without an authenticated manifest is rejected. An unverifiable log is a failure of check (a) and counts as no log."""
     failures: list[AuditFailure] = []
 
     def fail(check: str, seq: int | None, detail: str) -> None:
@@ -99,9 +101,15 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
 
     verified: VerifiedEventLog | None = None
     timeline_end_ns: int | None = None
-    if event_log is not None or event_log_head is not None:
+    if event_log is not None or manifest is not None:
         try:
-            verified = verify_event_log(event_log, event_log_head, records)
+            if not isinstance(manifest, AuthenticatedManifest):
+                raise EventLogError("no authenticated run manifest was supplied (the head digest must come from load_manifest)")
+            if manifest.record_count != len(records) or manifest.records_digest != records_digest(records):
+                raise EventLogError("the records do not match the authenticated manifest (record count or digest)")
+            if event_log is None or manifest.event_count != len(event_log):
+                raise EventLogError("the event log does not match the authenticated manifest event count")
+            verified = verify_event_log(event_log, manifest.event_log_head, records)
         except EventLogError as exc:
             fail("a", None, f"event log rejected: {exc}")
         else:
@@ -503,3 +511,17 @@ def _audit_groups(records, skips, expected_boundaries, boundary_skips, derived, 
                 fail("f", None, f"boundary {boundary} has no records and no verified skip reason")
         for boundary in recorded - set(expected_boundaries):
             fail("f", None, f"boundary {boundary} was sent but is not an expected boundary")
+
+
+def audit_run(run_dir, *, pinned_manifest_sha256: object, wrapper_count: int | None = None, **kwargs) -> AuditResult:
+    """Audit a persisted run end to end: records, event log and manifest are loaded from `run_dir`; the manifest is
+    authenticated against the out-of-band `pinned_manifest_sha256`. Any load or authentication failure is an audit failure
+    (check a), never an exception. The jsonl and manifest counts come from the persisted files; the wrapper count must be
+    supplied by the caller (it is an independent egress counter)."""
+    try:
+        run = load_run(run_dir, pinned_manifest_sha256=pinned_manifest_sha256)
+    except ManifestError as exc:
+        return AuditResult((AuditFailure("a", None, f"run rejected: {exc}"),))
+    kwargs.setdefault("jsonl_count", len(run.records))
+    kwargs.setdefault("manifest_count", run.manifest.record_count)
+    return audit_pace(run.records, event_log=run.events, manifest=run.manifest, wrapper_count=wrapper_count, **kwargs)
