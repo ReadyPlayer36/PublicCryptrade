@@ -52,7 +52,7 @@ Hardened audit
 test_audit.py (50 tests)
 6
 Regression tests
-listed above; 364 tests in tests/tools/obs
+listed above; 397 tests in tests/tools/obs
 
 Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
 #
@@ -128,4 +128,16 @@ tests/tools/obs/test_provenance.py: test_audit_pace_has_no_bare_timeline_end_par
 Supersedes item 2 of the fourth round: the "new timeline_end_ns argument" no longer exists; the bound comes from the verified TIMELINE_END event. Tests that exercised the scalar (test_audit.py) now go through an honest recorder in tests/fixtures/obs_fakes.py (recorded_events / verified_log_for); audit_all(timeline_end_ns=...) is a test convenience that logs the value, never a scalar passed to the audit.
 Runner requirement (replaces the fourth-round note): when a group is skipped the runner calls decide_admission(..., decided_at_ns=<clock read>) and immediately EventLogWriter.append_decision(...) with the records completed so far; at the end of the run it appends TIMELINE_END, and stores writer.events and writer.head_digest in the manifest. The head digest must be recorded where the operator cannot rewrite it afterwards (limit: whoever controls records, log and head together can forge a consistent triple).
 Mutation check (own spot check, not the frozen 16-mutant matrix): disabling the decided_at_ns equality check, the missing-event check, or the head-digest comparison makes 4 tests fail each; all were restored.
+
+Sixth remediation round (persisted run manifest and independent authentication)
+#
+Finding
+Change
+Regression tests
+1
+event_log_head reached audit_pace as an unverified scalar, so a forger who rewrote the log could supply a matching head
+New tools/obs/runstore.py. write_run persists records.jsonl, events.jsonl and manifest.json once (exclusive create; an inconsistent log is refused) and returns the SHA-256 of manifest.json, to be PINNED out of band. load_manifest(path, pinned_sha256=) requires a well-formed pin, matches the file bytes to it, parses strictly (no duplicate keys, exact key set and types, format obs-run-manifest/1) and verifies the manifest self-digest; it returns an AuthenticatedManifest (record and event counts, file digests, records digest, event_log_head), constructible only by the loader. load_run also matches both jsonl files to the manifest digests and the counts. audit_pace(event_log=, manifest=) replaces event_log_head: a missing or non-authenticated manifest, a record count or digest that differs from the audited records, or an event count that differs all fail check (a); the chain head is taken from the manifest only. audit_run(run_dir, pinned_manifest_sha256=, wrapper_count=) loads and audits a persisted run; load failures become check (a) failures, not exceptions. The jsonl and manifest counts come from the persisted files; the wrapper count is supplied by the caller.
+tests/tools/obs/test_run_manifest_e2e.py (31 tests): test_a_complete_run_round_trips_through_disk_and_passes_the_audit, test_the_head_digest_comes_only_from_the_authenticated_manifest, test_a_missing_manifest_or_artifact_fails_closed, test_a_missing_or_malformed_pinned_digest_fails_closed, test_a_wrong_pin_fails_closed, test_a_malformed_manifest_is_rejected_even_with_a_matching_pin (7 shapes), test_editing_the_manifest_without_the_pin_is_detected, test_editing_a_manifest_field_breaks_the_self_digest_even_if_the_forger_re_pins, test_a_fully_re_digested_forged_manifest_is_rejected_by_the_original_pin, test_altering_the_head_digest_to_fit_a_substituted_log_is_rejected, test_any_byte_change_in_a_persisted_file_is_detected (2 files), test_a_records_file_from_another_run_is_rejected, test_a_truncated_jsonl_file_is_rejected_even_when_re_pinned, test_dropping_the_terminal_event_from_a_persisted_run_is_rejected, test_a_persisted_run_without_a_recorded_decision_cannot_justify_a_skip, test_a_persisted_run_without_a_timeline_end_cannot_bound_a_terminal_skip
+Test convenience: tests/fixtures/obs_fakes.py audit_all(event_log_head=...) persists that head as a manifest and loads it through the real loader; it never reaches the audit as a scalar.
+Not covered (stated): AdmissionDecision objects (skips) are still passed by the caller and are checked against the logged DECISION events, not persisted; the pin's own storage (where it is recorded and who can rewrite it) is an operational control outside this code. Mutation spot check (own, not the frozen 16-mutant run): disabling the pin match, the records-file digest, the events-file digest, the manifest self-digest or the isinstance check on the manifest makes 1 to 7 tests fail each; all were restored.
 
