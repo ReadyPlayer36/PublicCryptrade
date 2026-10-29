@@ -52,7 +52,7 @@ Hardened audit
 test_audit.py (50 tests)
 6
 Regression tests
-listed above; 491 tests in tests/tools/obs
+listed above; 502 tests in tests/tools/obs
 
 Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
 #
@@ -166,4 +166,15 @@ A genuine, loader-issued AuthenticatedManifest could be mutated in place with ob
 tools/obs/runstore.py: _TRUSTED_FIELDS (record_count, records_file_sha256, records_digest, event_count, events_file_sha256, event_log_head, manifest_sha256) and _SEALS, a weak-key dictionary OUTSIDE the instance holding SHA-256 over the canonical current values of those fields, written by _register() at issue (load_manifest). manifest_trust_error(candidate) returns the not-supplied message for a wrong type or a non-issued instance (no attribute is read), the mutated-in-place message when the stored seal differs from the recomputed one (a missing attribute or a non-encodable value counts as mutation), else None; is_loader_issued is manifest_trust_error(...) is None. tools/obs/audit.py audit_pace calls manifest_trust_error first and raises EventLogError with its text, before any manifest attribute is read.
 tests/tools/obs/test_manifest_trust_and_types.py: test_object_setattr_on_any_authenticated_field_is_detected (7 fields), test_replacing_a_trusted_field_with_any_other_type_is_detected, test_deleting_a_trusted_field_in_place_is_detected, test_a_mutated_manifest_cannot_authenticate_a_fabricated_event_log, test_the_gate_runs_before_any_manifest_attribute_is_read, test_a_genuine_manifest_has_no_trust_error_and_its_seal_lives_off_the_instance, test_forgeries_still_report_the_not_supplied_reason, test_restoring_the_original_value_leaves_the_manifest_unchanged_and_trusted
 Stated limits: the seal covers VALUES, so restoring a field to its original value leaves no net change (pinned by a test); the registries are module-level, so code that can write _ISSUED or _SEALS directly can still forge trust. Mutation spot check (own, not the frozen 16-mutant run): disabling the seal comparison, storing a wrong seal, dropping event_log_head from the sealed fields, or removing the audit gate makes 16, 84, 6 and 27 tests fail; all restored.
+
+Eighth remediation round (immutable validated snapshot; no TOCTOU)
+#
+Finding
+Change
+Regression tests
+1
+audit_pace validated the manifest and then re-read attributes from the mutable instance, so it could be changed between check and use
+tools/obs/runstore.py: ManifestSnapshot (frozen dataclass of the seven authenticated fields) and validate_and_snapshot_manifest(candidate), which checks exact type, WeakSet identity and the off-instance seal and returns the snapshot, raising ManifestTrustError (a ManifestError) otherwise. Each field is read exactly once (_read_trusted_values, which also requires exact int/str types); the seal is recomputed from those same values and the snapshot is built from them, so what was checked is what is returned. manifest_trust_error and is_loader_issued are wrappers. tools/obs/audit.py audit_pace uses only snapshot.record_count, records_digest, event_count and event_log_head, and converts a list event log to a tuple; audit_run takes manifest_count from a snapshot.
+tests/tools/obs/test_manifest_trust_and_types.py: test_the_audit_uses_only_the_snapshot_even_if_the_instance_changes_after_validation (all authenticated fields are changed right after the check; the audit still passes), test_tampering_after_validation_cannot_rescue_a_fabricated_log_either, test_the_snapshot_is_an_immutable_copy_of_exactly_the_seven_authenticated_fields, test_a_snapshot_cannot_be_passed_off_as_an_authenticated_manifest, test_validation_raises_for_forgeries_and_for_mutation, test_a_wrongly_typed_field_is_never_snapshotted, test_audit_run_reads_the_manifest_counts_from_the_snapshot_and_rejects_a_mutated_instance, test_audit_run_fails_closed_when_the_instance_changes_between_its_two_validations
+Stated limits: audit_run validates twice (its own snapshot for manifest_count, then audit_pace), so a change between the two fails closed rather than being tolerated. The records sequence and the event log's LogEvent objects are not snapshotted (LogEvent is frozen; the list is frozen into a tuple). Mutation spot check (own, not the frozen 16-mutant run): reading event_log_head, record_count/records_digest or event_count from the raw manifest instead of the snapshot, or dropping the seal comparison, makes 2, 1, 1 and 14 tests fail; replacing audit_run's manifest_count with a raw read is behaviourally equivalent (audit_pace re-validates and fails closed), so no test can distinguish it.
 
