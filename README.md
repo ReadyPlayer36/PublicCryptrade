@@ -1,7 +1,7 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `impl-obs-harness`, based on commit `1d79c151210f24898758dacfa93069d1754641ac`
-(tree `56f5663701cbc5434570d2e0394ae062b6afdc10`). A commit cannot contain its own SHA, so the
+Branch `impl-obs-harness`, based on commit `6875dde11e8e0f51e764cb27251c9c175c591a07`
+(tree `4fd43a737f537b6c2f257ede73f67b2d14a61334`). A commit cannot contain its own SHA, so the
 SHA of this revision is reported in the submission message, not here. Production code and the
 observation harness are actively implemented under `src/trading_app/` and `tools/obs/`; the
 Stage-1 frozen specification and its approval record are preserved unchanged.
@@ -10,14 +10,14 @@ credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — working tree on top of base commit `1d79c15`,
+Offline verification of this revision — working tree on top of base commit `6875dde`,
 Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
 (`pip install -e ".[dev]"`):
 
-- Full suite: **1285 passed, 0 failed, 0 skipped** in 77.3 s with `filterwarnings = ["error"]`
-  (base `1d79c15`: 1266 passed; this revision adds 19 tests, all in
-  `tests/tools/obs/test_snapshot_failure.py`). Results apply to the identified revision and test
-  environment; they do not establish live acceptance.
+- Full suite: **1310 passed, 0 failed, 0 skipped** in 78.5 s with `filterwarnings = ["error"]`
+  (base `6875dde`: 1285 passed; this revision adds 25 net tests, all in
+  `tests/tools/obs/test_snapshot_failure.py`, which is a tracked file). Results apply to the
+  identified revision and test environment; they do not establish live acceptance.
 - Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
   `tools/validate_matrix.py` (104 acceptance rows, 58 item bindings, 18 mutation killers) and
   `tools/spec_check.py` (13 passed). Not re-run for this change and therefore not claimed here:
@@ -58,12 +58,16 @@ Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
   `expected_boundaries` or a list/tuple `event_log` becomes a controlled check (a) failure
   ("input snapshot failed for <input>: <type>: <message>"); `KeyboardInterrupt` and `SystemExit`
   still propagate.
-  Fix 11: `event_log` is fully snapshotted inside that boundary: `None` or any
-  `collections.abc.Sequence` becomes a tuple there, and any other type (dict, set, iterator,
-  duck-typed objects) is rejected as a controlled failure, so no later `len()` or indexing can run
-  caller code. The failure text is built by `_safe_exception_text`, which survives an exception
-  whose `__str__` raises or returns a non-string, or whose class `__name__` is broken, and is
-  length-bounded. See `docs/obs-harness-map.md`, "Sixth remediation round".
+  Fix 11/12: `event_log` is snapshotted inside that boundary and accepts exactly `None`, a
+  built-in `list` or a built-in `tuple` (`type(x) in (list, tuple)`, the types
+  `verify_event_log` accepts): subclasses, custom `Sequence`s, duck-typed objects, strings,
+  dicts, sets and iterators are rejected as a controlled failure without any of their methods
+  being called. The failure text comes from `_safe_exception_text`: the class name and message
+  are each flattened to a plain `str` (a `__str__` that raises or returns a non-string, a `str`
+  subclass with hostile methods, or a metaclass that breaks `__name__` fall back to fixed text),
+  control characters become `?`, and the result is capped at 300 characters. Policy: only
+  `Exception` subclasses are absorbed; `KeyboardInterrupt`, `SystemExit` and `GeneratorExit`
+  propagate, including when raised while an exception is being formatted. See `docs/obs-harness-map.md`, "Sixth remediation round".
 - Source scan (previous revision, not re-run here): `grep -rn "NotImplementedError" src/`
   returned 0 matches; this change touches no file under `src/`.
 - Traceability: not re-run for this change. Acceptance remains blocked by absent live/CI
