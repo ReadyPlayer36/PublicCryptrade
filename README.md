@@ -1,7 +1,7 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `impl-obs-harness`, based on commit `323e8b03e3df7a5a5b5a0b9b08b89d1d6a4462fb`
-(tree `acbe7da399cad3a3ae378e3f6aaed93a67223ccb`). A commit cannot contain its own SHA, so the
+Branch `impl-obs-harness`, based on commit `1d79c151210f24898758dacfa93069d1754641ac`
+(tree `56f5663701cbc5434570d2e0394ae062b6afdc10`). A commit cannot contain its own SHA, so the
 SHA of this revision is reported in the submission message, not here. Production code and the
 observation harness are actively implemented under `src/trading_app/` and `tools/obs/`; the
 Stage-1 frozen specification and its approval record are preserved unchanged.
@@ -10,12 +10,12 @@ credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — working tree on top of base commit `323e8b0`,
+Offline verification of this revision — working tree on top of base commit `1d79c15`,
 Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
 (`pip install -e ".[dev]"`):
 
-- Full suite: **1266 passed, 0 failed, 0 skipped** in 77.3 s with `filterwarnings = ["error"]`
-  (base `323e8b0`: 1239 passed; this revision adds 27 tests, all in
+- Full suite: **1285 passed, 0 failed, 0 skipped** in 77.3 s with `filterwarnings = ["error"]`
+  (base `1d79c15`: 1266 passed; this revision adds 19 tests, all in
   `tests/tools/obs/test_snapshot_failure.py`). Results apply to the identified revision and test
   environment; they do not establish live acceptance.
 - Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
@@ -57,7 +57,13 @@ Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
   boundary: any `Exception` raised while copying `records`, `skips`, `boundary_skips`,
   `expected_boundaries` or a list/tuple `event_log` becomes a controlled check (a) failure
   ("input snapshot failed for <input>: <type>: <message>"); `KeyboardInterrupt` and `SystemExit`
-  still propagate. See `docs/obs-harness-map.md`, "Sixth remediation round".
+  still propagate.
+  Fix 11: `event_log` is fully snapshotted inside that boundary: `None` or any
+  `collections.abc.Sequence` becomes a tuple there, and any other type (dict, set, iterator,
+  duck-typed objects) is rejected as a controlled failure, so no later `len()` or indexing can run
+  caller code. The failure text is built by `_safe_exception_text`, which survives an exception
+  whose `__str__` raises or returns a non-string, or whose class `__name__` is broken, and is
+  length-bounded. See `docs/obs-harness-map.md`, "Sixth remediation round".
 - Source scan (previous revision, not re-run here): `grep -rn "NotImplementedError" src/`
   returned 0 matches; this change touches no file under `src/`.
 - Traceability: not re-run for this change. Acceptance remains blocked by absent live/CI
