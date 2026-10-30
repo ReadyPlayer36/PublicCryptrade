@@ -128,3 +128,117 @@ def test_ordinary_inputs_still_audit_normally_and_no_controlled_failure_appears(
     n = len(records)
     result = audit_pace(list(records), jsonl_count=n, wrapper_count=n, manifest_count=n, skips=dict(skips), event_log=list(events), manifest=manifest)
     assert result.ok and all("input snapshot failed" not in f.detail for f in result.failures)
+
+
+# ---- Fix 11: event_log must be fully snapshotted inside the boundary; hostile exceptions cannot escape it ----
+from collections.abc import Sequence
+
+
+class LenRaises(Sequence):
+    """A real Sequence whose __len__ fails (e.g. the underlying store changed): the audit must never call it outside the guard."""
+
+    def __init__(self, items, exc):
+        self._items, self._exc = list(items), exc
+
+    def __len__(self):
+        raise self._exc
+
+    def __getitem__(self, index):
+        return self._items[index]
+
+
+class DuckLenRaises:
+    """Sequence-like by duck typing only (not a registered Sequence), with a failing __len__."""
+
+    def __len__(self):
+        raise RuntimeError("len blew up")
+
+    def __getitem__(self, index):
+        raise IndexError(index)
+
+
+@pytest.mark.parametrize("exc", [e for e in EXCEPTIONS if not isinstance(e, TypeError)], ids=lambda e: type(e).__name__)
+def test_an_event_log_whose_len_raises_is_a_controlled_failure_with_a_valid_manifest(run, exc):
+    run_dir, pin, records, events, skips, manifest = run
+    result = call(list(records), event_log=LenRaises(events, exc), manifest=manifest)
+    assert_controlled(result, "event_log", exc)
+
+
+def test_a_len_typeerror_is_treated_by_tuple_as_no_length_hint_so_the_copy_succeeds_and_is_audited_normally(run):
+    """CPython's tuple() swallows a TypeError from __len__ (length-hint semantics) and copies by iteration. The snapshot is then a
+    complete, valid log, so the audit proceeds on it (not a snapshot failure) and, being honest, passes."""
+    run_dir, pin, records, events, skips, manifest = run
+    n = len(records)
+    result = audit_pace(list(records), jsonl_count=n, wrapper_count=n, manifest_count=n, skips=dict(skips),
+                        event_log=LenRaises(events, TypeError("no len")), manifest=manifest)
+    assert result.ok and all("input snapshot failed" not in f.detail for f in result.failures)
+
+
+def test_a_duck_typed_event_log_is_rejected_at_the_boundary_not_probed_with_len(run):
+    run_dir, pin, records, events, skips, manifest = run
+    result = call(list(records), event_log=DuckLenRaises(), manifest=manifest)
+    assert_controlled(result, "event_log", TypeError())
+    assert "must be a sequence" in result.failures[0].detail
+
+
+@pytest.mark.parametrize("bad", [{"a": 1}, {1, 2}, 7, 1.5, object(), iter(())], ids=["dict", "set", "int", "float", "object", "iterator"])
+def test_unsupported_event_log_types_are_rejected_at_the_boundary(run, bad):
+    run_dir, pin, records, events, skips, manifest = run
+    result = call(list(records), event_log=bad, manifest=manifest)
+    assert_controlled(result, "event_log", TypeError())
+
+
+def test_a_string_event_log_is_snapshotted_then_rejected_by_verification_without_raising(run):
+    run_dir, pin, records, events, skips, manifest = run
+    result = call(list(records), event_log="not a log", manifest=manifest)
+    assert not result.ok and "event log rejected" in result.failures[0].detail
+
+
+def test_any_registered_sequence_event_log_is_converted_to_a_tuple_and_audits_normally(run):
+    run_dir, pin, records, events, skips, manifest = run
+    n = len(records)
+    class Plain(Sequence):
+        def __len__(self):
+            return len(events)
+
+        def __getitem__(self, index):
+            return events[index]
+
+    result = audit_pace(list(records), jsonl_count=n, wrapper_count=n, manifest_count=n, skips=dict(skips), event_log=Plain(), manifest=manifest)
+    assert result.ok
+
+
+# hostile exceptions: stringification must not escape the normalisation boundary
+class StrRaises(Exception):
+    def __str__(self):
+        raise RuntimeError("__str__ exploded")
+
+
+class StrReturnsInt(Exception):
+    def __str__(self):
+        return 42
+
+
+class StrReturnsHuge(Exception):
+    def __str__(self):
+        return "x" * 10_000
+
+
+class NameMeta(type):
+    @property
+    def __name__(cls):
+        raise RuntimeError("__name__ exploded")
+
+
+class BrokenNameError(Exception, metaclass=NameMeta):
+    pass
+
+
+@pytest.mark.parametrize("exc", [StrRaises("a"), StrReturnsInt("a"), StrReturnsHuge("a"), BrokenNameError("a")],
+                         ids=["str_raises", "str_returns_int", "str_huge", "name_raises"])
+def test_a_hostile_exception_cannot_escape_the_snapshot_boundary(run, exc):
+    run_dir, pin, records, events, skips, manifest = run
+    result = call(ExplodingList(records, exc))
+    assert isinstance(result, AuditResult) and not result.ok and result.checks() == {"a"}
+    detail = result.failures[0].detail
+    assert "input snapshot failed for records" in detail and len(detail) < 400
