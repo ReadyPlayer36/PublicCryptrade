@@ -52,7 +52,7 @@ Hardened audit
 test_audit.py (50 tests)
 6
 Regression tests
-listed above; 576 tests in tests/tools/obs
+listed above; 601 tests in tests/tools/obs
 
 Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
 #
@@ -210,4 +210,22 @@ event_log was converted only when it was a list or tuple; any other object reach
 tools/obs/audit.py audit_pace: inside the snapshot boundary, event_log is None, or must be a collections.abc.Sequence and is converted with tuple(); any other type raises TypeError and becomes a controlled check (a) failure, so every later len() or indexing works on a tuple. The failure text comes from _safe_exception_text, which guards str(type(exc).__name__) and str(exc) separately with fixed fallbacks and truncates to 300 characters.
 tests/tools/obs/test_snapshot_failure.py (19 added): a real Sequence whose __len__ raises (5 exception types) with a valid manifest, a duck-typed non-Sequence with a failing __len__, unsupported types (dict, set, int, float, object, iterator), a string (snapshotted, then rejected by verification without raising), a plain registered Sequence audited normally, a __len__ TypeError (copy succeeds, audit proceeds), and hostile exceptions (__str__ raising, returning an int, returning 10,000 characters, a metaclass whose __name__ raises)
 Stated limits: CPython's tuple() treats a TypeError from __len__ as "no length hint" and copies by iteration, so that single case is not a snapshot failure; it is covered by its own test and the audit then runs on the complete copy. A Sequence whose iteration never ends is not bounded by this change. Mutation spot check (own, not the frozen 16-mutant run): restoring the list/tuple-only conversion makes 14 tests fail; using the raw exception text makes 3 fail; both restored.
+
+Twelfth remediation round (event_log type policy, exception formatting, BaseException policy)
+#
+Finding
+Change
+Regression tests
+F11-01
+The audit boundary accepted any collections.abc.Sequence for event_log, wider than verify_event_log (list or tuple only), and copied it by running the caller's iteration code
+tools/obs/audit.py audit_pace: event_log must be None or have type exactly list or tuple (type(x) in (list, tuple)); anything else raises TypeError inside the snapshot boundary and becomes a controlled check (a) failure. The copy of an exact list or tuple is atomic and runs no caller code.
+test_snapshot_failure.py: test_every_non_builtin_event_log_is_rejected_at_the_boundary_without_running_its_code (16 candidates: Sequence with failing __len__, Sequence with hostile __iter__, duck-typed object, list subclass, tuple subclass, str, bytes, dict, set, frozenset, int, float, object, iterator, generator, range; each asserts that no __len__, __iter__ or __getitem__ call was made), test_builtin_list_and_tuple_event_logs_are_accepted, test_the_boundary_policy_matches_what_verify_event_log_accepts, test_none_event_log_is_still_allowed_and_fails_through_the_manifest_checks_not_the_boundary
+F11-02
+_safe_exception_text formatted with an f-string, which could invoke a hostile str subclass, kept control characters, and had no explicit BaseException policy
+tools/obs/audit.py: _plain_text builds an exact built-in str (str(value) must return a str, then str.__str__ flattens a subclass without calling its overrides; any Exception selects the fallback; non-printable characters become "?"). _safe_exception_text guards type(exc).__name__ separately (fallback "exception"), caps the class name at 100 characters and the whole text at _MAX_FAILURE_TEXT = 300. Only Exception is caught, here and at the boundary: KeyboardInterrupt, SystemExit and GeneratorExit propagate, including from inside __str__.
+test_snapshot_failure.py: test_non_exception_base_exceptions_propagate_from_every_snapshot_input (3 types, 3 inputs), test_a_base_exception_raised_while_formatting_an_ordinary_exception_propagates, test_hostile_exceptions_are_formatted_safely_and_capped and test_hostile_exceptions_cannot_escape_the_snapshot_boundary (8 cases: __str__ raising RuntimeError, returning int, returning None, returning 10,000 characters, returning a hostile str subclass, and three hostile metaclasses for __name__), test_fallback_kind_is_used_when_the_class_name_cannot_be_read, test_messages_over_300_characters_are_truncated_and_exactly_300_is_kept, test_control_characters_in_messages_are_neutralised, test_a_very_long_class_name_is_capped_too
+F11-03
+The new regression test file must be part of the commit
+tests/tools/obs/test_snapshot_failure.py is tracked at the base commit (git ls-files); this round modifies it in place. Its test list above is the required checklist: built-in list and tuple, custom sequences with failing __len__ or hostile __iter__, raw iterators and generators, dict and set rejections, exception __str__ raising or returning a non-string, BaseException propagation, hostile metaclasses, and messages longer than 300 characters.
+Stated limits: only list and tuple are accepted, so a caller holding another container must convert it itself; an exact list or tuple whose elements are not LogEvent objects is still rejected later by verify_event_log, not at the boundary. A hostile exception can still be raised by the caller's own iterator before formatting; only its text is neutralised. Mutation spot check (own, not the frozen 16-mutant run): widening the type check to Sequence, dropping str.__str__, removing the 300-character cap, catching BaseException, and dropping the control-character replacement make 7, 2, 3, 4 and 1 tests fail; all restored.
 
