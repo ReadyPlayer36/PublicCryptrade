@@ -88,10 +88,9 @@ def test_a_mapping_entry_vanishing_between_listing_and_reading_is_a_controlled_f
 
 
 @pytest.mark.parametrize("exc", EXCEPTIONS[:3], ids=lambda e: type(e).__name__)
-def test_expected_boundaries_and_event_log_failing_during_the_copy_are_controlled_failures(run, exc):
+def test_expected_boundaries_failing_during_the_copy_is_a_controlled_failure(run, exc):
     run_dir, pin, records, events, skips, manifest = run
     assert_controlled(call(list(records), expected_boundaries=ExplodingList([1, 2, 3], exc)), "expected_boundaries", exc)
-    assert_controlled(call(list(records), event_log=ExplodingList(events, exc), manifest=manifest), "event_log", exc)
 
 
 def test_a_generator_that_raises_part_way_is_a_controlled_failure(run):
@@ -130,86 +129,147 @@ def test_ordinary_inputs_still_audit_normally_and_no_controlled_failure_appears(
     assert result.ok and all("input snapshot failed" not in f.detail for f in result.failures)
 
 
-# ---- Fix 11: event_log must be fully snapshotted inside the boundary; hostile exceptions cannot escape it ----
+# ---- Fix 12 (F11-01): event_log accepts exactly the built-in list and tuple, the types verify_event_log accepts ----
 from collections.abc import Sequence
 
-
-class LenRaises(Sequence):
-    """A real Sequence whose __len__ fails (e.g. the underlying store changed): the audit must never call it outside the guard."""
-
-    def __init__(self, items, exc):
-        self._items, self._exc = list(items), exc
-
-    def __len__(self):
-        raise self._exc
-
-    def __getitem__(self, index):
-        return self._items[index]
+TYPE_MSG = "built-in list or tuple"
 
 
-class DuckLenRaises:
-    """Sequence-like by duck typing only (not a registered Sequence), with a failing __len__."""
+class Probe:
+    """Records every protocol call a hostile container receives; the boundary must reject it WITHOUT making any of them."""
 
-    def __len__(self):
-        raise RuntimeError("len blew up")
-
-    def __getitem__(self, index):
-        raise IndexError(index)
+    def __init__(self):
+        self.calls = []
 
 
-@pytest.mark.parametrize("exc", [e for e in EXCEPTIONS if not isinstance(e, TypeError)], ids=lambda e: type(e).__name__)
-def test_an_event_log_whose_len_raises_is_a_controlled_failure_with_a_valid_manifest(run, exc):
+def probed_candidates(events):
+    probe = Probe()
+
+    class LenRaises(Sequence):
+        def __len__(self):
+            probe.calls.append("__len__")
+            raise RuntimeError("len blew up")
+
+        def __getitem__(self, index):
+            probe.calls.append("__getitem__")
+            return list(events)[index]
+
+    class HostileIter(Sequence):
+        def __len__(self):
+            probe.calls.append("__len__")
+            return len(events)
+
+        def __iter__(self):
+            probe.calls.append("__iter__")
+            raise ValueError("iter blew up")
+
+        def __getitem__(self, index):
+            probe.calls.append("__getitem__")
+            return list(events)[index]
+
+    class Duck:
+        def __len__(self):
+            probe.calls.append("__len__")
+            return 0
+
+        def __getitem__(self, index):
+            probe.calls.append("__getitem__")
+            raise IndexError(index)
+
+    class ListSub(list):
+        def __iter__(self):
+            probe.calls.append("__iter__")
+            raise RuntimeError("list subclass iter")
+
+        def __len__(self):
+            probe.calls.append("__len__")
+            raise RuntimeError("list subclass len")
+
+    class TupleSub(tuple):
+        def __iter__(self):
+            probe.calls.append("__iter__")
+            raise RuntimeError("tuple subclass iter")
+
+    def gen():
+        probe.calls.append("generator")
+        yield from events
+
+    return probe, {
+        "sequence_len_raises": LenRaises(), "sequence_hostile_iter": HostileIter(), "duck_typed": Duck(),
+        "list_subclass": ListSub(events), "tuple_subclass": TupleSub(events), "str": "not a log", "bytes": b"not a log",
+        "dict": {"a": 1}, "set": {1, 2}, "frozenset": frozenset({1}), "int": 7, "float": 1.5, "object": object(),
+        "iterator": iter(events), "generator": gen(), "range": range(3),
+    }
+
+
+CANDIDATE_IDS = ["sequence_len_raises", "sequence_hostile_iter", "duck_typed", "list_subclass", "tuple_subclass", "str", "bytes", "dict",
+                 "set", "frozenset", "int", "float", "object", "iterator", "generator", "range"]
+
+
+@pytest.mark.parametrize("kind", CANDIDATE_IDS)
+def test_every_non_builtin_event_log_is_rejected_at_the_boundary_without_running_its_code(run, kind):
     run_dir, pin, records, events, skips, manifest = run
-    result = call(list(records), event_log=LenRaises(events, exc), manifest=manifest)
-    assert_controlled(result, "event_log", exc)
+    probe, candidates = probed_candidates(events)
+    result = call(list(records), event_log=candidates[kind], manifest=manifest)
+    assert_controlled(result, "event_log", TypeError())
+    assert TYPE_MSG in result.failures[0].detail
+    assert probe.calls == []                                                             # nothing of the caller's was executed
 
 
-def test_a_len_typeerror_is_treated_by_tuple_as_no_length_hint_so_the_copy_succeeds_and_is_audited_normally(run):
-    """CPython's tuple() swallows a TypeError from __len__ (length-hint semantics) and copies by iteration. The snapshot is then a
-    complete, valid log, so the audit proceeds on it (not a snapshot failure) and, being honest, passes."""
+@pytest.mark.parametrize("container", [list, tuple], ids=["list", "tuple"])
+def test_builtin_list_and_tuple_event_logs_are_accepted(run, container):
     run_dir, pin, records, events, skips, manifest = run
     n = len(records)
     result = audit_pace(list(records), jsonl_count=n, wrapper_count=n, manifest_count=n, skips=dict(skips),
-                        event_log=LenRaises(events, TypeError("no len")), manifest=manifest)
+                        event_log=container(events), manifest=manifest)
     assert result.ok and all("input snapshot failed" not in f.detail for f in result.failures)
 
 
-def test_a_duck_typed_event_log_is_rejected_at_the_boundary_not_probed_with_len(run):
+def test_the_boundary_policy_matches_what_verify_event_log_accepts(run):
+    """verify_event_log accepts exactly list/tuple (it rejects everything else), so the audit boundary is no wider than it."""
+    from tools.obs.eventlog import EventLogError, verify_event_log
     run_dir, pin, records, events, skips, manifest = run
-    result = call(list(records), event_log=DuckLenRaises(), manifest=manifest)
-    assert_controlled(result, "event_log", TypeError())
-    assert "must be a sequence" in result.failures[0].detail
+    head = manifest.event_log_head
+    verify_event_log(list(events), head, records)
+    verify_event_log(tuple(events), head, records)
+    _, candidates = probed_candidates(events)
+    for kind in ("sequence_len_raises", "duck_typed", "dict", "set", "iterator", "generator"):
+        with pytest.raises(EventLogError):
+            verify_event_log(candidates[kind], head, records)
 
 
-@pytest.mark.parametrize("bad", [{"a": 1}, {1, 2}, 7, 1.5, object(), iter(())], ids=["dict", "set", "int", "float", "object", "iterator"])
-def test_unsupported_event_log_types_are_rejected_at_the_boundary(run, bad):
+def test_none_event_log_is_still_allowed_and_fails_through_the_manifest_checks_not_the_boundary(run):
     run_dir, pin, records, events, skips, manifest = run
-    result = call(list(records), event_log=bad, manifest=manifest)
-    assert_controlled(result, "event_log", TypeError())
+    result = call(list(records), manifest=manifest)
+    assert not result.ok and all("input snapshot failed" not in f.detail for f in result.failures)
 
 
-def test_a_string_event_log_is_snapshotted_then_rejected_by_verification_without_raising(run):
+# ---- Fix 12 (F11-02): BaseException policy and hostile exception formatting ----
+from tools.obs.audit import _MAX_FAILURE_TEXT, _safe_exception_text
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt(), SystemExit(3), GeneratorExit()], ids=lambda e: type(e).__name__)
+def test_non_exception_base_exceptions_propagate_from_every_snapshot_input(run, exc):
     run_dir, pin, records, events, skips, manifest = run
-    result = call(list(records), event_log="not a log", manifest=manifest)
-    assert not result.ok and "event log rejected" in result.failures[0].detail
+    with pytest.raises(type(exc)):
+        call(ExplodingList(records, exc))
+    with pytest.raises(type(exc)):
+        call(list(records), skips=ExplodingMapping({(1, "g"): 1}, exc))
+    with pytest.raises(type(exc)):
+        call(list(records), expected_boundaries=ExplodingList([1, 2], exc))
 
 
-def test_any_registered_sequence_event_log_is_converted_to_a_tuple_and_audits_normally(run):
+def test_a_base_exception_raised_while_formatting_an_ordinary_exception_propagates(run):
+    class InterruptingStr(Exception):
+        def __str__(self):
+            raise KeyboardInterrupt()
+
     run_dir, pin, records, events, skips, manifest = run
-    n = len(records)
-    class Plain(Sequence):
-        def __len__(self):
-            return len(events)
-
-        def __getitem__(self, index):
-            return events[index]
-
-    result = audit_pace(list(records), jsonl_count=n, wrapper_count=n, manifest_count=n, skips=dict(skips), event_log=Plain(), manifest=manifest)
-    assert result.ok
+    with pytest.raises(KeyboardInterrupt):
+        call(ExplodingList(records, InterruptingStr("x")))
 
 
-# hostile exceptions: stringification must not escape the normalisation boundary
-class StrRaises(Exception):
+class StrRaisesRuntime(Exception):
     def __str__(self):
         raise RuntimeError("__str__ exploded")
 
@@ -219,26 +279,108 @@ class StrReturnsInt(Exception):
         return 42
 
 
+class StrReturnsNone(Exception):
+    def __str__(self):
+        return None
+
+
 class StrReturnsHuge(Exception):
     def __str__(self):
         return "x" * 10_000
 
 
-class NameMeta(type):
+class HostileStr(str):
+    def __format__(self, spec):
+        raise RuntimeError("__format__ exploded")
+
+    def __getitem__(self, item):
+        raise RuntimeError("__getitem__ exploded")
+
+    def __iter__(self):
+        raise RuntimeError("__iter__ exploded")
+
+    def __len__(self):
+        raise RuntimeError("__len__ exploded")
+
+
+class StrReturnsHostileSubclass(Exception):
+    def __str__(self):
+        return HostileStr("sub-class message")
+
+
+class NameRaisesMeta(type):
     @property
     def __name__(cls):
         raise RuntimeError("__name__ exploded")
 
 
-class BrokenNameError(Exception, metaclass=NameMeta):
+class NameNonStrMeta(type):
+    @property
+    def __name__(cls):
+        return 12345
+
+
+class NameHostileStrMeta(type):
+    @property
+    def __name__(cls):
+        return HostileStr("HostileName")
+
+
+class NameRaisesError(Exception, metaclass=NameRaisesMeta):
     pass
 
 
-@pytest.mark.parametrize("exc", [StrRaises("a"), StrReturnsInt("a"), StrReturnsHuge("a"), BrokenNameError("a")],
-                         ids=["str_raises", "str_returns_int", "str_huge", "name_raises"])
-def test_a_hostile_exception_cannot_escape_the_snapshot_boundary(run, exc):
+class NameNonStrError(Exception, metaclass=NameNonStrMeta):
+    pass
+
+
+class NameHostileStrError(Exception, metaclass=NameHostileStrMeta):
+    pass
+
+
+HOSTILE = [(StrRaisesRuntime("a"), "<message unavailable>"), (StrReturnsInt("a"), "<message unavailable>"),
+           (StrReturnsNone("a"), "<message unavailable>"), (StrReturnsHuge("a"), "x" * 50),
+           (StrReturnsHostileSubclass("a"), "sub-class message"), (NameRaisesError("m"), "m"), (NameNonStrError("m"), "m"),
+           (NameHostileStrError("m"), "m")]
+HOSTILE_IDS = ["str_raises_runtime", "str_returns_int", "str_returns_none", "str_huge", "str_returns_hostile_subclass", "name_raises",
+               "name_non_str", "name_hostile_str"]
+
+
+@pytest.mark.parametrize("exc,fragment", HOSTILE, ids=HOSTILE_IDS)
+def test_hostile_exceptions_are_formatted_safely_and_capped(exc, fragment):
+    text = _safe_exception_text(exc)
+    assert type(text) is str and len(text) <= _MAX_FAILURE_TEXT == 300
+    assert fragment in text
+
+
+@pytest.mark.parametrize("exc,fragment", HOSTILE, ids=HOSTILE_IDS)
+def test_hostile_exceptions_cannot_escape_the_snapshot_boundary(run, exc, fragment):
     run_dir, pin, records, events, skips, manifest = run
     result = call(ExplodingList(records, exc))
     assert isinstance(result, AuditResult) and not result.ok and result.checks() == {"a"}
     detail = result.failures[0].detail
-    assert "input snapshot failed for records" in detail and len(detail) < 400
+    assert type(detail) is str and "input snapshot failed for records" in detail and len(detail) < 400
+
+
+def test_fallback_kind_is_used_when_the_class_name_cannot_be_read():
+    assert _safe_exception_text(NameRaisesError("m")).startswith("exception: ")
+    assert _safe_exception_text(NameNonStrError("m")).startswith("12345: ")                # str(12345) is a legitimate plain text
+
+
+def test_messages_over_300_characters_are_truncated_and_exactly_300_is_kept():
+    long = _safe_exception_text(ValueError("y" * 5000))
+    assert len(long) == 300 and long.startswith("ValueError: yyy")
+    prefix = "ValueError: "
+    exact = _safe_exception_text(ValueError("z" * (300 - len(prefix))))
+    assert len(exact) == 300 and exact.endswith("z")
+    assert len(_safe_exception_text(ValueError("z" * (300 - len(prefix) + 1)))) == 300
+
+
+def test_control_characters_in_messages_are_neutralised():
+    text = _safe_exception_text(ValueError("line1\nline2\x00\x1b[31mred"))
+    assert "\n" not in text and "\x00" not in text and "\x1b" not in text and "line1?line2" in text
+
+
+def test_a_very_long_class_name_is_capped_too():
+    big = type("E" * 5000, (Exception,), {})
+    assert len(_safe_exception_text(big("m"))) <= 300
