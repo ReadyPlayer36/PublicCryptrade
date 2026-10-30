@@ -10,6 +10,7 @@ unusable). Pure function over the request records. Checks:
 """
 from __future__ import annotations
 
+import collections.abc
 import json
 from dataclasses import dataclass
 from fractions import Fraction
@@ -84,6 +85,20 @@ def abort_condition_seq(records: Sequence[RequestRecord]) -> int | None:
     return None
 
 
+def _safe_exception_text(exc: BaseException) -> str:
+    """'<type>: <message>' without ever letting a broken or hostile exception (a __str__ that raises, returns a non-string,
+    or a metaclass that breaks __name__) escape the normalisation boundary; falls back to fixed text. Bounded in length."""
+    try:
+        kind = str(type(exc).__name__)
+    except Exception:                                                                 # noqa: BLE001
+        kind = "exception"
+    try:
+        message = str(exc)
+    except Exception:                                                                 # noqa: BLE001
+        message = "<message unavailable>"
+    return f"{kind}: {message}"[:300]
+
+
 def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02_PROFILE, abort_seq: int | None = None,
                jsonl_count: int | None = None, wrapper_count: int | None = None, manifest_count: int | None = None,
                skips: Mapping[tuple[int, str], AdmissionDecision] | None = None,
@@ -110,10 +125,12 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
         name = "boundary_skips"
         boundary_skips = None if boundary_skips is None else dict(boundary_skips)
         name = "event_log"
-        if isinstance(event_log, (list, tuple)):
-            event_log = tuple(event_log)
+        if event_log is not None:
+            if not isinstance(event_log, collections.abc.Sequence):                   # list, tuple or any registered Sequence; nothing else
+                raise TypeError("event_log must be a sequence of log events")
+            event_log = tuple(event_log)                                              # after this, len()/indexing never touch caller code
     except Exception as exc:                                                          # noqa: BLE001 - deliberate fail-closed boundary
-        return AuditResult((AuditFailure("a", None, f"input snapshot failed for {name}: {type(exc).__name__}: {exc}"),))
+        return AuditResult((AuditFailure("a", None, f"input snapshot failed for {name}: {_safe_exception_text(exc)}"),))
     failures: list[AuditFailure] = []
 
     def fail(check: str, seq: int | None, detail: str) -> None:
