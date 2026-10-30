@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import pytest
 
 from tests.fixtures.obs_fakes import FakeClock, ScriptedTransport, audit_all
@@ -67,40 +66,61 @@ def test_the_integer_interval_rounds_fractional_endpoints_outward_exactly():
 
 # ---------------- watchdog: zero-duration deadline edges ----------------
 
+def _capturing_thread_factory(captured: list):
+    """thread_factory for run_with_deadline that records the worker so a test can assert on it and join it."""
+    def factory(*args, **kwargs):
+        thread = threading.Thread(*args, **kwargs)
+        captured.append(thread)
+        return thread
+    return factory
+
 def test_zero_cancellation_grace_fails_at_the_deadline_without_waiting():
-    release, cancelled, state = threading.Event(), [], CancellationState()
+    release, cancelled, state, workers = threading.Event(), [], CancellationState(), []
 
     def stubborn() -> None:
-        release.wait(10)
+        release.wait(10)            # safety net only: the finally below always releases it
 
-    t0 = time.monotonic()
-    with pytest.raises(CancellationFailed):
-        run_with_deadline(stubborn, lambda: cancelled.append(1),
-                          deadline_at_ns=at(0.05), clock=CLOCK, grace_ns=0, state=state)
-    elapsed = time.monotonic() - t0
-    assert 0.05 <= elapsed < 0.5
-    assert cancelled == [1] and state.cancelled
+    try:
+        with pytest.raises(CancellationFailed):
+            run_with_deadline(stubborn, lambda: cancelled.append(1),
+                              deadline_at_ns=at(0.05), clock=CLOCK, grace_ns=0, state=state,
+                              thread_factory=_capturing_thread_factory(workers))
+        # zero grace means no extra waiting: the failure is reported while the worker is still blocked (orphaned)
+        assert len(workers) == 1 and workers[0].is_alive()
+        assert cancelled == [1] and state.cancelled
+    finally:
+        release.set()               # guaranteed cleanup: the worker always exits, never a 10 s orphan
+        for worker in workers:
+            worker.join(timeout=5)
+    assert all(not worker.is_alive() for worker in workers)
 
 def test_a_deadline_that_is_already_past_cancels_at_once_and_the_grace_is_a_bound_not_a_wait():
-    release, cancelled = threading.Event(), []
+    release, cancelled, workers = threading.Event(), [], []
 
     def cooperative() -> int:
-        release.wait(10)
+        release.wait(10)            # safety net only: cancel() (and the finally below) release it
         return 42
 
-    t0 = time.monotonic()
-    result = run_with_deadline(cooperative, lambda: (cancelled.append(1), release.set()),
-                               deadline_at_ns=CLOCK.now_ns(), clock=CLOCK, grace_ns=int(1 * S))
-    elapsed = time.monotonic() - t0
-    assert result.timed_out and result.error is None and result.value is None
-    assert cancelled == [1]
-    assert elapsed < 0.5
+    try:
+        result = run_with_deadline(cooperative, lambda: (cancelled.append(1), release.set()),
+                                   deadline_at_ns=CLOCK.now_ns(), clock=CLOCK, grace_ns=int(1 * S),
+                                   thread_factory=_capturing_thread_factory(workers))
+        assert result.timed_out and result.error is None and result.value is None
+        assert cancelled == [1] and release.is_set()
+        assert len(workers) == 1 and not workers[0].is_alive()     # the cancelled worker finished inside the grace
+    finally:
+        release.set()
+        for worker in workers:
+            worker.join(timeout=5)
 
 # ---------------- transport: zero-duration timeout at the absolute deadline ----------------
 
 class _Sock:
     def settimeout(self, timeout: float) -> None:
         self.timeout = timeout
+
+    def shutdown(self, how: int) -> None:       # the transport shuts the socket down when it gives up
+        pass
 
 class _Resp:
     status = 200
@@ -112,25 +132,30 @@ class _Resp:
         return [("content-type", "application/json")]
 
 class _Conn:
-    def __init__(self) -> None:
+    def __init__(self, on_connect=None) -> None:
         self.sock, self.auto_open = _Sock(), 1
+        self.on_connect, self.requests, self.closed = on_connect, [], False
 
     def connect(self) -> None:
-        pass
+        if self.on_connect is not None:
+            self.on_connect()
 
     def request(self, method, target, headers=None) -> None:
-        pass
+        self.requests.append((method, target))
 
     def getresponse(self):
         return _Resp()
 
     def close(self) -> None:
-        pass
+        self.closed = True
 
-def _factory(made: list):
+def _factory(made: list, on_connect=None, conns: list | None = None):
     def make(scheme, host, port, timeout):
         made.append((scheme, host, port, timeout))
-        return _Conn()
+        conn = _Conn(on_connect)
+        if conns is not None:
+            conns.append(conn)
+        return conn
     return make
 
 def test_a_deadline_exactly_at_now_is_a_deadline_with_no_connection_opened():
@@ -141,11 +166,29 @@ def test_a_deadline_exactly_at_now_is_a_deadline_with_no_connection_opened():
     assert transport.sent == 1 and made == [] and transport.disabled_reason is None
 
 def test_one_nanosecond_of_deadline_budget_still_sends_the_request():
+    # ASSUMPTION: FakeClock is static (it never advances on its own), so with now == 0 and deadline == 1 ns every deadline
+    # check inside the transport (before connect, before the write) sees the same 1 ns of budget. This test pins only that
+    # strict boundary; the clock moving past the deadline mid-flight is covered by the controlled-clock test below.
     clock, made = FakeClock(0), []
     transport = HttpTransport(clock=clock, connection_factory=_factory(made))
     result = transport.send(KLINES, deadline_at_ns=1)
     assert (result.status, result.error) == (200, None) and result.body == b"[]"
     assert transport.sent == 1 and len(made) == 1 and transport.disabled_reason is None
+
+def test_a_deadline_that_expires_between_the_connect_check_and_the_write_check_blocks_the_write():
+    clock, made, conns = FakeClock(0), [], []
+    deadline = 1_000
+
+    def expire_during_connect() -> None:
+        clock.now = deadline        # the connection phase takes "too long": the clock is exactly at the deadline afterwards
+
+    transport = HttpTransport(clock=clock, connection_factory=_factory(made, expire_during_connect, conns))
+    result = transport.send(KLINES, deadline_at_ns=deadline)
+    assert (result.status, result.error) == (None, DEADLINE)
+    assert len(made) == 1 and len(conns) == 1           # the pre-connect check passed: a connection was set up
+    assert conns[0].requests == []                      # ...but the pre-write check refused: nothing was ever written
+    assert conns[0].closed
+    assert transport.sent == 1 and transport.disabled_reason is None
 
 # ---------------- pacer: a stale target may neither delay nor rewind ----------------
 
