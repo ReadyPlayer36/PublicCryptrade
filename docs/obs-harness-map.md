@@ -52,7 +52,7 @@ Hardened audit
 test_audit.py (50 tests)
 6
 Regression tests
-listed above; 557 tests in tests/tools/obs
+listed above; 576 tests in tests/tools/obs
 
 Third remediation round (non-blocking cancellation, absolute watchdog, evidence-tied decisions)
 #
@@ -199,4 +199,15 @@ The input snapshots (tuple(records), dict(skips), ...) were built outside any er
 tools/obs/audit.py audit_pace: all snapshot conversions (records, skips, expected_boundaries, boundary_skips and a list/tuple event_log) run in one try block that catches Exception and returns AuditResult with a single check (a) failure naming the input and the exception ("input snapshot failed for <input>: <type>: <message>"). Exception is used deliberately because the copy executes arbitrary caller code (iterators, __iter__, mapping access); KeyboardInterrupt and SystemExit are not caught. The event-log conversion moved from the manifest block into this boundary, so a failing list subclass is handled too.
 tests/tools/obs/test_snapshot_failure.py (27 tests): records failing during the copy (6 exception types), skips and boundary_skips mappings failing during key iteration (6 types each), a mapping entry vanishing between listing and reading, expected_boundaries and event_log failing mid-copy, a generator that raises part-way, a container that mutates itself while copied, KeyboardInterrupt still propagating, and a control that ordinary inputs audit normally
 Stated limits: the failures are simulated with containers that raise from __iter__ or __getitem__; plain list and dict copies are atomic in CPython and cannot be made to fail by another thread, so these tests cover the controlled-failure path, not a genuine race. A custom container whose copy is slow or never ends is not bounded by this change. Mutation spot check (own, not the frozen 16-mutant run): narrowing the handler to RuntimeError makes 19 tests fail; moving the event-log conversion out of the boundary makes 3 fail; both restored.
+
+Eleventh remediation round (event_log snapshot completeness and hostile exceptions)
+#
+Finding
+Change
+Regression tests
+1
+event_log was converted only when it was a list or tuple; any other object reached len() and indexing in the manifest block, outside the fail-closed boundary, and the failure text called str() on the caught exception, which could itself raise
+tools/obs/audit.py audit_pace: inside the snapshot boundary, event_log is None, or must be a collections.abc.Sequence and is converted with tuple(); any other type raises TypeError and becomes a controlled check (a) failure, so every later len() or indexing works on a tuple. The failure text comes from _safe_exception_text, which guards str(type(exc).__name__) and str(exc) separately with fixed fallbacks and truncates to 300 characters.
+tests/tools/obs/test_snapshot_failure.py (19 added): a real Sequence whose __len__ raises (5 exception types) with a valid manifest, a duck-typed non-Sequence with a failing __len__, unsupported types (dict, set, int, float, object, iterator), a string (snapshotted, then rejected by verification without raising), a plain registered Sequence audited normally, a __len__ TypeError (copy succeeds, audit proceeds), and hostile exceptions (__str__ raising, returning an int, returning 10,000 characters, a metaclass whose __name__ raises)
+Stated limits: CPython's tuple() treats a TypeError from __len__ as "no length hint" and copies by iteration, so that single case is not a snapshot failure; it is covered by its own test and the audit then runs on the complete copy. A Sequence whose iteration never ends is not bounded by this change. Mutation spot check (own, not the frozen 16-mutant run): restoring the list/tuple-only conversion makes 14 tests fail; using the raw exception text makes 3 fail; both restored.
 
