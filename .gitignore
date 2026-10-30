@@ -9,5 +9,9 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/binance_cooldown.json
+<<<<<<< Updated upstream
 data/binance_cooldown.json.lock
 artifacts/
+=======
+*.egg-info/
+>>>>>>> Stashed changes
