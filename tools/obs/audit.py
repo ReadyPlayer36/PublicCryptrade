@@ -10,7 +10,6 @@ unusable). Pure function over the request records. Checks:
 """
 from __future__ import annotations
 
-import collections.abc
 import json
 from dataclasses import dataclass
 from fractions import Fraction
@@ -85,18 +84,34 @@ def abort_condition_seq(records: Sequence[RequestRecord]) -> int | None:
     return None
 
 
+_MAX_FAILURE_TEXT = 300
+
+
+def _plain_text(value: object, fallback: str) -> str:
+    """An EXACT built-in str built without running any user-defined __str__/__format__/slicing: str(value) must yield a str
+    (a non-string result or an exception falls back), and a str subclass is flattened with str.__str__, which copies the
+    characters into a plain str. Non-printable characters are replaced so the text is safe to log."""
+    try:
+        text = str(value)
+        if not isinstance(text, str):
+            return fallback
+        text = str.__str__(text)
+    except Exception:                                                                 # noqa: BLE001 - hostile __str__/__name__: use the fallback
+        return fallback
+    return "".join(ch if ch.isprintable() else "?" for ch in text)
+
+
 def _safe_exception_text(exc: BaseException) -> str:
-    """'<type>: <message>' without ever letting a broken or hostile exception (a __str__ that raises, returns a non-string,
-    or a metaclass that breaks __name__) escape the normalisation boundary; falls back to fixed text. Bounded in length."""
+    """'<type>: <message>' for the audit failure, capped at 300 characters, never raising for an ordinary Exception: a __str__
+    that raises or returns a non-string, a str subclass, or a metaclass that breaks __name__ all fall back to fixed text.
+    Policy: only Exception subclasses are absorbed here and by the caller; a BaseException that is not an Exception
+    (KeyboardInterrupt, SystemExit, GeneratorExit) raised while formatting propagates and is never turned into a failure."""
     try:
-        kind = str(type(exc).__name__)
-    except Exception:                                                                 # noqa: BLE001
+        kind = _plain_text(type(exc).__name__, "exception")
+    except Exception:                                                                 # noqa: BLE001 - metaclass property raising on type(exc).__name__
         kind = "exception"
-    try:
-        message = str(exc)
-    except Exception:                                                                 # noqa: BLE001
-        message = "<message unavailable>"
-    return f"{kind}: {message}"[:300]
+    message = _plain_text(exc, "<message unavailable>")
+    return f"{kind[:100]}: {message}"[:_MAX_FAILURE_TEXT]
 
 
 def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02_PROFILE, abort_seq: int | None = None,
@@ -126,9 +141,9 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
         boundary_skips = None if boundary_skips is None else dict(boundary_skips)
         name = "event_log"
         if event_log is not None:
-            if not isinstance(event_log, collections.abc.Sequence):                   # list, tuple or any registered Sequence; nothing else
-                raise TypeError("event_log must be a sequence of log events")
-            event_log = tuple(event_log)                                              # after this, len()/indexing never touch caller code
+            if type(event_log) not in (list, tuple):                                  # built-in list/tuple only, as verify_event_log accepts;
+                raise TypeError("event_log must be a built-in list or tuple of log events")   # no subclasses, ABC sequences or iterators
+            event_log = tuple(event_log)                                              # atomic copy; afterwards len()/indexing never touch caller code
     except Exception as exc:                                                          # noqa: BLE001 - deliberate fail-closed boundary
         return AuditResult((AuditFailure("a", None, f"input snapshot failed for {name}: {_safe_exception_text(exc)}"),))
     failures: list[AuditFailure] = []
