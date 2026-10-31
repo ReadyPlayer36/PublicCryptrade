@@ -1,0 +1,5403 @@
+{
+  "aggregation": [
+    {
+      "expected": {
+        "T_all": {
+          "candidate": {
+            "l_ms": 3000,
+            "l_obs_ms": 700,
+            "l_raw_ms": 2700,
+            "pad_ms": 2000
+          },
+          "l_obs_ms": 700,
+          "unbounded": 0
+        },
+        "T_app": {
+          "candidate": {
+            "l_ms": 3000,
+            "l_obs_ms": 700,
+            "l_raw_ms": 2700,
+            "pad_ms": 2000
+          },
+          "l_obs_ms": 700,
+          "unbounded": 0
+        },
+        "T_matrix": {
+          "candidate": {
+            "l_ms": 3000,
+            "l_obs_ms": 700,
+            "l_raw_ms": 2700,
+            "pad_ms": 2000
+          },
+          "l_obs_ms": 700,
+          "unbounded": 0
+        }
+      },
+      "name": "single sample",
+      "sample_names": [
+        "stable from 0"
+      ]
+    },
+    {
+      "expected": {
+        "T_all": {
+          "candidate": {
+            "l_ms": 22000,
+            "l_obs_ms": 10800,
+            "l_raw_ms": 21600,
+            "pad_ms": 10800
+          },
+          "l_obs_ms": 10800,
+          "unbounded": 0
+        },
+        "T_app": {
+          "candidate": {
+            "l_ms": 22000,
+            "l_obs_ms": 10800,
+            "l_raw_ms": 21600,
+            "pad_ms": 10800
+          },
+          "l_obs_ms": 10800,
+          "unbounded": 0
+        },
+        "T_matrix": {
+          "candidate": {
+            "l_ms": 22000,
+            "l_obs_ms": 10800,
+            "l_raw_ms": 21600,
+            "pad_ms": 10800
+          },
+          "l_obs_ms": 10800,
+          "unbounded": 0
+        }
+      },
+      "name": "max over three samples",
+      "sample_names": [
+        "stable from 0",
+        "stable from 1",
+        "stable from 2"
+      ]
+    },
+    {
+      "expected": {
+        "T_all": {
+          "candidate": null,
+          "l_obs_ms": null,
+          "unbounded": 1
+        },
+        "T_app": {
+          "candidate": null,
+          "l_obs_ms": null,
+          "unbounded": 1
+        },
+        "T_matrix": {
+          "candidate": null,
+          "l_obs_ms": null,
+          "unbounded": 1
+        }
+      },
+      "name": "one unbounded sample blocks every tuple it differs on",
+      "sample_names": [
+        "stable from 0",
+        "unbounded"
+      ]
+    },
+    {
+      "expected": {
+        "T_all": {
+          "candidate": {
+            "l_ms": 6000,
+            "l_obs_ms": 2900,
+            "l_raw_ms": 5800,
+            "pad_ms": 2900
+          },
+          "l_obs_ms": 2900,
+          "unbounded": 0
+        },
+        "T_app": {
+          "candidate": {
+            "l_ms": 6000,
+            "l_obs_ms": 2900,
+            "l_raw_ms": 5800,
+            "pad_ms": 2900
+          },
+          "l_obs_ms": 2900,
+          "unbounded": 0
+        },
+        "T_matrix": {
+          "candidate": {
+            "l_ms": 3000,
+            "l_obs_ms": 700,
+            "l_raw_ms": 2700,
+            "pad_ms": 2000
+          },
+          "l_obs_ms": 700,
+          "unbounded": 0
+        }
+      },
+      "name": "tuple dependent",
+      "sample_names": [
+        "stable from 0",
+        "volume only differs at 0: matrix stable 0, app stable 1",
+        "taker field only differs at 0: all stable 1, app stable 0"
+      ]
+    }
+  ],
+  "bound_k": [
+    {
+      "bound_ms": 1,
+      "boundary_ms": 1767585600000,
+      "mono_end_k_ns": 5000000000,
+      "mono_start_s1_ns": 5000000000,
+      "name": "zero elapsed",
+      "s1_ms": 1767585600000
+    },
+    {
+      "bound_ms": 10002,
+      "boundary_ms": 1767585600000,
+      "mono_end_k_ns": 10000000000,
+      "mono_start_s1_ns": 0,
+      "name": "exactly representable 10000 ms",
+      "s1_ms": 1767585600000
+    },
+    {
+      "bound_ms": 10003,
+      "boundary_ms": 1767585600000,
+      "mono_end_k_ns": 10000000001,
+      "mono_start_s1_ns": 0,
+      "name": "one ns above exact",
+      "s1_ms": 1767585600000
+    },
+    {
+      "bound_ms": 10002,
+      "boundary_ms": 1767585600000,
+      "mono_end_k_ns": 9999999999,
+      "mono_start_s1_ns": 0,
+      "name": "one ns below exact",
+      "s1_ms": 1767585600000
+    },
+    {
+      "bound_ms": 1152,
+      "boundary_ms": 1767585600000,
+      "mono_end_k_ns": 1700000000,
+      "mono_start_s1_ns": 1000000000,
+      "name": "s1 after boundary, 0.7 s",
+      "s1_ms": 1767585600450
+    },
+    {
+      "bound_ms": 19403,
+      "boundary_ms": 1767585600000,
+      "mono_end_k_ns": 17000000000,
+      "mono_start_s1_ns": 0,
+      "name": "window edge 17 s",
+      "s1_ms": 1767585602400
+    },
+    {
+      "bound_ms": 2,
+      "boundary_ms": 1767585600000,
+      "mono_end_k_ns": 11,
+      "mono_start_s1_ns": 10,
+      "name": "sub-ms elapsed",
+      "s1_ms": 1767585600000
+    }
+  ],
+  "delta": "1/10000",
+  "finality": [
+    {
+      "close_time_ms": 1767583198122,
+      "final": true,
+      "lag_ms": 2000,
+      "offset_from_B": -1,
+      "server_time_ms": 1767583200123,
+      "timeframe": "5m"
+    },
+    {
+      "close_time_ms": 1767583198123,
+      "final": false,
+      "lag_ms": 2000,
+      "offset_from_B": 0,
+      "server_time_ms": 1767583200123,
+      "timeframe": "5m"
+    },
+    {
+      "close_time_ms": 1767583198124,
+      "final": false,
+      "lag_ms": 2000,
+      "offset_from_B": 1,
+      "server_time_ms": 1767583200123,
+      "timeframe": "5m"
+    },
+    {
+      "close_time_ms": 1767583193122,
+      "final": true,
+      "lag_ms": 7000,
+      "offset_from_B": -1,
+      "server_time_ms": 1767583200123,
+      "timeframe": "5m"
+    },
+    {
+      "close_time_ms": 1767583193123,
+      "final": false,
+      "lag_ms": 7000,
+      "offset_from_B": 0,
+      "server_time_ms": 1767583200123,
+      "timeframe": "5m"
+    },
+    {
+      "close_time_ms": 1767583193124,
+      "final": false,
+      "lag_ms": 7000,
+      "offset_from_B": 1,
+      "server_time_ms": 1767583200123,
+      "timeframe": "5m"
+    },
+    {
+      "close_time_ms": 1767607198122,
+      "final": true,
+      "lag_ms": 2000,
+      "offset_from_B": -1,
+      "server_time_ms": 1767607200123,
+      "timeframe": "15m"
+    },
+    {
+      "close_time_ms": 1767607198123,
+      "final": false,
+      "lag_ms": 2000,
+      "offset_from_B": 0,
+      "server_time_ms": 1767607200123,
+      "timeframe": "15m"
+    },
+    {
+      "close_time_ms": 1767607198124,
+      "final": false,
+      "lag_ms": 2000,
+      "offset_from_B": 1,
+      "server_time_ms": 1767607200123,
+      "timeframe": "15m"
+    },
+    {
+      "close_time_ms": 1767607193122,
+      "final": true,
+      "lag_ms": 7000,
+      "offset_from_B": -1,
+      "server_time_ms": 1767607200123,
+      "timeframe": "15m"
+    },
+    {
+      "close_time_ms": 1767607193123,
+      "final": false,
+      "lag_ms": 7000,
+      "offset_from_B": 0,
+      "server_time_ms": 1767607200123,
+      "timeframe": "15m"
+    },
+    {
+      "close_time_ms": 1767607193124,
+      "final": false,
+      "lag_ms": 7000,
+      "offset_from_B": 1,
+      "server_time_ms": 1767607200123,
+      "timeframe": "15m"
+    },
+    {
+      "close_time_ms": 1767715198122,
+      "final": true,
+      "lag_ms": 2000,
+      "offset_from_B": -1,
+      "server_time_ms": 1767715200123,
+      "timeframe": "1h"
+    },
+    {
+      "close_time_ms": 1767715198123,
+      "final": false,
+      "lag_ms": 2000,
+      "offset_from_B": 0,
+      "server_time_ms": 1767715200123,
+      "timeframe": "1h"
+    },
+    {
+      "close_time_ms": 1767715198124,
+      "final": false,
+      "lag_ms": 2000,
+      "offset_from_B": 1,
+      "server_time_ms": 1767715200123,
+      "timeframe": "1h"
+    },
+    {
+      "close_time_ms": 1767715193122,
+      "final": true,
+      "lag_ms": 7000,
+      "offset_from_B": -1,
+      "server_time_ms": 1767715200123,
+      "timeframe": "1h"
+    },
+    {
+      "close_time_ms": 1767715193123,
+      "final": false,
+      "lag_ms": 7000,
+      "offset_from_B": 0,
+      "server_time_ms": 1767715200123,
+      "timeframe": "1h"
+    },
+    {
+      "close_time_ms": 1767715193124,
+      "final": false,
+      "lag_ms": 7000,
+      "offset_from_B": 1,
+      "server_time_ms": 1767715200123,
+      "timeframe": "1h"
+    },
+    {
+      "close_time_ms": 1768147198122,
+      "final": true,
+      "lag_ms": 2000,
+      "offset_from_B": -1,
+      "server_time_ms": 1768147200123,
+      "timeframe": "4h"
+    },
+    {
+      "close_time_ms": 1768147198123,
+      "final": false,
+      "lag_ms": 2000,
+      "offset_from_B": 0,
+      "server_time_ms": 1768147200123,
+      "timeframe": "4h"
+    },
+    {
+      "close_time_ms": 1768147198124,
+      "final": false,
+      "lag_ms": 2000,
+      "offset_from_B": 1,
+      "server_time_ms": 1768147200123,
+      "timeframe": "4h"
+    },
+    {
+      "close_time_ms": 1768147193122,
+      "final": true,
+      "lag_ms": 7000,
+      "offset_from_B": -1,
+      "server_time_ms": 1768147200123,
+      "timeframe": "4h"
+    },
+    {
+      "close_time_ms": 1768147193123,
+      "final": false,
+      "lag_ms": 7000,
+      "offset_from_B": 0,
+      "server_time_ms": 1768147200123,
+      "timeframe": "4h"
+    },
+    {
+      "close_time_ms": 1768147193124,
+      "final": false,
+      "lag_ms": 7000,
+      "offset_from_B": 1,
+      "server_time_ms": 1768147200123,
+      "timeframe": "4h"
+    }
+  ],
+  "lag": [
+    {
+      "expected": {
+        "l_ms": 2000,
+        "l_obs_ms": 0,
+        "l_raw_ms": 2000,
+        "pad_ms": 2000
+      },
+      "l_obs_ms": 0
+    },
+    {
+      "expected": {
+        "l_ms": 3000,
+        "l_obs_ms": 1,
+        "l_raw_ms": 2001,
+        "pad_ms": 2000
+      },
+      "l_obs_ms": 1
+    },
+    {
+      "expected": {
+        "l_ms": 3000,
+        "l_obs_ms": 999,
+        "l_raw_ms": 2999,
+        "pad_ms": 2000
+      },
+      "l_obs_ms": 999
+    },
+    {
+      "expected": {
+        "l_ms": 3000,
+        "l_obs_ms": 1000,
+        "l_raw_ms": 3000,
+        "pad_ms": 2000
+      },
+      "l_obs_ms": 1000
+    },
+    {
+      "expected": {
+        "l_ms": 4000,
+        "l_obs_ms": 1001,
+        "l_raw_ms": 3001,
+        "pad_ms": 2000
+      },
+      "l_obs_ms": 1001
+    },
+    {
+      "expected": {
+        "l_ms": 4000,
+        "l_obs_ms": 1234,
+        "l_raw_ms": 3234,
+        "pad_ms": 2000
+      },
+      "l_obs_ms": 1234
+    },
+    {
+      "expected": {
+        "l_ms": 4000,
+        "l_obs_ms": 1999,
+        "l_raw_ms": 3999,
+        "pad_ms": 2000
+      },
+      "l_obs_ms": 1999
+    },
+    {
+      "expected": {
+        "l_ms": 4000,
+        "l_obs_ms": 2000,
+        "l_raw_ms": 4000,
+        "pad_ms": 2000
+      },
+      "l_obs_ms": 2000
+    },
+    {
+      "expected": {
+        "l_ms": 5000,
+        "l_obs_ms": 2001,
+        "l_raw_ms": 4002,
+        "pad_ms": 2001
+      },
+      "l_obs_ms": 2001
+    },
+    {
+      "expected": {
+        "l_ms": 7000,
+        "l_obs_ms": 3200,
+        "l_raw_ms": 6400,
+        "pad_ms": 3200
+      },
+      "l_obs_ms": 3200
+    },
+    {
+      "expected": {
+        "l_ms": 10000,
+        "l_obs_ms": 4999,
+        "l_raw_ms": 9998,
+        "pad_ms": 4999
+      },
+      "l_obs_ms": 4999
+    },
+    {
+      "expected": {
+        "l_ms": 10000,
+        "l_obs_ms": 5000,
+        "l_raw_ms": 10000,
+        "pad_ms": 5000
+      },
+      "l_obs_ms": 5000
+    },
+    {
+      "expected": {
+        "l_ms": 11000,
+        "l_obs_ms": 5001,
+        "l_raw_ms": 10002,
+        "pad_ms": 5001
+      },
+      "l_obs_ms": 5001
+    },
+    {
+      "expected": {
+        "l_ms": 20000,
+        "l_obs_ms": 9999,
+        "l_raw_ms": 19998,
+        "pad_ms": 9999
+      },
+      "l_obs_ms": 9999
+    },
+    {
+      "expected": {
+        "l_ms": 20000,
+        "l_obs_ms": 10000,
+        "l_raw_ms": 20000,
+        "pad_ms": 10000
+      },
+      "l_obs_ms": 10000
+    },
+    {
+      "expected": {
+        "l_ms": 21000,
+        "l_obs_ms": 10001,
+        "l_raw_ms": 20002,
+        "pad_ms": 10001
+      },
+      "l_obs_ms": 10001
+    },
+    {
+      "expected": {
+        "l_ms": 120000,
+        "l_obs_ms": 59999,
+        "l_raw_ms": 119998,
+        "pad_ms": 59999
+      },
+      "l_obs_ms": 59999
+    },
+    {
+      "expected": {
+        "l_ms": 120000,
+        "l_obs_ms": 60000,
+        "l_raw_ms": 120000,
+        "pad_ms": 60000
+      },
+      "l_obs_ms": 60000
+    },
+    {
+      "expected": null,
+      "l_obs_ms": 60001
+    }
+  ],
+  "max_samples": 126,
+  "rejections": [
+    {
+      "args": {
+        "close_time_ms": null,
+        "lag_ms": 2000,
+        "server_time_ms": 10000
+      },
+      "exc": "MissingValueError",
+      "fn": "is_final",
+      "message": "close_time_ms is required",
+      "name": "is_final close_time_ms missing"
+    },
+    {
+      "args": {
+        "close_time_ms": true,
+        "lag_ms": 2000,
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "close_time_ms must be an int, not bool",
+      "name": "is_final close_time_ms bool"
+    },
+    {
+      "args": {
+        "close_time_ms": "1000",
+        "lag_ms": 2000,
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "close_time_ms must be an int, not str",
+      "name": "is_final close_time_ms str"
+    },
+    {
+      "args": {
+        "close_time_ms": 1.5,
+        "lag_ms": 2000,
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "close_time_ms must be an int, not float",
+      "name": "is_final close_time_ms float"
+    },
+    {
+      "args": {
+        "close_time_ms": {
+          "$float": "nan"
+        },
+        "lag_ms": 2000,
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "close_time_ms must be an int, not float",
+      "name": "is_final close_time_ms nan"
+    },
+    {
+      "args": {
+        "close_time_ms": -1,
+        "lag_ms": 2000,
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidValueError",
+      "fn": "is_final",
+      "message": "close_time_ms must be >= 0, got -1",
+      "name": "is_final close_time_ms negative"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": 2000,
+        "server_time_ms": null
+      },
+      "exc": "MissingValueError",
+      "fn": "is_final",
+      "message": "server_time_ms is required",
+      "name": "is_final server_time_ms missing"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": 2000,
+        "server_time_ms": true
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "server_time_ms must be an int, not bool",
+      "name": "is_final server_time_ms bool"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": 2000,
+        "server_time_ms": "1000"
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "server_time_ms must be an int, not str",
+      "name": "is_final server_time_ms str"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": 2000,
+        "server_time_ms": 1.5
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "server_time_ms must be an int, not float",
+      "name": "is_final server_time_ms float"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": 2000,
+        "server_time_ms": {
+          "$float": "nan"
+        }
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "server_time_ms must be an int, not float",
+      "name": "is_final server_time_ms nan"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": 2000,
+        "server_time_ms": -1
+      },
+      "exc": "InvalidValueError",
+      "fn": "is_final",
+      "message": "server_time_ms must be >= 0, got -1",
+      "name": "is_final server_time_ms negative"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": null,
+        "server_time_ms": 10000
+      },
+      "exc": "MissingValueError",
+      "fn": "is_final",
+      "message": "lag_ms is required",
+      "name": "is_final lag_ms missing"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": true,
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "lag_ms must be an int, not bool",
+      "name": "is_final lag_ms bool"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": "1000",
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "lag_ms must be an int, not str",
+      "name": "is_final lag_ms str"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": 1.5,
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "lag_ms must be an int, not float",
+      "name": "is_final lag_ms float"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": {
+          "$float": "nan"
+        },
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "is_final",
+      "message": "lag_ms must be an int, not float",
+      "name": "is_final lag_ms nan"
+    },
+    {
+      "args": {
+        "close_time_ms": 1000,
+        "lag_ms": -1,
+        "server_time_ms": 10000
+      },
+      "exc": "InvalidValueError",
+      "fn": "is_final",
+      "message": "lag_ms must be >= 0, got -1",
+      "name": "is_final lag_ms negative"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 9,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "NonMonotonicError",
+      "fn": "bound_k_ms",
+      "message": "mono_end_k_ns 9 is earlier than mono_start_s1_ns 10",
+      "name": "bound_k end before start"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585599999
+      },
+      "exc": "InvalidValueError",
+      "fn": "bound_k_ms",
+      "message": "s1_ms 1767585599999 is before boundary_ms 1767585600000",
+      "name": "bound_k s1 before boundary"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": null
+      },
+      "exc": "MissingValueError",
+      "fn": "bound_k_ms",
+      "message": "s1_ms is required",
+      "name": "bound_k s1_ms missing"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": false
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "s1_ms must be an int, not bool",
+      "name": "bound_k s1_ms bool"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": "5"
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "s1_ms must be an int, not str",
+      "name": "bound_k s1_ms str"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": {
+          "$float": "nan"
+        }
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "s1_ms must be an int, not float",
+      "name": "bound_k s1_ms nan"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": -1
+      },
+      "exc": "InvalidValueError",
+      "fn": "bound_k_ms",
+      "message": "s1_ms must be >= 0, got -1",
+      "name": "bound_k s1_ms negative"
+    },
+    {
+      "args": {
+        "boundary_ms": null,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "MissingValueError",
+      "fn": "bound_k_ms",
+      "message": "boundary_ms is required",
+      "name": "bound_k boundary_ms missing"
+    },
+    {
+      "args": {
+        "boundary_ms": false,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "boundary_ms must be an int, not bool",
+      "name": "bound_k boundary_ms bool"
+    },
+    {
+      "args": {
+        "boundary_ms": "5",
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "boundary_ms must be an int, not str",
+      "name": "bound_k boundary_ms str"
+    },
+    {
+      "args": {
+        "boundary_ms": {
+          "$float": "nan"
+        },
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "boundary_ms must be an int, not float",
+      "name": "bound_k boundary_ms nan"
+    },
+    {
+      "args": {
+        "boundary_ms": -1,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidValueError",
+      "fn": "bound_k_ms",
+      "message": "boundary_ms must be >= 0, got -1",
+      "name": "bound_k boundary_ms negative"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": null,
+        "s1_ms": 1767585600000
+      },
+      "exc": "MissingValueError",
+      "fn": "bound_k_ms",
+      "message": "mono_start_s1_ns is required",
+      "name": "bound_k mono_start_s1_ns missing"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": false,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "mono_start_s1_ns must be an int, not bool",
+      "name": "bound_k mono_start_s1_ns bool"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": "5",
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "mono_start_s1_ns must be an int, not str",
+      "name": "bound_k mono_start_s1_ns str"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": {
+          "$float": "nan"
+        },
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "mono_start_s1_ns must be an int, not float",
+      "name": "bound_k mono_start_s1_ns nan"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": 20,
+        "mono_start_s1_ns": -1,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidValueError",
+      "fn": "bound_k_ms",
+      "message": "mono_start_s1_ns must be >= 0, got -1",
+      "name": "bound_k mono_start_s1_ns negative"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": null,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "MissingValueError",
+      "fn": "bound_k_ms",
+      "message": "mono_end_k_ns is required",
+      "name": "bound_k mono_end_k_ns missing"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": false,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "mono_end_k_ns must be an int, not bool",
+      "name": "bound_k mono_end_k_ns bool"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": "5",
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "mono_end_k_ns must be an int, not str",
+      "name": "bound_k mono_end_k_ns str"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": {
+          "$float": "nan"
+        },
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidTypeError",
+      "fn": "bound_k_ms",
+      "message": "mono_end_k_ns must be an int, not float",
+      "name": "bound_k mono_end_k_ns nan"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767585600000,
+        "mono_end_k_ns": -1,
+        "mono_start_s1_ns": 10,
+        "s1_ms": 1767585600000
+      },
+      "exc": "InvalidValueError",
+      "fn": "bound_k_ms",
+      "message": "mono_end_k_ns must be >= 0, got -1",
+      "name": "bound_k mono_end_k_ns negative"
+    },
+    {
+      "args": {
+        "l_obs_ms": null
+      },
+      "exc": "MissingValueError",
+      "fn": "lag_candidate",
+      "message": "l_obs_ms is required",
+      "name": "lag missing"
+    },
+    {
+      "args": {
+        "l_obs_ms": true
+      },
+      "exc": "InvalidTypeError",
+      "fn": "lag_candidate",
+      "message": "l_obs_ms must be an int, not bool",
+      "name": "lag bool"
+    },
+    {
+      "args": {
+        "l_obs_ms": "1000"
+      },
+      "exc": "InvalidTypeError",
+      "fn": "lag_candidate",
+      "message": "l_obs_ms must be an int, not str",
+      "name": "lag str"
+    },
+    {
+      "args": {
+        "l_obs_ms": 1000.0
+      },
+      "exc": "InvalidTypeError",
+      "fn": "lag_candidate",
+      "message": "l_obs_ms must be an int, not float",
+      "name": "lag float"
+    },
+    {
+      "args": {
+        "l_obs_ms": {
+          "$float": "nan"
+        }
+      },
+      "exc": "InvalidTypeError",
+      "fn": "lag_candidate",
+      "message": "l_obs_ms must be an int, not float",
+      "name": "lag nan"
+    },
+    {
+      "args": {
+        "l_obs_ms": -1
+      },
+      "exc": "InvalidValueError",
+      "fn": "lag_candidate",
+      "message": "l_obs_ms must be >= 0, got -1",
+      "name": "lag negative"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": null
+      },
+      "exc": "MissingValueError",
+      "fn": "SampleInput",
+      "message": "timeframe is required",
+      "name": "sample timeframe missing"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "2m"
+      },
+      "exc": "InvalidValueError",
+      "fn": "SampleInput",
+      "message": "unsupported timeframe '2m'",
+      "name": "sample timeframe unknown"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": 5
+      },
+      "exc": "InvalidTypeError",
+      "fn": "SampleInput",
+      "message": "timeframe must be a str, not int",
+      "name": "sample timeframe not str"
+    },
+    {
+      "args": {
+        "boundary_ms": true,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidTypeError",
+      "fn": "SampleInput",
+      "message": "boundary_ms must be an int, not bool",
+      "name": "sample boundary bool"
+    },
+    {
+      "args": {
+        "boundary_ms": "1767574800000",
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidTypeError",
+      "fn": "SampleInput",
+      "message": "boundary_ms must be an int, not str",
+      "name": "sample boundary str"
+    },
+    {
+      "args": {
+        "boundary_ms": -300000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidValueError",
+      "fn": "SampleInput",
+      "message": "boundary_ms must be >= 0, got -300000",
+      "name": "sample boundary negative"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800001,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidValueError",
+      "fn": "SampleInput",
+      "message": "boundary_ms 1767574800001 is not aligned to 5m",
+      "name": "sample boundary misaligned"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          100,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "NonMonotonicError",
+      "fn": "SampleInput",
+      "message": "bounds_ms[2] 100 is earlier than bounds_ms[1] 2900",
+      "name": "sample bounds non-monotonic"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          -1,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidValueError",
+      "fn": "SampleInput",
+      "message": "bounds_ms[0] must be >= 0, got -1",
+      "name": "sample bounds negative"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          true,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidTypeError",
+      "fn": "SampleInput",
+      "message": "bounds_ms[1] must be an int, not bool",
+      "name": "sample bounds bool"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          "11000"
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidTypeError",
+      "fn": "SampleInput",
+      "message": "bounds_ms[3] must be an int, not str",
+      "name": "sample bounds str"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          {
+            "$float": "nan"
+          },
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidTypeError",
+      "fn": "SampleInput",
+      "message": "bounds_ms[0] must be an int, not float",
+      "name": "sample bounds nan"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          null,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MissingValueError",
+      "fn": "SampleInput",
+      "message": "bounds_ms[2] is required",
+      "name": "sample bounds missing entry"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidValueError",
+      "fn": "SampleInput",
+      "message": "observations and bounds_ms must each have 4 entries",
+      "name": "sample bounds wrong length"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": null,
+        "timeframe": "5m"
+      },
+      "exc": "ReferenceMissingError",
+      "fn": "SampleInput",
+      "message": "reference row is missing",
+      "name": "sample reference missing"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference must have exactly 12 elements, got 11",
+      "name": "sample reference 11 fields"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": "xxxxxxxxxxxx",
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference must be a list or tuple, not str",
+      "name": "sample reference not list"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          true,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[0] must be an int, not bool",
+      "name": "sample reference open bool"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          true,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[8] must be an int, not bool",
+      "name": "sample reference trades bool"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999.0,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[6] must be an int, not float",
+      "name": "sample reference close time float"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          100.0,
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[1] must be a decimal string, not float",
+      "name": "sample reference price number"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "NaN",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[2] is not a finite non-negative decimal string: 'NaN'",
+      "name": "sample reference price NaN"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "Infinity",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[3] is not a finite non-negative decimal string: 'Infinity'",
+      "name": "sample reference price Infinity"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "-1.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[5] is not a finite non-negative decimal string: '-1.0'",
+      "name": "sample reference negative volume"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[7] is not a finite non-negative decimal string: ''",
+      "name": "sample reference empty string"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "1_0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[9] is not a finite non-negative decimal string: '1_0'",
+      "name": "sample reference underscore"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          " 5.0",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[10] is not a finite non-negative decimal string: ' 5.0'",
+      "name": "sample reference whitespace"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "1e2",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[4] is not a finite non-negative decimal string: '1e2'",
+      "name": "sample reference exponent"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          0
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[11] must be a str, not int",
+      "name": "sample reference ignore not str"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          -1,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[8] must be >= 0, got -1",
+      "name": "sample reference negative trades"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574800000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[0] open time 1767574800000 != expected 1767574500000",
+      "name": "sample reference wrong open"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574800000,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "reference[6] close time 1767574800000 != expected 1767574799999",
+      "name": "sample reference wrong close"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "MalformedRowError",
+      "fn": "SampleInput",
+      "message": "observations[2] must have exactly 12 elements, got 3",
+      "name": "sample observation malformed"
+    },
+    {
+      "args": {
+        "boundary_ms": 1767574800000,
+        "bounds_ms": [
+          700,
+          2900,
+          10800,
+          11000
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        "timeframe": "5m"
+      },
+      "exc": "InvalidValueError",
+      "fn": "SampleInput",
+      "message": "observations and bounds_ms must each have 4 entries",
+      "name": "sample observations wrong length"
+    },
+    {
+      "args": {
+        "samples": null
+      },
+      "exc": "MissingValueError",
+      "fn": "analyze_samples",
+      "message": "samples is required",
+      "name": "analyze none"
+    },
+    {
+      "args": {
+        "samples": []
+      },
+      "exc": "EmptySampleError",
+      "fn": "analyze_samples",
+      "message": "no samples",
+      "name": "analyze empty list"
+    },
+    {
+      "args": {
+        "samples": []
+      },
+      "exc": "EmptySampleError",
+      "fn": "analyze_samples",
+      "message": "no samples",
+      "name": "analyze empty tuple"
+    },
+    {
+      "args": {
+        "samples": "abc"
+      },
+      "exc": "InvalidTypeError",
+      "fn": "analyze_samples",
+      "message": "samples must be a list or tuple, not str",
+      "name": "analyze str"
+    },
+    {
+      "args": {
+        "samples": {
+          "a": 1
+        }
+      },
+      "exc": "InvalidTypeError",
+      "fn": "analyze_samples",
+      "message": "samples must be a list or tuple, not dict",
+      "name": "analyze dict"
+    },
+    {
+      "args": {
+        "samples": [
+          "x"
+        ]
+      },
+      "exc": "InvalidTypeError",
+      "fn": "analyze_samples",
+      "message": "samples[0] must be a SampleInput, not str",
+      "name": "analyze non-sample"
+    },
+    {
+      "args": {
+        "samples": {
+          "$repeat_sample": 127
+        }
+      },
+      "exc": "SampleCountError",
+      "fn": "analyze_samples",
+      "message": "127 samples exceed the maximum of 126",
+      "name": "analyze too many samples"
+    },
+    {
+      "args": {
+        "indices": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": null
+      },
+      "exc": "ReferenceMissingError",
+      "fn": "stable_from",
+      "message": "reference row is missing",
+      "name": "stable_from reference missing"
+    },
+    {
+      "args": {
+        "indices": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "observations": [
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ],
+          [
+            1767574500000,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "10.0",
+            1767574799999,
+            "1005.0",
+            100,
+            "5.0",
+            "502.5",
+            "0"
+          ]
+        ],
+        "reference": [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      },
+      "exc": "InvalidValueError",
+      "fn": "stable_from",
+      "message": "expected 4 observations, got 3",
+      "name": "stable_from wrong observation count"
+    }
+  ],
+  "sizes": {
+    "max_samples": 126,
+    "min_samples": 1
+  },
+  "stability": [
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 700,
+          "stable_from": 0
+        },
+        "T_app": {
+          "bound_ms": 700,
+          "stable_from": 0
+        },
+        "T_matrix": {
+          "bound_ms": 700,
+          "stable_from": 0
+        }
+      },
+      "name": "stable from 0",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        },
+        "T_app": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        },
+        "T_matrix": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        }
+      },
+      "name": "stable from 1",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.6",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 10800,
+          "stable_from": 2
+        },
+        "T_app": {
+          "bound_ms": 10800,
+          "stable_from": 2
+        },
+        "T_matrix": {
+          "bound_ms": 10800,
+          "stable_from": 2
+        }
+      },
+      "name": "stable from 2",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.6",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.6",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 61000,
+          "stable_from": 3
+        },
+        "T_app": {
+          "bound_ms": 61000,
+          "stable_from": 3
+        },
+        "T_matrix": {
+          "bound_ms": 61000,
+          "stable_from": 3
+        }
+      },
+      "name": "stable from 3",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.6",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.6",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.6",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": null,
+          "stable_from": null
+        },
+        "T_app": {
+          "bound_ms": null,
+          "stable_from": null
+        },
+        "T_matrix": {
+          "bound_ms": null,
+          "stable_from": null
+        }
+      },
+      "name": "unbounded",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.6",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        },
+        "T_app": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        },
+        "T_matrix": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        }
+      },
+      "name": "empty response at 0 then stable",
+      "observations": [
+        null,
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": null,
+          "stable_from": null
+        },
+        "T_app": {
+          "bound_ms": null,
+          "stable_from": null
+        },
+        "T_matrix": {
+          "bound_ms": null,
+          "stable_from": null
+        }
+      },
+      "name": "empty response at 3 is unbounded",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        null
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 10800,
+          "stable_from": 2
+        },
+        "T_app": {
+          "bound_ms": 10800,
+          "stable_from": 2
+        },
+        "T_matrix": {
+          "bound_ms": 10800,
+          "stable_from": 2
+        }
+      },
+      "name": "flap: equal, differ, equal, equal",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.6",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 700,
+          "stable_from": 0
+        },
+        "T_app": {
+          "bound_ms": 700,
+          "stable_from": 0
+        },
+        "T_matrix": {
+          "bound_ms": 700,
+          "stable_from": 0
+        }
+      },
+      "name": "raw text only difference is stable",
+      "observations": [
+        [
+          1767574500000,
+          "100.00",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.000",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.00",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.000",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.00",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.000",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.00",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.000",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        },
+        "T_app": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        },
+        "T_matrix": {
+          "bound_ms": 700,
+          "stable_from": 0
+        }
+      },
+      "name": "volume only differs at 0: matrix stable 0, app stable 1",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.1",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        },
+        "T_app": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        },
+        "T_matrix": {
+          "bound_ms": 700,
+          "stable_from": 0
+        }
+      },
+      "name": "trade count only differs at 0",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          101,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    },
+    {
+      "boundary_ms": 1767574800000,
+      "bounds_ms": [
+        700,
+        2900,
+        10800,
+        61000
+      ],
+      "expected": {
+        "T_all": {
+          "bound_ms": 2900,
+          "stable_from": 1
+        },
+        "T_app": {
+          "bound_ms": 700,
+          "stable_from": 0
+        },
+        "T_matrix": {
+          "bound_ms": 700,
+          "stable_from": 0
+        }
+      },
+      "name": "taker field only differs at 0: all stable 1, app stable 0",
+      "observations": [
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.1",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ],
+        [
+          1767574500000,
+          "100.0",
+          "101.0",
+          "99.0",
+          "100.5",
+          "10.0",
+          1767574799999,
+          "1005.0",
+          100,
+          "5.0",
+          "502.5",
+          "0"
+        ]
+      ],
+      "reference": [
+        1767574500000,
+        "100.0",
+        "101.0",
+        "99.0",
+        "100.5",
+        "10.0",
+        1767574799999,
+        "1005.0",
+        100,
+        "5.0",
+        "502.5",
+        "0"
+      ],
+      "timeframe": "5m"
+    }
+  ]
+}
