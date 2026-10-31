@@ -46,11 +46,7 @@
 ### 2.2 Write-Read-Audit Self-Verification [NEW]
 - Runner calls `load_run(staging, pin)` and executes `audit_run(...)` against reloaded persisted artifacts before atomic publication.
 
----
 
-### Part 2: Sections 3 to 6
-
-```markdown
 ## 3. Adversarial Edge Cases & Safety Guards
 
 ### 3.1 DNS Isolation Boundary [NEW]
@@ -62,8 +58,6 @@
 ### 3.3 Protocol v0.5 Alignment [NEW]
 - Maps harness outcomes to record shapes and protocol incident tables without breaking frozen schemas.
 
----
-
 ## 4. Signal State Machine & Incident Matrices
 
 ### 4.1 Signal State Machine & Commit Checkpoints (CP1–CP3) [NEW]
@@ -72,8 +66,6 @@
 
 ### 4.2 Complete Incident & Crash Persistence Matrices [EXISTS]
 - Fully enumerated **N1–N14**, **T1–T9**, **P1–P8**, **E1–E12**, and **K0–K12** staging crash tables.
-
----
 
 ## 5. Provenance & Terminal Success Invariants
 
@@ -86,8 +78,6 @@
 
 ### 5.3 Strict Success Predicate ($S$) & Invariant M [NEW]
 - $S \iff \text{COMMITTED} \land \text{RECEIPT} \land \text{VERIFIED} \land \text{AUDITED} \land \text{EGRESS\_CLEAN} \land \text{PLAN\_TERMINAL}$.
-
----
 
 ## 6. Gates & Reviewer Decisions
 
