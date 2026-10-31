@@ -45,44 +45,73 @@
 
 ### 2.2 Write-Read-Audit Self-Verification [NEW]
 - Runner calls `load_run(staging, pin)` and executes `audit_run(...)` against reloaded persisted artifacts before atomic publication.
-
-
 ## 3. Adversarial Edge Cases & Safety Guards
 
 ### 3.1 DNS Isolation Boundary [NEW]
-- Uses a killable `_resolve.py` subprocess with `RESOLVE_TIMEOUT_S=5.0` during pre-flight resolution. Unkillable hangups map to unsealed T0 outcomes (`cause: PUBLISH-UNSUPPORTED` or DNS failure).
+- **Subprocess Isolation:** Resolves hostnames in an isolated, killable `_resolve.py` subprocess using `RESOLVE_TIMEOUT_S = 5.0`. If resolution hangs or exceeds the deadline, the main process terminates the resolver worker via `kill()` and `wait(2.0)`.
+- **Pre-Flight Enforcement:** All DNS resolution occurs strictly during pre-flight. The runtime session path connects exclusively via pinned IP addresses, ensuring zero blocking DNS lookups during pacing.
+- **Failure Classification:** Unresolvable or unkillable DNS hangups are classified as unsealed, untrusted execution failures (Terminal State T0) with structured cause codes.
 
 ### 3.2 Byte-Exact Streaming Memory Budgets (`INCIDENT-MEMORY`) [NEW]
-- **Streaming Enforcement:** Chunk-level `retained + len(chunk) > SESSION_BODY_BUDGET_BYTES` (50 MiB session total, 4 MiB per-response cap) enforced inside the streaming read loop. Domain B transient buffer raised to 6 MiB.
+- **Streaming Enforcement:** The chunk-level streaming read loop enforces the session aggregate budget dynamically:
+  $$\text{retained\_total} + \text{len(chunk)} > \text{SESSION\_BODY\_BUDGET\_BYTES (50 MiB)}$$
+  Pre-dispatch checks serve as advisory guards, while chunk-level streaming validation halts and aborts immediately before retaining excess bytes.
+- **Per-Response Cap:** 4 MiB maximum response body enforced via header pre-checks and streaming chunk limits.
+- **Disjoint Memory Domains:**
+  - **Domain A:** Retained response payloads (capped by 50 MiB session aggregate / 4 MiB per-response).
+  - **Domain B:** Transient body buffers (`TRANSIENT_BUDGET_BYTES = 6 MiB`) accommodating in-flight decompression and hashing buffers.
+  - **Domain C:** Fixed harness overhead.
+- **Decompression Bounds:** Never-decompress policy in the hot execution path; offline verification enforces `MAX_DECOMPRESSED_BYTES` and a strict 1000:1 expansion ratio ceiling.
 
 ### 3.3 Protocol v0.5 Alignment [NEW]
-- Maps harness outcomes to record shapes and protocol incident tables without breaking frozen schemas.
+- **Record Shape Preservation:** Record structures and JSONL schemas remain frozen under `obs-run-manifest/1`. New detail values for transport and memory incidents live inside the free-form `error` field.
+- **No-Response Family Rule:** `status is None` uniformly triggers the no-response sequence and incident counter regardless of transport detail sub-codes.
+- **Incident Mapping:** `INCIDENT-MEMORY` maps cleanly to the protocol's formal `ABORT (INCIDENT)` table classification.
+
+---
 
 ## 4. Signal State Machine & Incident Matrices
 
 ### 4.1 Signal State Machine & Commit Checkpoints (CP1–CP3) [NEW]
-- **States:** `PRE-FLIGHT` → `RUNNING` → `STOPPING` → `SEALING` → `VERIFYING` → `COMMITTING` → `COMMITTED` (or `EMERGENCY`).
-- **Checkpoints:** CP1 (after rename), CP2 (after parent fsync), CP3 (after index fsync) with a single deferred-signal consumer.
+- **Lifecycle States:** `PRE-FLIGHT` → `RUNNING` → `STOPPING` → `SEALING` → `VERIFYING` → `COMMITTING` → `COMMITTED` (or `EMERGENCY`).
+- **Deferred Interrupt Handling:** First `SIGINT` or `SIGTERM` sets an interrupt flag checked at ≤100 ms intervals inside pacing sleep loops, ensuring no request starts mid-interrupt and triggering a graceful sealed abort.
+- **Commit Checkpoints (CP1–CP3):**
+  - **CP1:** Immediately after atomic staging rename.
+  - **CP2:** Immediately after parent directory `fsync()`.
+  - **CP3:** Immediately after outer index receipt publication.
+- **Second Signal Behavior:** Triggers immediate emergency exit (`os._exit`), with millisecond-bounded deferral permitted only within atomic synchronization checkpoints to guarantee journal consistency.
 
-### 4.2 Complete Incident & Crash Persistence Matrices [EXISTS]
-- Fully enumerated **N1–N14**, **T1–T9**, **P1–P8**, **E1–E12**, and **K0–K12** staging crash tables.
+### 4.2 Complete Incident Matrices (N1–N14, T1–T9, P1–P8, E1–E12) [EXISTS]
+- Fully enumerated persistence and error matrices mapping every condition to its detection rule, countermeasure, outcome code, and evidence treatment:
+  - **N1–N14 (Network & Transport):** Covers 12.0 s read timeouts, connection drops, chunk limits, and inline PACE-8 verification.
+  - **T1–T9 (Timing & Clock):** Monotonic regression checks, wall-clock jumps, and NTP slew handling.
+  - **P1–P8 (Pacing & Admission):** Rolling cap enforcement and target re-evaluation boundaries.
+  - **E1–E12 (Execution & Environment):** Signal handling, memory budgets, and file locks.
 
-## 5. Provenance & Terminal Success Invariants
+### 4.3 Staging Crash Persistence Matrix (K0–K12) [EXISTS]
+- 13 deterministic persistence failure scenarios (including file write failures, file `fsync()` errors, staging rename interruptions, and parent-directory `fsync()` faults) proving fail-closed atomicity across all staging operations.
+## 5. Provenance, Receipt & Terminal Success Invariants
 
 ### 5.1 Outer Evidence Index (`obs-outer-index/1`) [EXISTS]
-- Frozen `obs-run-manifest/1` schema remains untouched at 8 keys; session provenance resides in sibling `obs-outer-index/1`.
+- **Frozen Manifest:** The core run artifact schema (`obs-run-manifest/1`) remains strictly frozen at its exact 8-key set.
+- **Provenance Sibling:** All runner execution metadata, Python runtimes, OS platform details, commit SHAs, and working-tree clean status reside in an independent sibling index (`obs-outer-index/1`), bound to the run via the exact manifest SHA-256 pin.
 
-### 5.2 Refusal Journal (`obs-refusal/1`) & Terminal States (T0–T6) [NEW]
-- **T0 vs T2:** Decided by a durable, fsynced refusal journal (`obs-refusal/1`). Torn journals ⇒ T2.
-- **T4 Strictness:** Strictly represents verified runs lacking a receipt. Tampered runs map to T3.
+### 5.2 Refusal Journal (`obs-refusal/1`) & Terminal-State Partition [NEW]
+- **Durable Refusal Journal:** Pre-flight refusals write a structured, fsynced journal (`obs-refusal/1`). A torn or missing refusal journal during a pre-flight crash correctly resolves to Terminal State **T2 (INCONCLUSIVE-CRASH)** rather than false-positive pre-flight rejection (**T0**).
+- **Strict Re-Verification (`observe()`):** `observe()` performs full re-verification of persisted artifacts *before* checking for the receipt. A tampered or corrupt run directory maps to **T3 (FAILED-AUDIT)**, ensuring state **T4 (SEALED-UNRECEIPTED)** is strictly reserved for valid, verified runs that lack a published receipt.
 
 ### 5.3 Strict Success Predicate ($S$) & Invariant M [NEW]
-- $S \iff \text{COMMITTED} \land \text{RECEIPT} \land \text{VERIFIED} \land \text{AUDITED} \land \text{EGRESS\_CLEAN} \land \text{PLAN\_TERMINAL}$.
+- **Invariant M:** Every run attempt terminates in exactly one deterministic state: successfully published and verified, quarantined (`*.unverified/`), or entirely absent (never partial).
+- **Strict Success Predicate ($S$):**
+  $$S \iff \text{COMMITTED} \land \text{RECEIPT} \land \text{VERIFIED} \land \text{AUDITED} \land \text{EGRESS\_CLEAN} \land \text{PLAN\_TERMINAL}$$
+- **Terminal States (T0–T6):** Exhaustive partition mapping every possible runtime outcome to a single definitive state, governing exit codes ($0, 1, 2, 130, 143$) and refusal handling.
+
+---
 
 ## 6. Gates & Reviewer Decisions
 
 ### 6.1 Validation Gates (G-R1 through G-R12) [NEW]
-- Automated assertion checks covering all adversarial remediation rounds.
+- Automated assertion and test gates mapped directly to each adversarial remediation requirement (AR-01 through AR-12 and V12-01 through V12-08).
 
 ### 6.2 Reviewer Decisions (D1 through D10) [NEW]
-- Formal architectural decisions regarding memory budgets, host policies, and execution boundaries.
+- Formal architectural decisions covering host binding policies, memory budget thresholds, isolation boundaries, and protocol v0.5 alignment.
