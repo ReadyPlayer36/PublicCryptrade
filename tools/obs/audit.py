@@ -17,7 +17,7 @@ from typing import Mapping, Sequence
 
 from tools.obs.admission import AdmissionDecision
 from tools.obs.estimator import OffsetEstimator, TimeSample
-from tools.obs.eventlog import EventLogError, VerifiedEventLog, records_digest, verify_event_log
+from tools.obs.eventlog import EVENT_DECISION, EventLogError, VerifiedEventLog, records_digest, verify_event_log
 from tools.obs.runstore import AuthenticatedManifest, ManifestError, ManifestTrustError, load_run, validate_and_snapshot_manifest
 from tools.obs.pacer import OBS02_PROFILE, PaceProfile, RequestRecord, release_ns, window_count
 from tools.obs.params import AUDIT_MAX_DURATION_NS, CANCEL_GRACE_NS, DEADLINE_NS, KLINES_PATH, MAX_CONSECUTIVE_NO_RESPONSE, MS, TIME_PATH
@@ -168,11 +168,18 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
             fail("a", None, f"event log rejected: {exc}")
         else:
             end_event = verified.timeline_end
-            if end_event is not None:
+            if end_event is None:
+                fail("a", None, "the event log has no TIMELINE_END event: the end of the run is unrecorded (missing terminal event)")
+            else:
                 timeline_end_ns = end_event.get("timeline_end_ns")
                 if end_event.records_before != len(records):
                     fail("a", None, f"TIMELINE_END was logged after {end_event.records_before} records but {len(records)} exist")
                     timeline_end_ns = None
+            explained = set(skips or {})
+            for event in verified.events:
+                if event.kind == EVENT_DECISION and (event.get("boundary_ms"), event.get("group_name")) not in explained:
+                    fail("a", None, f"DECISION event for ({event.get('boundary_ms')!r}, {event.get('group_name')!r}) matches no audited skip: "
+                                    "an unexplained decision timestamp is never accepted")
 
     # (a) integrity
     typed_ok = True
