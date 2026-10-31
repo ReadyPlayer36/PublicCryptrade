@@ -247,6 +247,116 @@ def test_analysis_never_approves_a_lag():
         candidate.l_ms = 1                                               # frozen
 
 
+# ------------------------------------------------------------------------------------------------ immutable snapshot
+def _fresh_sample_spec(name):
+    spec = json.loads(json.dumps(STABILITY[name]))                      # private deep copy of lists the test may mutate
+    return spec
+
+
+@pytest.mark.requirement("OBS-02")
+def test_snapshot_rows_are_plain_tuples_copied_from_the_inputs_and_none_is_preserved():
+    spec = _fresh_sample_spec("empty response at 0 then stable")        # observation 0 is None
+    sample = make_sample(spec)
+    assert type(sample.reference) is tuple and sample.reference is not spec["reference"]
+    assert sample.observations[0] is None
+    for stored, original in zip(sample.observations[1:], spec["observations"][1:]):
+        assert type(stored) is tuple and stored is not original and list(stored) == original
+    assert type(sample.observations) is tuple and type(sample.bounds_ms) is tuple
+    hash(sample)                                                         # fully immutable data is hashable
+
+
+@pytest.mark.requirement("OBS-02")
+def test_mutating_original_observation_lists_after_construction_does_not_alter_the_sample():
+    spec = _fresh_sample_spec("stable from 0")
+    sample = make_sample(spec)
+    before = sample.observations
+    for row in spec["observations"]:
+        row[1] = "999.0"                                                 # would make observations differ from the reference
+        row[8] = -5
+    spec["observations"][0] = None
+    spec["observations"].append(["junk"])
+    assert sample.observations == before
+    assert all(row is not None and row[1] == "100.0" and row[8] == 100 for row in sample.observations)
+
+
+@pytest.mark.requirement("OBS-02")
+def test_mutating_the_original_reference_list_after_construction_does_not_alter_the_sample():
+    spec = _fresh_sample_spec("stable from 0")
+    sample = make_sample(spec)
+    spec["reference"][1] = "999.0"
+    spec["reference"].clear()
+    assert len(sample.reference) == 12 and sample.reference[1] == "100.0"
+
+
+@pytest.mark.requirement("OBS-02")
+def test_mutation_through_sample_observations_is_rejected():
+    sample = make_sample(_fresh_sample_spec("stable from 0"))
+    before = sample.observations
+    with pytest.raises(TypeError):
+        sample.observations[1][1] = "999.0"
+    with pytest.raises(TypeError):
+        sample.observations[1][1:3] = ("1", "2")
+    with pytest.raises(TypeError):
+        sample.observations[0] = None
+    with pytest.raises(AttributeError):
+        sample.observations[1].append("x")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        sample.observations = ()
+    assert sample.observations == before
+
+
+@pytest.mark.requirement("OBS-02")
+def test_mutation_through_sample_reference_is_rejected():
+    sample = make_sample(_fresh_sample_spec("stable from 0"))
+    before = sample.reference
+    with pytest.raises(TypeError):
+        sample.reference[1] = "999.0"
+    with pytest.raises(TypeError):
+        del sample.reference[0]
+    with pytest.raises(AttributeError):
+        sample.reference.append("x")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        sample.reference = None
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        sample.bounds_ms = (0, 0, 0, 0)
+    assert sample.reference == before
+
+
+@pytest.mark.requirement("OBS-02")
+@pytest.mark.parametrize("name", ["stable from 0", "stable from 2", "unbounded", "empty response at 0 then stable", "flap: equal, differ, equal, equal"])
+def test_analysis_results_unchanged_after_attempted_external_mutation(name):
+    spec = _fresh_sample_spec(name)
+    sample = make_sample(spec)
+    expected = analysis.analyze_samples([sample])
+    for row in spec["observations"]:
+        if row is not None:
+            row[1] = "999.0"
+            row[8] = 7
+    spec["reference"][1] = "999.0"
+    spec["reference"][8] = 7
+    for attempt in (lambda: sample.reference.__setitem__(1, "1.0"), lambda: sample.observations.__setitem__(0, None),
+                    lambda: setattr(sample, "reference", None)):
+        with pytest.raises((TypeError, AttributeError)):
+            attempt()
+    assert analysis.analyze_samples([sample]) == expected
+    for tname in analysis.TUPLES:
+        assert expected.by_name(tname).l_obs_ms == STABILITY[name]["expected"][tname]["bound_ms"]
+
+
+@pytest.mark.requirement("OBS-02")
+def test_snapshot_does_not_change_validation_of_mutable_inputs_or_error_precedence():
+    spec = _fresh_sample_spec("stable from 0")
+    spec["reference"] = "x" * 12                                          # not a list/tuple: reported, not iterated into chars
+    with pytest.raises(analysis.MalformedRowError) as info:
+        make_sample(spec)
+    assert str(info.value) == "reference must be a list or tuple, not str"
+    spec = _fresh_sample_spec("stable from 0")
+    spec["observations"][2] = {"a": 1}
+    with pytest.raises(analysis.MalformedRowError) as info:
+        make_sample(spec)
+    assert str(info.value) == "observations[2] must be a list or tuple, not dict"
+
+
 # ------------------------------------------------------------------------------------------------ rejections
 @pytest.mark.requirement("OBS-02")
 @pytest.mark.parametrize("case", V["rejections"], ids=lambda c: c["name"])
