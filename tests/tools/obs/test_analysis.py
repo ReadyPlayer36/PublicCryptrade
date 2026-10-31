@@ -4,6 +4,8 @@ Vectors come from tests/fixtures/vectors/obs_analysis_vectors.json, produced by 
 import the harness. Tests call `analysis.<name>` at call time so the degenerate-double meta-test can patch the module.
 Vector-driven tests are named test_vector_* (the meta-test relies on that prefix).
 """
+import ast
+import dataclasses
 import importlib.util
 import inspect
 import json
@@ -72,10 +74,61 @@ def test_vector_finality_boundary_triples(case):
     assert case["final"] is (case["offset_from_B"] < 0)           # B-1 final; B and B+1 are not (strict <)
 
 
+def _all_defaults_in_source():
+    """Every default of every def/lambda/method in the module source, found by AST (public, private, nested)."""
+    tree = ast.parse(Path(analysis.__file__).read_text())
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            defaults = list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]
+            found += [(getattr(node, "name", "<lambda>"), ast.unparse(d)) for d in defaults]
+        if isinstance(node, ast.ClassDef):                     # dataclass field defaults would also be defaults
+            for item in node.body:
+                if isinstance(item, ast.AnnAssign) and item.value is not None:
+                    found.append((f"{node.name}.{ast.unparse(item.target)}", ast.unparse(item.value)))
+    return found
+
+
 @pytest.mark.requirement("LAG-01")
-def test_no_function_has_a_default_lag_or_default_argument():
-    for fn in (analysis.is_final, analysis.bound_k_ms, analysis.lag_candidate, analysis.stable_from, analysis.analyze_samples):
-        assert all(p.default is inspect.Parameter.empty for p in inspect.signature(fn).parameters.values()), fn.__name__
+def test_no_default_arguments_anywhere_in_the_module_source():
+    assert _all_defaults_in_source() == []
+
+
+@pytest.mark.requirement("LAG-01")
+def test_no_default_arguments_on_any_runtime_callable():
+    checked = []
+    for name, obj in vars(analysis).items():
+        if getattr(obj, "__module__", None) != analysis.__name__:
+            continue
+        targets = [obj]
+        if inspect.isclass(obj):
+            targets = [m for _, m in inspect.getmembers(obj, inspect.isfunction)]
+            assert all(f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
+                       for f in getattr(obj, "__dataclass_fields__", {}).values()), name
+        for target in targets:
+            signature = inspect.signature(target)
+            assert all(p.default is inspect.Parameter.empty for p in signature.parameters.values()), (name, str(signature))
+            checked.append(name)
+    assert {"is_final", "bound_k_ms", "lag_candidate", "validate_row", "rows_equal", "stable_from", "analyze_samples",
+            "_int", "_check_row_shape", "_check_indices", "_equal", "_check_label", "SampleInput", "AnalysisResult"} <= set(checked)
+
+
+@pytest.mark.requirement("LAG-01")
+def test_omitting_any_argument_is_a_python_error_not_a_silent_default():
+    for fn, argc in ((analysis.is_final, 3), (analysis.bound_k_ms, 4), (analysis.lag_candidate, 1), (analysis.rows_equal, 3),
+                     (analysis.stable_from, 3), (analysis.analyze_samples, 1)):
+        for omit in range(argc):
+            args = [None] * argc
+            with pytest.raises(TypeError):
+                fn(*(args[:omit] + args[omit + 1:]))
+    with pytest.raises(TypeError):
+        analysis.validate_row([], expected_open_ms=0, interval_ms=1)               # label omitted
+    with pytest.raises(TypeError):
+        analysis._int("x", 1)                                                       # minimum omitted
+
+
+@pytest.mark.requirement("LAG-01")
+def test_no_default_lag_constant_and_no_approval_surface():
     forbidden = [n for n in dir(analysis) if "default" in n.lower() or n.startswith("APPROVED") or n in {"LAG", "LAG_MS", "L_MS"}]
     assert forbidden == []
     assert not hasattr(analysis, "approve_lag") and not hasattr(analysis, "choose_lag")
@@ -141,6 +194,13 @@ def test_vector_stability_per_tuple(case):
 
 
 @pytest.mark.requirement("OBS-02")
+@pytest.mark.parametrize("case", V["rows_equal"], ids=lambda c: c["name"])
+def test_vector_rows_equal(case):
+    got = analysis.rows_equal(case["left"], case["right"], case["indices"])
+    assert got is case["expected"]
+
+
+@pytest.mark.requirement("OBS-02")
 def test_text_only_difference_is_not_instability_and_numeric_difference_is():
     assert STABILITY["raw text only difference is stable"]["expected"]["T_all"]["stable_from"] == 0
     assert STABILITY["unbounded"]["expected"]["T_matrix"]["stable_from"] is None
@@ -202,5 +262,7 @@ def test_vector_rejections_have_exact_type_and_message(case):
 @pytest.mark.requirement("OBS-02")
 def test_every_rule_family_has_a_rejection_vector():
     names = {c["exc"] for c in V["rejections"]}
+    fns = {c["fn"] for c in V["rejections"]}
+    assert {"is_final", "bound_k_ms", "lag_candidate", "SampleInput", "analyze_samples", "stable_from", "rows_equal", "validate_row"} <= fns
     assert names == {"MissingValueError", "InvalidTypeError", "InvalidValueError", "NonMonotonicError", "EmptySampleError",
                      "SampleCountError", "ReferenceMissingError", "MalformedRowError"}

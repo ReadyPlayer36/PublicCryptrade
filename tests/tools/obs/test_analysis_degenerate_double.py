@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-FAMILIES = ("finality_boundary", "bound_k", "lag_formula", "stability", "aggregation", "rejections")
+FAMILIES = ("finality_boundary", "bound_k", "lag_formula", "stability", "aggregation", "rejections", "rows_equal")
 PLUGINS = {
     "constant": '''
 def pytest_configure(config):
@@ -17,6 +17,8 @@ def pytest_configure(config):
     analysis.bound_k_ms = lambda *a, **k: 0
     analysis.lag_candidate = lambda *a, **k: None
     analysis.stable_from = lambda *a, **k: 0
+    analysis.rows_equal = lambda *a, **k: True
+    analysis.validate_row = lambda *a, **k: None
     analysis.analyze_samples = lambda *a, **k: analysis.AnalysisResult(())
     analysis.SampleInput.__post_init__ = lambda self: None
 ''',
@@ -25,13 +27,13 @@ def pytest_configure(config):
     from tools.obs import analysis
     def boom(*a, **k):
         raise analysis.AnalysisError("degenerate double always raises")
-    for name in ("is_final", "bound_k_ms", "lag_candidate", "stable_from", "analyze_samples", "validate_row"):
+    for name in ("is_final", "bound_k_ms", "lag_candidate", "stable_from", "analyze_samples", "validate_row", "rows_equal"):
         setattr(analysis, name, boom)
     analysis.SampleInput.__post_init__ = boom
 ''',
 }
 PREFIX = {"finality_boundary": "test_vector_finality", "bound_k": "test_vector_bound_k", "lag_formula": "test_vector_lag",
-          "stability": "test_vector_stability", "aggregation": "test_vector_aggregation", "rejections": "test_vector_rejections"}
+          "stability": "test_vector_stability", "aggregation": "test_vector_aggregation", "rejections": "test_vector_rejections", "rows_equal": "test_vector_rows_equal"}
 
 
 @pytest.mark.requirement("OBS-02")
