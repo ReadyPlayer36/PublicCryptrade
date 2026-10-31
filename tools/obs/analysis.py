@@ -260,9 +260,21 @@ def lag_candidate(l_obs_ms: int) -> LagCandidate | None:
 
 
 # ----------------------------------------------------------------------------------------------- samples and analysis
+def _freeze_row(row: object) -> object:
+    """Immutable copy of a list/tuple row; anything else is returned unchanged so validation reports it exactly as before."""
+    if isinstance(row, (list, tuple)):
+        return tuple(row)
+    return row
+
+
 @dataclass(frozen=True)
 class SampleInput:
-    """One sample = one timeframe at one boundary: 4 observations, their bound_k values and the +180 s reference."""
+    """One sample = one timeframe at one boundary: 4 observations, their bound_k values and the +180 s reference.
+
+    Construction takes a deep immutable snapshot: the reference and every non-None observation are copied into plain
+    tuples (elements are validated ints/strs, which are immutable) BEFORE validation, so exactly the validated data is
+    stored and later changes to the caller's lists cannot reach the sample. ``None`` observations are preserved.
+    """
 
     timeframe: str
     boundary_ms: int
@@ -285,6 +297,8 @@ class SampleInput:
             if value < previous:
                 raise NonMonotonicError(f"bounds_ms[{i}] {value} is earlier than bounds_ms[{i - 1}] {previous}")
             previous = value
+        object.__setattr__(self, "observations", tuple(None if row is None else _freeze_row(row) for row in self.observations))
+        object.__setattr__(self, "reference", _freeze_row(self.reference))
         if self.reference is None:
             raise ReferenceMissingError("reference row is missing")
         expected_open = boundary - interval
