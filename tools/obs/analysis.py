@@ -74,7 +74,7 @@ class MalformedRowError(AnalysisError):
 
 
 # ----------------------------------------------------------------------------------------------- strict scalars
-def _int(name: str, value: object, *, minimum: int | None = 0) -> int:
+def _int(name: str, value: object, *, minimum: int | None) -> int:
     if value is None:
         raise MissingValueError(f"{name} is required")
     if isinstance(value, bool):
@@ -99,19 +99,19 @@ def _interval_ms(timeframe: object) -> int:
 # ----------------------------------------------------------------------------------------------- finality rule
 def is_final(close_time_ms: int, server_time_ms: int, lag_ms: int) -> bool:
     """Frozen rule: final iff close_time_ms < B, B = S - L. Strict inequality; no default for ``lag_ms``."""
-    close = _int("close_time_ms", close_time_ms)
-    server = _int("server_time_ms", server_time_ms)
-    lag = _int("lag_ms", lag_ms)
+    close = _int("close_time_ms", close_time_ms, minimum=0)
+    server = _int("server_time_ms", server_time_ms, minimum=0)
+    lag = _int("lag_ms", lag_ms, minimum=0)
     return close < server - lag
 
 
 # ----------------------------------------------------------------------------------------------- bound_k (section 8)
 def bound_k_ms(s1_ms: int, boundary_ms: int, mono_start_s1_ns: int, mono_end_k_ns: int) -> int:
     """bound_k = (s1 - T) + 1 + ceil((mono_end_k - mono_start_S1) x (1 + delta)) in integer ms (exact rational maths)."""
-    s1 = _int("s1_ms", s1_ms)
-    boundary = _int("boundary_ms", boundary_ms)
-    start = _int("mono_start_s1_ns", mono_start_s1_ns)
-    end = _int("mono_end_k_ns", mono_end_k_ns)
+    s1 = _int("s1_ms", s1_ms, minimum=0)
+    boundary = _int("boundary_ms", boundary_ms, minimum=0)
+    start = _int("mono_start_s1_ns", mono_start_s1_ns, minimum=0)
+    end = _int("mono_end_k_ns", mono_end_k_ns, minimum=0)
     if end < start:
         raise NonMonotonicError(f"mono_end_k_ns {end} is earlier than mono_start_s1_ns {start}")
     if s1 < boundary:
@@ -121,8 +121,16 @@ def bound_k_ms(s1_ms: int, boundary_ms: int, mono_start_s1_ns: int, mono_end_k_n
 
 
 # ----------------------------------------------------------------------------------------------- rows (section 7.1)
-def validate_row(row: object, *, expected_open_ms: int, interval_ms: int, label: str = "row") -> None:
-    """Structural validity of one returned kline row. Any violation is an incident (wrong shape), not instability."""
+def _check_label(label: object) -> str:
+    if label is None:
+        raise MissingValueError("label is required")
+    if not isinstance(label, str):
+        raise InvalidTypeError(f"label must be a str, not {type(label).__name__}")
+    return label
+
+
+def _check_row_shape(row: object, label: str) -> None:
+    """Shape and per-field type/text validity of a non-None row. Never raises anything but AnalysisError."""
     if row is None:
         raise MissingValueError(f"{label} is required")
     if not isinstance(row, (list, tuple)):
@@ -143,16 +151,37 @@ def validate_row(row: object, *, expected_open_ms: int, interval_ms: int, label:
         raise MalformedRowError(f"{label}[11] must be a str, not {type(row[11]).__name__}")
     if row[8] < 0:
         raise MalformedRowError(f"{label}[8] must be >= 0, got {row[8]}")
-    if row[0] != expected_open_ms:
-        raise MalformedRowError(f"{label}[0] open time {row[0]} != expected {expected_open_ms}")
-    if row[6] != expected_open_ms + interval_ms - 1:
-        raise MalformedRowError(f"{label}[6] close time {row[6]} != expected {expected_open_ms + interval_ms - 1}")
 
 
-def rows_equal(left: Sequence[Any] | None, right: Sequence[Any] | None, indices: Sequence[int]) -> bool:
-    """Section 7.2: integers by value, decimal strings by numeric Decimal equality; an absent row equals nothing."""
-    if left is None or right is None:
-        return False
+def validate_row(row: object, *, expected_open_ms: int, interval_ms: int, label: str) -> None:
+    """Structural validity of one returned kline row. Any violation is an incident (wrong shape), not instability."""
+    name = _check_label(label)
+    expected_open = _int("expected_open_ms", expected_open_ms, minimum=0)
+    interval = _int("interval_ms", interval_ms, minimum=1)
+    _check_row_shape(row, name)
+    if row[0] != expected_open:
+        raise MalformedRowError(f"{name}[0] open time {row[0]} != expected {expected_open}")
+    if row[6] != expected_open + interval - 1:
+        raise MalformedRowError(f"{name}[6] close time {row[6]} != expected {expected_open + interval - 1}")
+
+
+def _check_indices(indices: object) -> tuple[int, ...]:
+    if indices is None:
+        raise MissingValueError("indices is required")
+    if not isinstance(indices, (list, tuple)):
+        raise InvalidTypeError(f"indices must be a list or tuple, not {type(indices).__name__}")
+    if len(indices) == 0:
+        raise InvalidValueError("indices must not be empty")            # an empty comparison would be vacuously equal
+    checked = []
+    for position, index in enumerate(indices):
+        value = _int(f"indices[{position}]", index, minimum=None)
+        if not 0 <= value <= 10:                                       # index 11 ("ignore") is never compared (section 7.1)
+            raise InvalidValueError(f"indices[{position}] must be between 0 and 10, got {value}")
+        checked.append(value)
+    return tuple(checked)
+
+
+def _equal(left: Sequence[Any], right: Sequence[Any], indices: tuple[int, ...]) -> bool:
     for index in indices:
         a, b = left[index], right[index]
         if index in _INT_FIELDS:
@@ -163,15 +192,44 @@ def rows_equal(left: Sequence[Any] | None, right: Sequence[Any] | None, indices:
     return True
 
 
+def rows_equal(left: Sequence[Any] | None, right: Sequence[Any] | None, indices: Sequence[int]) -> bool:
+    """Section 7.2: integers by value, decimal strings by numeric Decimal equality; an absent row (None) equals nothing.
+
+    Every non-None row is shape-validated first, so malformed input raises AnalysisError, never IndexError/TypeError.
+    """
+    checked = _check_indices(indices)
+    if left is not None:
+        _check_row_shape(left, "left")
+    if right is not None:
+        _check_row_shape(right, "right")
+    if left is None or right is None:
+        return False
+    return _equal(left, right, checked)
+
+
 def stable_from(observations: Sequence[Sequence[Any] | None], reference: Sequence[Any] | None, indices: Sequence[int]) -> int | None:
-    """Section 7.3: smallest i* with observations i*..3 all equal to the reference, else None (UNBOUNDED within +60 s)."""
+    """Section 7.3: smallest i* with observations i*..3 all equal to the reference, else None (UNBOUNDED within +60 s).
+
+    The reference and ALL four observations are validated before any comparison, so a malformed row can never hide
+    behind an earlier mismatch.
+    """
     if reference is None:
         raise ReferenceMissingError("reference row is missing")
+    if observations is None:
+        raise MissingValueError("observations is required")
+    if not isinstance(observations, (list, tuple)):
+        raise InvalidTypeError(f"observations must be a list or tuple, not {type(observations).__name__}")
     if len(observations) != OBSERVATIONS:
         raise InvalidValueError(f"expected {OBSERVATIONS} observations, got {len(observations)}")
+    checked = _check_indices(indices)
+    _check_row_shape(reference, "reference")
+    for i, row in enumerate(observations):
+        if row is not None:
+            _check_row_shape(row, f"observations[{i}]")
     first: int | None = None
     for i in range(OBSERVATIONS - 1, -1, -1):
-        if not rows_equal(observations[i], reference, indices):
+        row = observations[i]
+        if row is None or not _equal(row, reference, checked):
             break
         first = i
     return first
@@ -193,7 +251,7 @@ def lag_candidate(l_obs_ms: int) -> LagCandidate | None:
 
     None (INCONCLUSIVE) if L_obs > 60000.
     """
-    l_obs = _int("l_obs_ms", l_obs_ms)
+    l_obs = _int("l_obs_ms", l_obs_ms, minimum=0)
     if l_obs > MAX_L_OBS_MS:
         return None
     pad = max(MIN_PAD_MS, l_obs)
@@ -214,7 +272,7 @@ class SampleInput:
 
     def __post_init__(self) -> None:
         interval = _interval_ms(self.timeframe)
-        boundary = _int("boundary_ms", self.boundary_ms)
+        boundary = _int("boundary_ms", self.boundary_ms, minimum=0)
         if boundary % interval != 0:
             raise InvalidValueError(f"boundary_ms {boundary} is not aligned to {self.timeframe}")
         if not isinstance(self.observations, tuple) or not isinstance(self.bounds_ms, tuple):
@@ -223,7 +281,7 @@ class SampleInput:
             raise InvalidValueError(f"observations and bounds_ms must each have {OBSERVATIONS} entries")
         previous = -1
         for i, bound in enumerate(self.bounds_ms):
-            value = _int(f"bounds_ms[{i}]", bound)
+            value = _int(f"bounds_ms[{i}]", bound, minimum=0)
             if value < previous:
                 raise NonMonotonicError(f"bounds_ms[{i}] {value} is earlier than bounds_ms[{i - 1}] {previous}")
             previous = value
