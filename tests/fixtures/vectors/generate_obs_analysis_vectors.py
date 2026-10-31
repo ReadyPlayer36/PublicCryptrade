@@ -239,6 +239,100 @@ def build():
       "reference row is missing", "stable_from reference missing")
     r("stable_from", {"observations": [ref] * 3, "reference": ref, "indices": [1, 2, 3, 4]}, "InvalidValueError",
       "expected 4 observations, got 3", "stable_from wrong observation count")
+
+    # ---- standalone validation boundaries (R2): rows_equal / stable_from / validate_row
+    idx = [1, 2, 3, 4]
+    short = ref[:3]
+    ok_args = {"left": ref, "right": ref, "indices": idx}
+    R = "rows_equal"
+    r(R, {**ok_args, "left": short}, "MalformedRowError", "left must have exactly 12 elements, got 3", "rows_equal left short")
+    r(R, {**ok_args, "right": []}, "MalformedRowError", "right must have exactly 12 elements, got 0", "rows_equal right empty")
+    r(R, {**ok_args, "left": "x" * 12}, "MalformedRowError", "left must be a list or tuple, not str", "rows_equal left str")
+    r(R, {**ok_args, "right": {"a": 1}}, "MalformedRowError", "right must be a list or tuple, not dict", "rows_equal right dict")
+    r(R, {**ok_args, "left": mut_row(1, 100.0)}, "MalformedRowError", "left[1] must be a decimal string, not float", "rows_equal left float field")
+    r(R, {**ok_args, "right": mut_row(2, None)}, "MalformedRowError", "right[2] must be a decimal string, not NoneType", "rows_equal right None field")
+    r(R, {**ok_args, "left": mut_row(3, "NaN")}, "MalformedRowError", "left[3] is not a finite non-negative decimal string: 'NaN'", "rows_equal left NaN text")
+    r(R, {**ok_args, "right": mut_row(4, "-1")}, "MalformedRowError", "right[4] is not a finite non-negative decimal string: '-1'", "rows_equal right negative text")
+    r(R, {**ok_args, "left": mut_row(8, True)}, "MalformedRowError", "left[8] must be an int, not bool", "rows_equal left bool trades")
+    r(R, {**ok_args, "right": mut_row(0, "1")}, "MalformedRowError", "right[0] must be an int, not str", "rows_equal right str open time")
+    r(R, {**ok_args, "indices": None}, "MissingValueError", "indices is required", "rows_equal indices missing")
+    r(R, {**ok_args, "indices": []}, "InvalidValueError", "indices must not be empty", "rows_equal indices empty")
+    r(R, {**ok_args, "indices": "1234"}, "InvalidTypeError", "indices must be a list or tuple, not str", "rows_equal indices str")
+    r(R, {**ok_args, "indices": 3}, "InvalidTypeError", "indices must be a list or tuple, not int", "rows_equal indices int")
+    r(R, {**ok_args, "indices": [True]}, "InvalidTypeError", "indices[0] must be an int, not bool", "rows_equal indices bool")
+    r(R, {**ok_args, "indices": [1, "2"]}, "InvalidTypeError", "indices[1] must be an int, not str", "rows_equal indices str element")
+    r(R, {**ok_args, "indices": [1, nan]}, "InvalidTypeError", "indices[1] must be an int, not float", "rows_equal indices nan element")
+    r(R, {**ok_args, "indices": [None]}, "MissingValueError", "indices[0] is required", "rows_equal indices None element")
+    r(R, {**ok_args, "indices": [1, 11]}, "InvalidValueError", "indices[1] must be between 0 and 10, got 11", "rows_equal indices 11 ignore field")
+    r(R, {**ok_args, "indices": [-1]}, "InvalidValueError", "indices[0] must be between 0 and 10, got -1", "rows_equal indices negative")
+    r(R, {**ok_args, "indices": [12]}, "InvalidValueError", "indices[0] must be between 0 and 10, got 12", "rows_equal indices out of range")
+    r(R, {**ok_args, "left": None, "right": short}, "MalformedRowError", "right must have exactly 12 elements, got 3", "rows_equal None left does not hide malformed right")
+
+    SF = "stable_from"
+    sf_ok = {"observations": [ref] * 4, "reference": ref, "indices": idx}
+    r(SF, {**sf_ok, "observations": None}, "MissingValueError", "observations is required", "stable_from observations missing")
+    r(SF, {**sf_ok, "observations": "abcd"}, "InvalidTypeError", "observations must be a list or tuple, not str", "stable_from observations str")
+    r(SF, {**sf_ok, "observations": {"a": 1}}, "InvalidTypeError", "observations must be a list or tuple, not dict", "stable_from observations dict")
+    r(SF, {**sf_ok, "observations": [ref] * 5}, "InvalidValueError", "expected 4 observations, got 5", "stable_from five observations")
+    r(SF, {**sf_ok, "observations": []}, "InvalidValueError", "expected 4 observations, got 0", "stable_from zero observations")
+    r(SF, {**sf_ok, "reference": short}, "MalformedRowError", "reference must have exactly 12 elements, got 3", "stable_from reference short")
+    r(SF, {**sf_ok, "reference": "x"}, "MalformedRowError", "reference must be a list or tuple, not str", "stable_from reference str")
+    r(SF, {**sf_ok, "reference": mut_row(5, "NaN")}, "MalformedRowError", "reference[5] is not a finite non-negative decimal string: 'NaN'", "stable_from reference NaN")
+    r(SF, {**sf_ok, "observations": [ref, ref, short, ref]}, "MalformedRowError", "observations[2] must have exactly 12 elements, got 3", "stable_from observation short")
+    r(SF, {**sf_ok, "observations": [short, ref, ref, ref]}, "MalformedRowError", "observations[0] must have exactly 12 elements, got 3", "stable_from observation 0 short")
+    bad_last = mut_row(1, "100.9")
+    r(SF, {**sf_ok, "observations": [mut_row(2, 5), ref, ref, bad_last]}, "MalformedRowError", "observations[0][2] must be a decimal string, not int", "stable_from malformed row 0 hidden behind a mismatch at 3")
+    r(SF, {**sf_ok, "observations": [ref, ref, ref, mut_row(8, False)]}, "MalformedRowError", "observations[3][8] must be an int, not bool", "stable_from observation bool trades")
+    r(SF, {**sf_ok, "indices": None}, "MissingValueError", "indices is required", "stable_from indices missing")
+    r(SF, {**sf_ok, "indices": []}, "InvalidValueError", "indices must not be empty", "stable_from indices empty")
+    r(SF, {**sf_ok, "indices": [11]}, "InvalidValueError", "indices[0] must be between 0 and 10, got 11", "stable_from indices 11")
+    r(SF, {**sf_ok, "indices": [True]}, "InvalidTypeError", "indices[0] must be an int, not bool", "stable_from indices bool")
+    r(SF, {**sf_ok, "reference": None, "observations": None}, "ReferenceMissingError", "reference row is missing", "stable_from reference missing wins")
+
+    VR = "validate_row"
+    vr_ok = {"row": ref, "expected_open_ms": op, "interval_ms": I, "label": "row"}
+    r(VR, {**vr_ok, "row": None}, "MissingValueError", "row is required", "validate_row row None")
+    r(VR, {**vr_ok, "row": None, "label": "probe"}, "MissingValueError", "probe is required", "validate_row row None custom label")
+    r(VR, {**vr_ok, "label": None}, "MissingValueError", "label is required", "validate_row label missing")
+    r(VR, {**vr_ok, "label": 5}, "InvalidTypeError", "label must be a str, not int", "validate_row label int")
+    r(VR, {**vr_ok, "expected_open_ms": None}, "MissingValueError", "expected_open_ms is required", "validate_row open missing")
+    r(VR, {**vr_ok, "expected_open_ms": "1"}, "InvalidTypeError", "expected_open_ms must be an int, not str", "validate_row open str")
+    r(VR, {**vr_ok, "expected_open_ms": True}, "InvalidTypeError", "expected_open_ms must be an int, not bool", "validate_row open bool")
+    r(VR, {**vr_ok, "expected_open_ms": -1}, "InvalidValueError", "expected_open_ms must be >= 0, got -1", "validate_row open negative")
+    r(VR, {**vr_ok, "interval_ms": None}, "MissingValueError", "interval_ms is required", "validate_row interval missing")
+    r(VR, {**vr_ok, "interval_ms": 300000.0}, "InvalidTypeError", "interval_ms must be an int, not float", "validate_row interval float")
+    r(VR, {**vr_ok, "interval_ms": nan}, "InvalidTypeError", "interval_ms must be an int, not float", "validate_row interval nan")
+    r(VR, {**vr_ok, "interval_ms": 0}, "InvalidValueError", "interval_ms must be >= 1, got 0", "validate_row interval zero")
+    r(VR, {**vr_ok, "interval_ms": -5}, "InvalidValueError", "interval_ms must be >= 1, got -5", "validate_row interval negative")
+    r(VR, {**vr_ok, "row": short, "label": "probe"}, "MalformedRowError", "probe must have exactly 12 elements, got 3", "validate_row short custom label")
+    r(VR, {**vr_ok, "row": mut_row(0, op + I)}, "MalformedRowError", f"row[0] open time {op + I} != expected {op}", "validate_row wrong open")
+    r(VR, {**vr_ok, "interval_ms": I + 1}, "MalformedRowError", f"row[6] close time {op + I - 1} != expected {op + I}", "validate_row wrong interval")
+
+    # positive rows_equal vectors (expected values from exact Fractions, not from the implementation)
+    def eq_expected(a, b, ix):
+        if a is None or b is None:
+            return False
+        return all((a[i] == b[i]) if i in (0, 6, 8) else (F(a[i]) == F(b[i])) for i in ix)
+
+    re_cases = []
+    for name, a, b, ix in (
+        ("identical all fields", ref, ref, list(range(0, 11))),
+        ("text-only difference", row(op, I, o="100.00", v="10.000"), ref, list(range(1, 9))),
+        ("close price differs T_matrix", differ["price"], ref, [1, 2, 3, 4]),
+        ("volume differs outside T_matrix", differ["volume"], ref, [1, 2, 3, 4]),
+        ("volume differs inside T_app", differ["volume"], ref, list(range(1, 9))),
+        ("trade count differs only on index 8", differ["trades"], ref, [8]),
+        ("trade count differs not in T_matrix", differ["trades"], ref, [1, 2, 3, 4]),
+        ("taker differs only in T_all", differ["taker"], ref, list(range(1, 9))),
+        ("taker differs in T_all", differ["taker"], ref, list(range(1, 11))),
+        ("close time index 6 compared by value", row(op, I, close=op + I), ref, [6]),
+        ("left absent", None, ref, [1]),
+        ("right absent", ref, None, [1]),
+        ("both absent", None, None, [1]),
+        ("duplicate indices tolerated", ref, ref, [1, 1, 2]),
+    ):
+        re_cases.append({"name": name, "left": a, "right": b, "indices": ix, "expected": eq_expected(a, b, ix)})
+    out["rows_equal"] = re_cases
     out["rejections"] = rej
     return out
 
