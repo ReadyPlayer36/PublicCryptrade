@@ -1,8 +1,8 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `impl-obs-harness-provenance`, based on commit `39be05529d61adc8ceb37cd6f0fc9b46eb26e620`
-(tree `c274d3b2d9d5526ecc8ffd92305fb962f8a41504`). The code and tests of this revision are the
-tree `a01bc99d78de832b86294a53bb55dabc9f5673a9` (everything below was measured on that tree; the
+Branch `impl-obs-harness-provenance`, based on commit `d0917438e0249d7233280fbcb764ea5616fcd8a4`
+(tree `2f55dbac2907a594a7d75eadfa646994c26e9deb`). The code and tests of this revision are the
+tree `969d484ec8e6a059244ffb1f764c2638f4f43ae0` (everything below was measured on that tree; the
 documentation-only edit that follows it changes no code and no test). A commit cannot contain its
 own SHA, so the SHA of the final commit is reported in the submission message, not here; the tree
 hashes above identify the content independently of how it was uploaded. Production code and the
@@ -13,14 +13,13 @@ credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — code tree `a01bc99d` on top of base commit `39be055`,
+Offline verification of this revision — code tree `969d484e` on top of base commit `d0917438`,
 Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
 (`pip install -e ".[dev]"`):
 
-- Full suite: **1783 passed, 0 failed, 0 skipped** in 72.4 s with `filterwarnings = ["error"]`
-  (base `39be055`: 1675 passed; this revision adds 108 tests, all in the new tracked file
-  `tests/tools/obs/test_strict_types.py`; one assertion in `tests/tools/obs/test_audit.py` now expects a
-  bool `boundary_ms` to be refused at the snapshot boundary, check (a), instead of later by check (f)). Results apply to the identified
+- Full suite: **1820 passed, 0 failed, 0 skipped** in 81.7 s with `filterwarnings = ["error"]`
+  (base `d0917438`: 1783 passed; this revision adds 37 tests: 34 in the new tracked file
+  `tests/tools/obs/test_capture_once.py` and 3 field-pair cases in `tests/tools/obs/test_deep_immutability.py`). Results apply to the identified
   revision and test environment; they do not establish live acceptance.
 - Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
   `tools/validate_matrix.py` (104 acceptance rows, 58 item bindings, 18 mutation killers),
@@ -53,6 +52,16 @@ Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
   a head digest only if it is an exact `str` of exactly 64 lowercase hex characters (a hostile
   `str` subclass, uppercase, wrong length or non-hex is "missing or malformed") and accepts only
   exact `list`/`tuple` event sequences, which it is never asked to iterate if they are subclasses.
+- Capture-once round (this revision; reviewer finding on `_freeze_event`): the snapshot of a
+  `LogEvent` now reads each of its seven attributes exactly once into locals, validates the
+  locals, and rebuilds the snapshot from those locals only; the caller's object is never read
+  again, so a change made to it between capture, validation and reconstruction cannot reach the
+  snapshot. The nested field pairs (and the request-record header pairs) are copied atomically
+  with `tuple(pair)`, so their length and elements come from one read. Tests count every
+  attribute read and, right after the first read, replace the attribute on the live object with
+  a hostile value. Limit (stated): without real concurrency the atomic `tuple(...)` copies are
+  indistinguishable from plain iteration, so one mutant (dropping the outer `tuple(fields)`) is
+  documented as equivalent in single-threaded execution, not hidden.
 - Evidence-bound provenance: `decided_at_ns` and the terminal `timeline_end_ns` are never bare
   scalars. `tools/obs/eventlog.py` is a SHA-256 hash-chained event log bound to a digest of the
   recorded requests. `tools/obs/runstore.py` persists a run (`records.jsonl`, `events.jsonl`,
