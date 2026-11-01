@@ -183,12 +183,28 @@ def test_any_byte_change_in_a_persisted_file_is_detected(tmp_path, name):
     assert not result.ok and "does not match the manifest digest" in text(result)
 
 
-def test_a_records_file_from_another_run_is_rejected(tmp_path):
+def test_an_events_file_from_another_run_is_rejected(tmp_path):
     run_dir, pin, records, events, skips = build_run(tmp_path)
     other_dir, other_pin, _, _, _ = build_run(tmp_path, name="other", timeline_end_ns=5 * 10**14)
+    assert (other_dir / runstore.EVENTS_FILE).read_bytes() != (run_dir / runstore.EVENTS_FILE).read_bytes()      # control: they differ
     shutil.copy(other_dir / runstore.EVENTS_FILE, run_dir / runstore.EVENTS_FILE)
     result = audit(run_dir, pin, skips, records)
     assert not result.ok and "events.jsonl does not match the manifest digest" in text(result)
+
+
+def test_a_records_file_from_another_run_is_rejected(tmp_path):
+    """A different run: same boundary and decision but a different recorded response body, so its records.jsonl differs.
+    (build_run twice yields byte-identical records, which is why the other run is built from altered records.)"""
+    run_dir, pin, records, events, skips = build_run(tmp_path)
+    other_records = [replace(records[0], body=records[0].body + b" ")] + list(records[1:])
+    other_events, _ = recorded_events(other_records, skips, 10**15)
+    other_dir = tmp_path / "other"
+    write_run(other_dir, other_records, other_events)
+    assert (other_dir / runstore.RECORDS_FILE).read_bytes() != (run_dir / runstore.RECORDS_FILE).read_bytes()    # control: they differ
+    shutil.copy(other_dir / runstore.RECORDS_FILE, run_dir / runstore.RECORDS_FILE)
+    result = audit(run_dir, pin, skips, records)
+    assert not result.ok and "records.jsonl does not match the manifest digest" in text(result)
+    assert "events.jsonl" not in text(result)                                                   # the records file is what was substituted
 
 
 def test_a_truncated_jsonl_file_is_rejected_even_when_re_pinned(tmp_path):

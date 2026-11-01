@@ -195,12 +195,14 @@ def forge_chain(records, specs):
     return tuple(events), prev
 
 
-def test_a_smuggled_extra_field_in_an_early_entry_breaks_the_link_to_the_next_entry(skip_run):
+def test_a_schema_valid_edit_of_an_early_entry_breaks_the_link_to_the_next_entry(skip_run):
     from tools.obs.eventlog import EventLogError, verify_event_log
     records, _, _, _, events, head = skip_run
-    smuggled = rehash(events[0], fields=tuple(sorted(events[0].fields + (("note", "hidden"),))))   # only this entry rehashed
-    forged = (smuggled,) + events[1:]
-    assert forged[-1].entry_hash == head                                  # the head digest alone cannot see this edit
+    fields = dict(events[0].fields)
+    fields["m_e_ns"] += 1                                                  # a value no schema rule can object to
+    edited = rehash(events[0], fields=tuple(sorted(fields.items())))       # only this entry rehashed
+    forged = (edited,) + events[1:]
+    assert forged[-1].entry_hash == head                                   # the head digest alone cannot see this edit
     with pytest.raises(EventLogError, match=r"event 1: prev_hash does not link to the previous entry"):
         verify_event_log(forged, head, records)
     assert not audit_all(records, skips=skip_run[3], event_log=forged, event_log_head=head).ok
