@@ -11,7 +11,7 @@ unusable). Pure function over the request records. Checks:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from typing import Mapping, Sequence
 
@@ -114,6 +114,32 @@ def _safe_exception_text(exc: BaseException) -> str:
     return f"{kind[:100]}: {message}"[:_MAX_FAILURE_TEXT]
 
 
+def _freeze_record(record: object) -> RequestRecord:
+    """Deeply immutable copy of one request record, taken at the audit boundary (fail closed).
+
+    `RequestRecord` is a frozen dataclass, but frozen only shields its own attributes: a `body` that is a bytearray or a
+    `headers` that is a list (or holds lists) can still be changed through the caller's reference. Every such field is
+    normalised here: `body` becomes `bytes` (bytes, bytearray and memoryview are copied; anything else is refused) and
+    `headers` becomes a tuple of (str, str) pairs. Exact types are required, so subclasses with hostile methods are refused.
+    Everything after this point, including the digest checks, reads only the returned copy."""
+    if type(record) is not RequestRecord:
+        raise TypeError(f"record must be a RequestRecord, not {type(record).__name__}")
+    body = record.body
+    if type(body) is not bytes:
+        if type(body) not in (bytearray, memoryview):
+            raise TypeError(f"record {record.seq!r}: body must be bytes, bytearray or memoryview, not {type(body).__name__}")
+        body = bytes(body)
+    headers = record.headers
+    if type(headers) not in (tuple, list):
+        raise TypeError(f"record {record.seq!r}: headers must be a tuple or list of pairs, not {type(headers).__name__}")
+    pairs = []
+    for pair in headers:
+        if type(pair) not in (tuple, list) or len(pair) != 2 or type(pair[0]) is not str or type(pair[1]) is not str:
+            raise TypeError(f"record {record.seq!r}: every header must be a (str, str) pair")
+        pairs.append((pair[0], pair[1]))
+    return replace(record, body=body, headers=tuple(pairs))
+
+
 def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02_PROFILE, abort_seq: int | None = None,
                jsonl_count: int | None = None, wrapper_count: int | None = None, manifest_count: int | None = None,
                skips: Mapping[tuple[int, str], AdmissionDecision] | None = None,
@@ -132,7 +158,7 @@ def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02
     # (fail closed). Only Exception is caught: KeyboardInterrupt / SystemExit still propagate.
     try:
         name = "records"
-        records = tuple(records)
+        records = tuple(_freeze_record(record) for record in records)
         name = "skips"
         skips = None if skips is None else dict(skips)
         name = "expected_boundaries"

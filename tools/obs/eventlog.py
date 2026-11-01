@@ -118,12 +118,69 @@ class VerifiedEventLog:
         return self.events[-1] if self.events and self.events[-1].kind == EVENT_TIMELINE_END else None
 
 
+_SCHEMA: dict[str, tuple[tuple[str, type], ...]] = {      # exact field names, canonical (sorted) order, exact types
+    EVENT_DECISION: (("boundary_ms", int), ("decided_at_ns", int), ("group_name", str), ("m_e_ns", int)),
+    EVENT_TIMELINE_END: (("timeline_end_ns", int),),
+}
+
+
+def _freeze_event(event: object, position: int) -> LogEvent:
+    """Deeply immutable copy of one event built from exactly-typed primitives; anything else is refused (fail closed).
+
+    `LogEvent` is frozen, but its `fields` may be a list, or hold lists, and its scalars may be bools or subclasses. The copy
+    has a tuple of (str, int|str) tuples and exact `int`/`str` scalars; booleans never count as integers."""
+    if type(event) is not LogEvent:
+        raise EventLogError("the event log is missing or not a sequence of LogEvent entries")
+    for name, value, kind in (("index", event.index, int), ("records_before", event.records_before, int), ("kind", event.kind, str),
+                              ("records_digest", event.records_digest, str), ("prev_hash", event.prev_hash, str),
+                              ("entry_hash", event.entry_hash, str)):
+        if type(value) is not kind:
+            raise EventLogError(f"event {position}: {name} must have type {kind.__name__}, not {type(value).__name__}")
+    if type(event.fields) not in (tuple, list):
+        raise EventLogError(f"event {position}: fields must be a tuple of (name, value) pairs, not {type(event.fields).__name__}")
+    pairs = []
+    for pair in event.fields:
+        if type(pair) not in (tuple, list) or len(pair) != 2:
+            raise EventLogError(f"event {position}: every field must be a (name, value) pair")
+        name, value = pair
+        if type(name) is not str:
+            raise EventLogError(f"event {position}: field names must be str, not {type(name).__name__}")
+        if type(value) is not int and type(value) is not str:
+            raise EventLogError(f"event {position}: field {name!r} must be an int or a str, not {type(value).__name__}")
+        pairs.append((name, value))
+    return LogEvent(event.index, event.kind, tuple(pairs), event.records_before, event.records_digest, event.prev_hash, event.entry_hash)
+
+
+def _check_schema(event: LogEvent, position: int) -> None:
+    expected = _SCHEMA[event.kind]
+    names = [name for name, _ in event.fields]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise EventLogError(f"event {position}: duplicate field name(s) {duplicates}")
+    allowed = [name for name, _ in expected]
+    unexpected = sorted(set(names) - set(allowed))
+    if unexpected:
+        raise EventLogError(f"event {position}: unexpected field(s) {unexpected} for a {event.kind} event")
+    missing = sorted(set(allowed) - set(names))
+    if missing:
+        raise EventLogError(f"event {position}: missing field(s) {missing} for a {event.kind} event")
+    if names != allowed:
+        raise EventLogError(f"event {position}: fields are not in canonical (sorted) order")
+    for (name, kind), (_, value) in zip(expected, event.fields):
+        if type(value) is not kind:
+            raise EventLogError(f"event {position}: field {name!r} must have type {kind.__name__}, not {type(value).__name__}")
+
+
 def verify_event_log(events: object, head_digest: object, records: Sequence[object]) -> VerifiedEventLog:
-    """Verify structure, hash chain, manifest head digest and record-prefix binding. Raises EventLogError (fail closed)."""
+    """Verify structure, schema, hash chain, manifest head digest and record-prefix binding. Raises EventLogError (fail closed).
+
+    The caller's events are first copied into deeply immutable snapshots; every check and the returned `VerifiedEventLog`
+    use only those snapshots, so later changes to the caller's objects cannot alter what was verified."""
     if not isinstance(head_digest, str) or len(head_digest) != 64:
         raise EventLogError("the manifest head digest is missing or malformed")
-    if not isinstance(events, (list, tuple)) or any(type(e) is not LogEvent for e in events):
+    if not isinstance(events, (list, tuple)):
         raise EventLogError("the event log is missing or not a sequence of LogEvent entries")
+    events = tuple(_freeze_event(event, position) for position, event in enumerate(tuple(events)))
     prev, seen_decisions, last_before = GENESIS, set(), 0
     for position, event in enumerate(events):
         if event.index != position:
@@ -134,8 +191,7 @@ def verify_event_log(events: object, head_digest: object, records: Sequence[obje
             raise EventLogError(f"event {position}: prev_hash does not link to the previous entry (tampered, dropped or reordered)")
         if event.entry_hash != _entry_hash(event.prev_hash, event.index, event.kind, event.fields, event.records_before, event.records_digest):
             raise EventLogError(f"event {position}: entry hash does not match its content (tampered)")
-        if not all(_is_int(v) or isinstance(v, str) for _, v in event.fields):
-            raise EventLogError(f"event {position}: field values must be ints or strings")
+        _check_schema(event, position)
         if event.kind == EVENT_TIMELINE_END and position != len(events) - 1:
             raise EventLogError(f"event {position}: TIMELINE_END must be the final event")
         if event.kind == EVENT_DECISION:
@@ -143,7 +199,7 @@ def verify_event_log(events: object, head_digest: object, records: Sequence[obje
             if key in seen_decisions:
                 raise EventLogError(f"event {position}: duplicate decision for {key}")
             seen_decisions.add(key)
-        if not _is_int(event.records_before) or not last_before <= event.records_before <= len(records):
+        if not last_before <= event.records_before <= len(records):
             raise EventLogError(f"event {position}: records_before {event.records_before!r} is not a valid, non-decreasing record count")
         if event.records_digest != records_digest(records[: event.records_before]):
             raise EventLogError(f"event {position}: records digest does not match the recorded requests (log is not bound to this run)")
@@ -151,4 +207,4 @@ def verify_event_log(events: object, head_digest: object, records: Sequence[obje
         prev = event.entry_hash
     if prev != head_digest:
         raise EventLogError("the chain head does not match the manifest digest (truncated, extended or replaced log)")
-    return VerifiedEventLog(tuple(events), _TOKEN)
+    return VerifiedEventLog(events, _TOKEN)
