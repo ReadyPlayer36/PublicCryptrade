@@ -1,8 +1,8 @@
 # Stage-2 acceptance scaffold and observation harness (review candidate)
 
-Branch `obs-harness-provenance`, based on commit `67df23d9c9bf39bfd9916c6169f6bf68ca1c29df`
-(tree `deba42ec835648c61640f28256c061615acfd587`). The code and tests of this revision are the
-tree `bea6bc2f09f79eef739e0d7053c2b3da419a3983` (everything below was measured on that tree; the
+Branch `impl-obs-harness-provenance`, based on commit `b40fed989ce6e2e133efacf1eb6370f1e4913488`
+(tree `99989901f2fcd605871febe2289e1ca4c289334e`). The code and tests of this revision are the
+tree `016a33ab9340ee5e5f3788683480201790c6d1cc` (everything below was measured on that tree; the
 documentation-only edit that follows it changes no code and no test). A commit cannot contain its
 own SHA, so the SHA of the final commit is reported in the submission message, not here; the tree
 hashes above identify the content independently of how it was uploaded. Production code and the
@@ -13,13 +13,13 @@ credentials, private endpoints, orders, or live network requests are included.
 
 ## Verified status
 
-Offline verification of this revision — code tree `bea6bc2f` on top of base commit `67df23d`,
+Offline verification of this revision — code tree `016a33ab` on top of base commit `b40fed9`,
 Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
 (`pip install -e ".[dev]"`):
 
-- Full suite: **1613 passed, 0 failed, 0 skipped** in 82.3 s with `filterwarnings = ["error"]`
-  (base `67df23d`: 1575 passed; this revision adds 38 tests, all in
-  `tests/tools/obs/test_provenance_binding.py`, a tracked file). Results apply to the identified
+- Full suite: **1675 passed, 0 failed, 0 skipped** in 77.8 s with `filterwarnings = ["error"]`
+  (base `b40fed9`: 1613 passed; this revision adds 62 tests: 61 in the new tracked file
+  `tests/tools/obs/test_deep_immutability.py` and 1 in `tests/tools/obs/test_run_manifest_e2e.py`). Results apply to the identified
   revision and test environment; they do not establish live acceptance.
 - Gates re-run on this revision: `tools/check_freeze.py` (FREEZE CHECK PASSED),
   `tools/validate_matrix.py` (104 acceptance rows, 58 item bindings, 18 mutation killers),
@@ -34,6 +34,15 @@ Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
   timestamp" failure. `audit_run` always supplies the log and manifest, so the persisted-run path
   is fail-closed on both. Limit (stated): `audit_pace` called directly with neither `event_log`
   nor `manifest` still performs no provenance check; it is a unit-test entry point, not a run audit.
+- Deep immutability round (this revision; reviewer F-01 to F-03): (F-01) `audit_pace` now takes a
+  deeply immutable copy of every request record at entry: `body` becomes `bytes` (bytearray and
+  memoryview are copied, anything else is a controlled failure) and `headers` a tuple of
+  `(str, str)` pairs; only exact `RequestRecord` instances are accepted, and every later check,
+  digest included, reads the copy. (F-02) `verify_event_log` copies each event into exactly-typed
+  primitives (a bool is never an int), rejects duplicate, unexpected and missing field names and
+  non-canonical (unsorted) field order per event kind, and returns snapshots that the audit
+  consumes exclusively. (F-03) the e2e test that swapped `events.jsonl` was renamed to say so, and
+  a real `records.jsonl` substitution test was added.
 - Evidence-bound provenance: `decided_at_ns` and the terminal `timeline_end_ns` are never bare
   scalars. `tools/obs/eventlog.py` is a SHA-256 hash-chained event log bound to a digest of the
   recorded requests. `tools/obs/runstore.py` persists a run (`records.jsonl`, `events.jsonl`,
