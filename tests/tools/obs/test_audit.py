@@ -232,7 +232,7 @@ def test_f_unknown_group_names_roles_and_kinds_are_refused():
     assert "f" in checks(renumber([replace(r, group_kind="1h") if r.group_name == "g0" else r for r in base]))      # unknown kind
     assert "f" in checks(renumber([replace(r, group_kind=None) if r.group_name == "g0" else r for r in base]))      # missing kind
     assert "f" in checks(renumber([replace(r, boundary_ms=None) if r.group_name == "g0" else r for r in base]))     # missing boundary
-    assert "f" in checks(renumber([replace(r, boundary_ms=True) if r.group_name == "g0" else r for r in base]))
+    assert "a" in checks(renumber([replace(r, boundary_ms=True) if r.group_name == "g0" else r for r in base]))      # refused at the snapshot boundary
     assert "f" in checks(renumber([replace(r, group_kind="5m") if r.group_name == "resync" else r for r in base]))   # resync has no kind
 
 
