@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
@@ -118,6 +119,7 @@ class VerifiedEventLog:
         return self.events[-1] if self.events and self.events[-1].kind == EVENT_TIMELINE_END else None
 
 
+_HEAD_DIGEST = re.compile(r"[0-9a-f]{64}")                # a SHA-256 hexdigest: exactly 64 lowercase hex characters
 _SCHEMA: dict[str, tuple[tuple[str, type], ...]] = {      # exact field names, canonical (sorted) order, exact types
     EVENT_DECISION: (("boundary_ms", int), ("decided_at_ns", int), ("group_name", str), ("m_e_ns", int)),
     EVENT_TIMELINE_END: (("timeline_end_ns", int),),
@@ -176,9 +178,9 @@ def verify_event_log(events: object, head_digest: object, records: Sequence[obje
 
     The caller's events are first copied into deeply immutable snapshots; every check and the returned `VerifiedEventLog`
     use only those snapshots, so later changes to the caller's objects cannot alter what was verified."""
-    if not isinstance(head_digest, str) or len(head_digest) != 64:
+    if type(head_digest) is not str or _HEAD_DIGEST.fullmatch(head_digest) is None:      # exact str: no subclass with hostile __eq__/__ne__
         raise EventLogError("the manifest head digest is missing or malformed")
-    if not isinstance(events, (list, tuple)):
+    if type(events) not in (list, tuple):                                                # exact built-ins: no hostile __iter__/__getitem__
         raise EventLogError("the event log is missing or not a sequence of LogEvent entries")
     events = tuple(_freeze_event(event, position) for position, event in enumerate(tuple(events)))
     prev, seen_decisions, last_before = GENESIS, set(), 0

@@ -11,7 +11,7 @@ unusable). Pure function over the request records. Checks:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from fractions import Fraction
 from typing import Mapping, Sequence
 
@@ -114,30 +114,46 @@ def _safe_exception_text(exc: BaseException) -> str:
     return f"{kind[:100]}: {message}"[:_MAX_FAILURE_TEXT]
 
 
-def _freeze_record(record: object) -> RequestRecord:
-    """Deeply immutable copy of one request record, taken at the audit boundary (fail closed).
+_RECORD_FIELDS: tuple[tuple[str, type, bool], ...] = (       # (name, exact type, None allowed) for every scalar RequestRecord field
+    ("seq", int, False), ("role", str, False), ("path", str, False), ("start_ns", int, False), ("end_ns", int, False),
+    ("status", int, True), ("error", str, True), ("group_name", str, True), ("group_kind", str, True), ("boundary_ms", int, True),
+)
 
-    `RequestRecord` is a frozen dataclass, but frozen only shields its own attributes: a `body` that is a bytearray or a
-    `headers` that is a list (or holds lists) can still be changed through the caller's reference. Every such field is
-    normalised here: `body` becomes `bytes` (bytes, bytearray and memoryview are copied; anything else is refused) and
-    `headers` becomes a tuple of (str, str) pairs. Exact types are required, so subclasses with hostile methods are refused.
-    Everything after this point, including the digest checks, reads only the returned copy."""
+
+def _freeze_record(record: object) -> RequestRecord:
+    """Deeply immutable, strictly typed copy of one request record, taken at the audit boundary (fail closed).
+
+    `RequestRecord` is a frozen dataclass, but frozen only shields its own attributes and says nothing about the TYPES stored in
+    them. Every field is validated by EXACT type (`type(x) is int`, never isinstance): a bool is not an int, and an int/str
+    subclass, whose comparison, hashing or repr could be hostile, is refused. `body` becomes `bytes` (bytes, bytearray and
+    memoryview are copied; anything else is refused) and `headers` a tuple of (str, str) pairs. The returned record is built only
+    from the validated canonical primitives, each read from the caller's object exactly once; everything after this point,
+    including the digest checks, reads only the copy."""
     if type(record) is not RequestRecord:
         raise TypeError(f"record must be a RequestRecord, not {type(record).__name__}")
-    body = record.body
+    values = {name: getattr(record, name) for name, _, _ in _RECORD_FIELDS}
+    body, headers = record.body, record.headers
+    label = f"record {values['seq']}" if type(values["seq"]) is int else "record"
+    for name, kind, optional in _RECORD_FIELDS:
+        value = values[name]
+        if value is None and optional:
+            continue
+        if type(value) is not kind:
+            article = "an" if kind is int else "a"
+            raise TypeError(f"{label}: {name} must be {article} {kind.__name__}{' or None' if optional else ''}, not {type(value).__name__}")
     if type(body) is not bytes:
         if type(body) not in (bytearray, memoryview):
-            raise TypeError(f"record {record.seq!r}: body must be bytes, bytearray or memoryview, not {type(body).__name__}")
+            raise TypeError(f"{label}: body must be bytes, bytearray or memoryview, not {type(body).__name__}")
         body = bytes(body)
-    headers = record.headers
     if type(headers) not in (tuple, list):
-        raise TypeError(f"record {record.seq!r}: headers must be a tuple or list of pairs, not {type(headers).__name__}")
+        raise TypeError(f"{label}: headers must be a tuple or list of pairs, not {type(headers).__name__}")
     pairs = []
     for pair in headers:
         if type(pair) not in (tuple, list) or len(pair) != 2 or type(pair[0]) is not str or type(pair[1]) is not str:
-            raise TypeError(f"record {record.seq!r}: every header must be a (str, str) pair")
+            raise TypeError(f"{label}: every header must be a (str, str) pair")
         pairs.append((pair[0], pair[1]))
-    return replace(record, body=body, headers=tuple(pairs))
+    return RequestRecord(values["seq"], values["role"], values["path"], values["start_ns"], values["end_ns"], values["status"],
+                         values["error"], values["group_name"], values["group_kind"], values["boundary_ms"], body, tuple(pairs))
 
 
 def audit_pace(records: Sequence[RequestRecord], *, profile: PaceProfile = OBS02_PROFILE, abort_seq: int | None = None,
