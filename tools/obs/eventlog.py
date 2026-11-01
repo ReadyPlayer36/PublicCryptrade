@@ -129,28 +129,37 @@ _SCHEMA: dict[str, tuple[tuple[str, type], ...]] = {      # exact field names, c
 def _freeze_event(event: object, position: int) -> LogEvent:
     """Deeply immutable copy of one event built from exactly-typed primitives; anything else is refused (fail closed).
 
+    Capture once, validate the captures, rebuild from the captures: every attribute of the caller's event is read EXACTLY ONCE
+    into a local, all type checks and canonicalisation run on those locals, and the returned `LogEvent` is built from the
+    validated locals only. The caller's object is never read again, so a change made to it after its attribute was captured
+    (between capture and validation, or between validation and reconstruction) cannot reach the snapshot.
+
     `LogEvent` is frozen, but its `fields` may be a list, or hold lists, and its scalars may be bools or subclasses. The copy
     has a tuple of (str, int|str) tuples and exact `int`/`str` scalars; booleans never count as integers."""
     if type(event) is not LogEvent:
         raise EventLogError("the event log is missing or not a sequence of LogEvent entries")
-    for name, value, kind in (("index", event.index, int), ("records_before", event.records_before, int), ("kind", event.kind, str),
-                              ("records_digest", event.records_digest, str), ("prev_hash", event.prev_hash, str),
-                              ("entry_hash", event.entry_hash, str)):
+    index, kind_, fields = event.index, event.kind, event.fields                       # one read per attribute, all up front
+    records_before, digest, prev_hash, entry_hash = event.records_before, event.records_digest, event.prev_hash, event.entry_hash
+    for name, value, kind in (("index", index, int), ("records_before", records_before, int), ("kind", kind_, str),
+                              ("records_digest", digest, str), ("prev_hash", prev_hash, str), ("entry_hash", entry_hash, str)):
         if type(value) is not kind:
             raise EventLogError(f"event {position}: {name} must have type {kind.__name__}, not {type(value).__name__}")
-    if type(event.fields) not in (tuple, list):
-        raise EventLogError(f"event {position}: fields must be a tuple of (name, value) pairs, not {type(event.fields).__name__}")
+    if type(fields) not in (tuple, list):
+        raise EventLogError(f"event {position}: fields must be a tuple of (name, value) pairs, not {type(fields).__name__}")
     pairs = []
-    for pair in event.fields:
-        if type(pair) not in (tuple, list) or len(pair) != 2:
+    for pair in tuple(fields):                                                         # atomic copy of the exact list/tuple
+        if type(pair) not in (tuple, list):
             raise EventLogError(f"event {position}: every field must be a (name, value) pair")
-        name, value = pair
+        items = tuple(pair)                                                            # atomic copy: length and elements from one read
+        if len(items) != 2:
+            raise EventLogError(f"event {position}: every field must be a (name, value) pair")
+        name, value = items
         if type(name) is not str:
             raise EventLogError(f"event {position}: field names must be str, not {type(name).__name__}")
         if type(value) is not int and type(value) is not str:
             raise EventLogError(f"event {position}: field {name!r} must be an int or a str, not {type(value).__name__}")
         pairs.append((name, value))
-    return LogEvent(event.index, event.kind, tuple(pairs), event.records_before, event.records_digest, event.prev_hash, event.entry_hash)
+    return LogEvent(index, kind_, tuple(pairs), records_before, digest, prev_hash, entry_hash)
 
 
 def _check_schema(event: LogEvent, position: int) -> None:

@@ -148,10 +148,11 @@ def _freeze_record(record: object) -> RequestRecord:
     if type(headers) not in (tuple, list):
         raise TypeError(f"{label}: headers must be a tuple or list of pairs, not {type(headers).__name__}")
     pairs = []
-    for pair in headers:
-        if type(pair) not in (tuple, list) or len(pair) != 2 or type(pair[0]) is not str or type(pair[1]) is not str:
+    for pair in tuple(headers):                                                        # atomic copies: each element is read once
+        items = tuple(pair) if type(pair) in (tuple, list) else ()
+        if len(items) != 2 or type(items[0]) is not str or type(items[1]) is not str:
             raise TypeError(f"{label}: every header must be a (str, str) pair")
-        pairs.append((pair[0], pair[1]))
+        pairs.append((items[0], items[1]))
     return RequestRecord(values["seq"], values["role"], values["path"], values["start_ns"], values["end_ns"], values["status"],
                          values["error"], values["group_name"], values["group_kind"], values["boundary_ms"], body, tuple(pairs))
 
