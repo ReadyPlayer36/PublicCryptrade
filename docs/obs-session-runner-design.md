@@ -1,24 +1,26 @@
-# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v1.6 (NORMATIVE)
+# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v1.7 (NORMATIVE)
 
 Status: design only. No live request is authorized by this document. Milestone 1 remains **BLOCKED** until the reviewer accepts
-the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.5**: it resolves all seven
-findings of the v1.5 review (V15-01…V15-07, §1.0) and re-states every affected section at implementation granularity; where
-v1.5 and this document disagree, this document governs, and sections not restated here remain normative as written in v1.5.
+the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.6**: it resolves all seven
+findings of the v1.6 review (V16-01…V16-07, §1.0) and re-states every affected section at implementation granularity; where
+v1.6 and this document disagree, this document governs, and sections not restated here remain normative as written in v1.6.
 
-Anchor: repository `ReadyPlayer36/PublicCryptrade`, commit `673f9a2ace30a449267adace9af0f9d94865bda1`
+Anchor: repository `ReadyPlayer36/PublicCryptrade`, commit `11ff12535e42639e3bab53304651e3ea2b5cd6b3`
 (branch `impl-obs-harness-provenance`; lineage `impl-obs-step1` → `f337862e52dada43f425cee05154e18f212987aa` →
-`dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f` → this commit), reviewed against the actual Step-1 code in `tools/obs/` at
-that commit. V15 branch-sync result: `tools/obs/` is byte-identical between `dbfe53c…` and `673f9a2…` (only this
-document changed between them; `git diff dbfe53c 673f9a2 -- tools/obs/` is empty), so every v1.6 correction below is a
-design-text-versus-code discrepancy, not code drift. Hard citations re-verified at this commit: `audit.py` lines 70–86
+`dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f` → `673f9a2ace30a449267adace9af0f9d94865bda1` → this commit), reviewed
+against the actual Step-1 code in `tools/obs/` at that commit. V15/V16 branch-sync result: `tools/obs/` is byte-identical
+between `dbfe53c…` and `11ff125…` (only this document changed between them; `673f9a2` and `11ff125` are
+documentation-only revisions of this file — `git diff dbfe53c 11ff125 -- tools/obs/` is empty), so every v1.7 correction
+below is a design-text-versus-code discrepancy, not code drift. Hard citations re-verified at this commit: `audit.py` lines 70–86
 (`abort_condition_seq`), 289–296 (check (g): `wrapper_count` must be a caller-supplied integer — the "independent
 egress counter") and 623–626 (`audit_run` reloads the run via `load_run` at 626); `runstore.py` 45 (`ManifestError(ValueError)`),
 172/217 (`_canonical`/`_lines`), 206–209 (`record_to_json` base64-encodes the body), 246–250/279–286 (`_read`/`_jsonl`
 whole-file load), 253–258 (`load_manifest` fails closed without a 64-hex pin), 291–328 (field validators), 348–357
 (`_record_from_json` decodes `body_b64` from a str), 370–388 (`load_run`), and `eventlog.py` 50–58 (digest-line format;
-`bytes(r.body)` is `r.body` — probe-verified identity, so bodies hash in place). Phase memory numbers in §6.5 are
-measurements over the exact normative sequences on CPython 3.12 (`tracemalloc`, worst-case inputs); the probe scripts
-are review artifacts, not repository files.
+`bytes(r.body)` is `r.body` — probe-verified identity, so bodies hash in place). Phase memory numbers in §6.5 and
+Appendix A are measurements over the exact normative sequences on CPython 3.12.3 (`tracemalloc`, worst-case inputs;
+methodology, raw values and native-headroom accounting: Appendix A); the probe scripts are review artifacts, not
+repository files.
 Imperative key words MUST, MUST NOT, SHALL, SHOULD, SHOULD NOT are normative. "§n" refers to a section of this document;
 "protocol §n" refers to `docs/obs-protocol.md` v0.5. Code identifiers in `monospace` refer to real symbols in `tools/obs/`
 unless explicitly marked *runner* (Step-2 code that this document specifies).
@@ -36,8 +38,10 @@ relaxed check in them. Where Step 2 extends a Step-1 entry point (**four** place
 parameter of `execute`, §3.1, the chunked body-read path, §6.4, the evidence writer `write_run`, §5.1/§5.1.1 (added by
 v1.5 for V14-01/V14-02), and — added by v1.6 for V15-02 — the evidence reader `load_run`, §5.1.2), the extension MUST
 preserve every observable outcome of the current implementation (record shapes, error strings, error precedence,
-counters, and for `write_run` the exact bytes it writes / for `load_run` the exact accept-reject set and `LoadedRun`
-contents) and land with the regression tests named in §11.
+counters, and for `write_run` the exact bytes it writes / for `load_run` the exact accept-reject set, error precedence
+and `LoadedRun` contents — the `load_run` contract is made exact by v1.7 for V16-05: Step-1's error precedence and JSON
+dialect are reproduced verbatim, with the `MAX_LINE` cap as the sole documented acceptance divergence (§5.1.2, D35)) and
+land with the regression tests named in §11.
 
 0.3 Persisted artifacts (all names are exact):
 
@@ -71,21 +75,33 @@ checks (a)–(g) of `audit_pace`, `validate_missed_window_decision` + `validate_
 (single-flight, record append, `abort_seq` convention), `watchdog.py::run_with_deadline` (absolute deadline + 1 s
 cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pin), `params.py` (all numeric constants).
 
-## 1. Revision maps — V15 findings resolved in v1.6; V14/V13 findings retained
+## 1. Revision maps — V16 findings resolved in v1.7; V15/V14/V13 findings retained
 
-### 1.0 V15 findings resolved in v1.6
+### 1.0 V16 findings resolved in v1.7
+
+| ID | Finding (v1.6 review) | Where resolved | Resolution in one line |
+|---|---|---|---|
+| V16-01 | The resolver treated `journal_pin`/`receipt_pin` as optional (`if pin is not None and sha256(raw) != pin`): a refusal authenticated only by its recomputable self-digest classified authoritative T0, and a receipt with no `receipt_pin` could accept T1/T6 — self-digests are tamper-evidence any same-UID writer can forge, so they granted authoritative status | §9.1, §9.2 rules R2/R3, §9.3 T0/T1/T3/T6 rows, §2.4, §10.1, D31, G-V16-01 | All three pins mandatory and fail closed: T0 requires `journal_pin` supplied ∧ byte-SHA-256 match; T1/T6 require `receipt_pin` supplied ∧ byte-SHA-256 match; pin absent or mismatched → T3 (never T0/T1/T6); self-digest recheck retained as necessary but not sufficient |
+| V16-02 | `observe()`'s two quarantine calls were naked: `EEXIST` (`PublishConflict`) and `EPERM`/`EIO`/`ENOSYS`/`EXDEV`/`ENOSPC` (`PublishUnavailable`/`OSError`) escaped `observe()` as exceptions instead of resolving terminal states — the resolver could raise, breaking its exactly-one-T-row contract | §9.2 `try_quarantine` (both branches), §9.3 T5 row, D32, G-V16-02 | New `try_quarantine` helper that NEVER raises (`PublishConflict` → CONFLICT; `PublishUnavailable`/`PublishIdentityMismatch`/`OSError` → QUARANTINE-FAILED): final-branch QUARANTINE-FAILED → T5 immediately (final + unmovable stale staging fails closed), staging-branch → T5 on every outcome; seal-time step 5 stays strictly fatal (D28) |
+| V16-03 | §7.5/K10–K12/T4 promised automatic T4→T6 receipt reconstitution ("`observe()` may complete CP2+CP3"), but the receipt's complete field set (admitted decisions, skip summaries, memory/diagnostics, pins, `wrapper_count`) exists only in the in-memory draft that dies with the process — no CP1-durable draft exists, so reconstitution is impossible | §5.3, §7.5, §8.5 K10–K12, §9.2, §9.3 T4 row, D14/D33, G-V16-03 | T4 made a TERMINAL incomplete state requiring operator review: no code path may write/fsync/publish a receipt after CP1, K10–K12 resolve T4 only, `observe()` is idempotent on T4; T4 still requires `pin` + full audit pass incl. check (g) with `egress_count` |
+| V16-04 | The 12 MiB ceiling rested on quoted numbers with no reproducible measurement record in the document: probe methodology, raw CPython 3.12.3 values and the derivation of the 262,144 B native `HTTP_HEADROOM` term were external to the review artifact | new Appendix A, §6.5, §12, D34, G-V16-04 | New Appendix A: environment and protocol (CPython 3.12.3, `tracemalloc` over the exact normative sequences, worst-case inputs, fixed seeds), probe inventory (probe1–probe7), raw phase and banned-pattern tables (all values re-measured for this revision), and native-headroom accounting over a real local-TLS request via glibc `mallinfo2` (native-arena peak 277,120 B; conservative phase-1 total 8,739,616 ≤ 8,781,824 B) |
+| V16-05 | §5.1.2 interleaved structure and body-decode per line (line 1's bad body masked line 5's bad keys — Step-1 validates ALL lines' structure before decoding ANY body, runstore.py:375–379) and parsed with plain `json.loads`, accepting duplicate keys and `NaN`/`Infinity` that Step-1's `_parse_json` rejects; the §0.2 exact accept-reject/error-precedence contract was therefore not met | §5.1.2 rewritten, §0.2, §6.5 phase 3, D24/D35, G-V16-05 | Five bounded stages with Step-1's exact precedence (both digests → records structure for ALL lines → records decode for ALL lines → events structure → events decode → count), Step-1's JSON dialect (`_no_duplicate_keys`, `parse_constant` rejection, verbatim messages, normalization net), structure dicts discarded and decode re-reads (O(1) memory, two reads per file); sole documented acceptance divergence: lines longer than `MAX_LINE` (impossible under the frozen schema; accepting them unbounded would violate the same review's budget) |
+| V16-06 | Resolver↔audit check (g) drift: `wrapper_count` could reach `audit_run` as `None`/non-int (failing only by incident), an UNAUTHENTICATED receipt's count could feed check (g) because `receipt_pin` was verified after the audit, and T4's precondition of an independent integer count == `len(records)` was implicit | §9.2 restructured (authenticate receipt → resolve `wc` → mirror check (g) → audit), §9.3 T4 row, D36, G-V16-06 | Receipt authenticated (R3) before ANY of its fields is used; `wc` sourced only from `egress_count` or authenticated `receipt.wrapper_count`; check (g)'s three tests (supplied, int-not-bool, `== len(records)`) mirrored explicitly and failed closed to T3/T5 BEFORE `audit_run`; T4/T1/T6 rows each state their count precondition |
+| V16-07 | §5.2.4 published the receipt with `expect = None`: between writing `.<run_id>.receipt.tmp` and `renameat2` a same-UID process could substitute the temp file; neither step 3 nor step 5 pinned its inode, so foreign bytes could be published as the receipt | §5.2.4, §5.2 step 3, D37, G-V16-07 | `st_tmp = os.fstat(tmp_fd)` captured on the creation descriptor BEFORE close and passed as `expect` into `publish_file()`: step 3 pins `(st_dev, st_ino)` pre-syscall, step 5 proves post-rename identity (type relative to `st_src`, so files publish too); substitution → step-3 require aborts before the syscall, or step-5 `PublishIdentityMismatch` after it → CP3 fails → T4 (or T3 when foreign bytes stand under the final name — `receipt_pin` never matches) — terminal, never T6 |
+
+### 1.1 V15 findings resolved in v1.6
 
 | ID | Finding (v1.5 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
 | V15-01 | `stream_records` called `record_to_json(r)` twice per record (head and tail), each call base64-encoding the whole body (≤ 5,592,408 B string ×2 per record) — the seal's own framing destroyed even v1.4's declared 131,072 B phase-2 bound; it also mis-stated `body_b64`'s canonical position (it sorts FIRST, before `boundary_ms`, not between `boundary_ms` and `end_ns`), its head/tail byte joins produced invalid JSON, and the JSONL line terminator was never written | §5.1.1, §6.5 phase 2, D25, G-V15-01 | New metadata-only `record_meta_json(r)` (11 keys, never touches `r.body`; `record_to_json` banned from the writer), corrected `{`-head / `",`-tail framing proven byte-equal to `_lines([record_to_json…])` incl. a 4 MiB body (probe-verified), seal peak ≤ 151,552 B (measured 148,113 B) |
-| V15-02 | `load_run` (runstore.py:370–388) reads whole files (`_read` → `read_bytes`) and splits them in memory (`raw.split(b"\n")`) holding every parsed record — verification of a 50 MiB session peaks at ≥ 139.8 MB, not 12 MiB; §6.5 phase 3 assumed an incremental reader that no code specified | new §5.1.2, §6.5 phase 3, §0.2, D24, G-V15-02 | New §5.1.2 incremental `load_run`: 64 KiB chunk reads, digest pass first (Step-1 error precedence preserved), `MAX_LINE`-capped line reader, decode → release → parse → release → encode → release → `b64decode(bytes)` record decoding (measured 11,188,261 B ≤ 11,202,224 B); declared the fourth Step-2 extension point with a byte-exact contract |
+| V15-02 | `load_run` (runstore.py:370–388) reads whole files (`_read` → `read_bytes`) and splits them in memory (`raw.split(b"\n")`) holding every parsed record — verification of a 50 MiB session peaks at ≥ 139.8 MB, not 12 MiB; §6.5 phase 3 assumed an incremental reader that no code specified | new §5.1.2, §6.5 phase 3, §0.2, D24, G-V15-02 | New §5.1.2 incremental `load_run`: 64 KiB chunk reads, digest pass first (Step-1 error precedence preserved), `MAX_LINE`-capped line reader, decode → release → parse → release → encode → release → `b64decode(bytes)` record decoding (measured 11,188,261 B ≤ 11,202,224 B); declared the fourth Step-2 extension point with a byte-exact contract (v1.6's implementation of this row did NOT in fact preserve Step-1's precedence — found by V16-05, see §1.0) |
 | V15-03 | §9.2 passed `wrapper_count = receipt.outer_count or structurally-derived`: `outer_count` is not a receipt key (`wrapper_count` is), `receipt` was referenced before it was parsed, and any value derived from the record stream makes audit check (g) tautological (audit.py:289–296 requires an INDEPENDENT counter, 623–624) | §9.2, §2.4, §10.1, §10.2, D26, G-V15-03 | `wrapper_count` sourced only from (1) the out-of-band `egress_count` print (`transport.sent`, flushed beside the manifest pin) or (2) `receipt.wrapper_count` (minted from `transport.sent` at CP3); disagreement → T3; absent both → check (g) fails → T5/T3; structural derivation explicitly banned |
 | V15-04 | `load_run(final, pinned = pin if pin else receipt_pin(final))` called `receipt_pin` (a hex string, not a function) as if it produced a manifest pin; without `pin`, Step-1's `load_manifest` fails closed anyway (runstore.py:255–258), so v1.5's "structural verification still runs" was unimplementable for finals | §9.2, §9.3 T3/T4 rows, §7.5, §10.1, D27, G-V15-04 | `pin` mandatory to verify or recover a final: `pin` absent + final present → T5/T3 (fail closed, never T4/T6, no CP2/CP3 recovery); recovery (CP2+CP3) only with the independently supplied manifest pin; `receipt_pin` never used as a manifest pin |
 | V15-05 | §5.2 step 5 swallowed a failed impostor quarantine (`except PublishUnavailable: pass`), leaving the impostor standing under `<run_id>` while the comment claimed T3; `PublishConflict` (EEXIST) escaped unhandled; `observe()`'s own quarantine calls could raise out of the resolver | §5.2 step 5, §5.2.5, §9.2, D28, G-V15-05 | Quarantine failure strictly fatal: no `pass`, every branch raises `PublishIdentityMismatch` with the cause chained, the runner dies before CP1b/CP2/CP3 so no receipt can exist; `observe()` catches quarantine failures and still returns exactly one T-row; classification-level guarantee with the residual stated |
 | V15-06 | §5.2.5 bounded the mode (`& 0o022 == 0`) but never stated the UID trust boundary: no owner check (`st_uid`), no explicit statement about same-UID processes (which can rename inside `RUN_ROOT` without taking the flock) | §5.2 step 1, §5.2.5, D29, G-V15-06 | Owner validation `st_pfd.st_uid == os.geteuid()` at lock time; explicit two-tier boundary: different-UID writers kernel-prevented (owner-only mode + `O_NOFOLLOW` + identity re-proof), same-UID writers detected-not-prevented (step-5 inode proof, CP1b, pins → quarantine/T3/T5), §10.1 residual restated |
 | V15-07 | The 12 MiB budget was asserted with formula-only phase peaks that did not match the code those paths would run (v1.5 phase 2 assumed 124,928 B while its own `record_to_json` calls cost ~11 MB; phase 3's `+1,024` term was 757 B short of measurement; no measured evidence) | §6.1, §6.5, §12, G-V13-04, G-V14-03, G-V15-07, D30 | Official `TRANSIENT_BUDGET_BYTES = 12,582,912` (D30) with per-instant measured proofs: peak₁ ≤ 8,781,824 (measured 8,724,640), peak₂ ≤ 151,552 (measured 148,113), peak₃ ≤ 11,202,224 (measured 11,188,261); budget = max ≤ 12,582,912, margin 1,380,688 B (12.3 %); banned patterns measured: `b64decode(str)` 15,381,335, `json.loads(bytes)` held 16,781,149, retained chunks 5,656,645 |
 
-### 1.1 V14 findings resolved in v1.5 (retained)
+### 1.2 V14 findings resolved in v1.5 (retained)
 
 | ID | Finding (v1.4 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
@@ -98,7 +114,7 @@ cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pi
 | V14-07 | TOCTOU: the step-3 `stat(staging)` → `renameat2` window was closed only by a post-hoc assert that aborted *after* publishing an impostor; no `RUN_ROOT` permission/symlink boundary; no content re-proof after rename | §5.2 steps 1/3/5, new §5.2.5, §7.5 CP1b, G-V14-07 | Absolute `RUN_ROOT`, `O_NOFOLLOW` open, owner-only mode check; pre-syscall re-stat; identity mismatch → quarantine the published name (never left standing); CP1b content re-verification against the pin before CP3; residual limits stated |
 | V14-08 | The 250 ms second-signal deferral had no enforcement mechanism: a main-thread handler cannot run while the main thread is inside a blocking synchronous syscall | §2.1, §7.4, §8.4 E3, D22, G-V14-08 | Named daemon watchdog thread `obs-watchdog` arms once from the handler and exits the process via `os._exit` at the bound; deferred exit point after syscall + bookkeeping; EINTR/PEP-475 and D-state limits stated |
 
-### 1.2 V13 findings resolved in v1.4 (retained)
+### 1.3 V13 findings resolved in v1.4 (retained)
 
 | ID | Finding (re-audit) | Where resolved | Resolution in one line |
 |---|---|---|---|
@@ -162,9 +178,10 @@ quarantined (`<run_id>.unverified/`), or entirely absent — never a partial run
 ```
 S ⟺ phase = COMMITTED
   ∧ receipt published AND parses AND its manifest_sha256 equals the pin of manifest.json
+  ∧ receipt_pin supplied AND sha256(receipt bytes) = receipt_pin (V16-01: T1/T6 never accept an unauthenticated receipt)
   ∧ observe() re-verification passes (load_run with pin + audit_run with wrapper_count from an independent egress
-    source — live: transport.sent; observe(): egress_count, else receipt.wrapper_count; never structurally derived,
-    V15-03)
+    source — live: transport.sent; observe(): egress_count, else the authenticated receipt.wrapper_count; never
+    structurally derived, V15-03)
   ∧ PACE-5 (g) egress equality holds: jsonl_count = wrapper_count = manifest_count
   ∧ PLAN_TERMINAL: every planned boundary is recorded or carries a verified skip reason (boundary_skips /
     group-level MISSED-WINDOW evidence), and the event log ends with TIMELINE_END covering every record
@@ -498,100 +515,142 @@ Failure mapping: a write `OSError` → K2/K3/K4; manifest write → K5; any `fsy
 old behavior (mkdir-if-absent + these same bytes) so Step-1's regression tests stay green; live sealing calls the
 fd-based entry with the locked `pfd`.
 
-5.1.2 **Normative reader — incremental, bounded, single-copy (V15-02; the fourth Step-2 extension point, §0.2;
-D24).** The Step-1 `load_run` (runstore.py:370–388) reads each file whole (`_read` → `path.read_bytes()`, 246–250),
-splits it in memory (`raw.split(b"\n")`, `_jsonl` 279–286), parses every line and holds all records: for a 50 MiB
-session that peaks at ≥ 139.8 MB of transient (≥ 2 × 4/3 × `SESSION_BODY_BUDGET_BYTES` of jsonl bytes plus every parsed
-`body_b64` string) — an order of magnitude above the Domain B budget — and it cannot support §6.5 phase 3's 12 MiB
-verification bound. Step 2 REPLACES `load_run` (decision **D24**: same name, same keyword-only signature, same
-`LoadedRun`, same `ManifestError` messages, same error precedence, same accept-reject set — the tests of §11 pin the
-contract) with the reader below. `audit_run` (audit.py:626) calls `load_run` and inherits it unchanged;
+5.1.2 **Normative reader — exact Step-1 compatibility, bounded passes (V15-02, V16-05; the fourth Step-2 extension
+point, §0.2; D24/D35).** The Step-1 `load_run` (runstore.py:370–388) reads each file whole (`_read` →
+`path.read_bytes()`, 246–250), splits it in memory (`raw.split(b"\n")`, `_jsonl` 279–286), parses every line and holds
+all records: for a 50 MiB session that peaks at ≥ 139.8 MB of transient (≥ 2 × 4/3 × `SESSION_BODY_BUDGET_BYTES` of
+jsonl bytes plus every parsed `body_b64` string) — an order of magnitude above the Domain B budget — and it cannot
+support §6.5 phase 3's 12 MiB verification bound. Step 2 REPLACES `load_run` (decision **D24**): same name, same
+keyword-only signature, same `LoadedRun`, same `ManifestError` messages, same accept-reject set — the differential
+tests of §11 (G-V16-05) pin the contract. `audit_run` (audit.py:626) calls `load_run` and inherits it unchanged;
 `load_manifest` (runstore.py:253) is unchanged — its manifest is ≤ 1 KiB by the 8-key schema (bounded full read) and
-it already fails closed without a well-formed 64-hex pin (255–258, V15-04). Step-1's error precedence
-(runstore.py:373–380) is: records digest → events digest → records structure → records parse → events structure →
-events parse → count; the two passes below reproduce it exactly.
+it already fails closed without a well-formed 64-hex pin (255–258, V15-04).
+
+**Exact Step-1 precedence (V16-05), reproduced branch-for-branch.** In Step-1's `load_run` the records statement
+evaluates `_jsonl(records_raw, …)` — truncation check, then per-line `_parse_json`, then per-line key-set check — to
+COMPLETION before mapping `_record_from_json` (body decode + field validation) over it, and the records statement
+completes before the events statement runs (runstore.py:375–379). The observable precedence is therefore exactly:
 
 ```
-function LOAD_RUN(run_dir, *, pinned_manifest_sha256) -> LoadedRun:   # normative; REPLACES Step-1 load_run (D24)
-    manifest = load_manifest(run_dir/manifest.json, pinned_sha256 = pinned_manifest_sha256)   # unchanged; V15-04
-    rec_scan = scan_stream(records.jsonl)             # PASS 1: incremental hash + byte-level line facts, no parsing
-    ev_scan  = scan_stream(events.jsonl)
-    if rec_scan.hex != manifest.records_file_sha256:
-        raise ManifestError("records.jsonl does not match the manifest digest (altered or substituted)")     # verbatim
-    if ev_scan.hex != manifest.events_file_sha256:
-        raise ManifestError("events.jsonl does not match the manifest digest (altered or substituted log)")  # verbatim
-    check_lines(rec_scan, "records.jsonl")            # truncation (verbatim) / line > MAX_LINE (new, fail closed) —
-    records = parse_records(records.jsonl, rec_scan.hex)   # BEFORE any parse, exactly as Step-1 checks first
-    check_lines(ev_scan, "events.jsonl")
-    events  = parse_events(events.jsonl, ev_scan.hex)
-    if len(records) != manifest.record_count or len(events) != manifest.event_count:
-        raise ManifestError("record or event count does not match the manifest")                                 # verbatim
+1. manifest errors (load_manifest; pin required, runstore.py:253–258)
+2. records read OSError ("records.jsonl is missing or unreadable: …", 246–250)
+3. events read OSError  (same message for events.jsonl)
+4. records digest mismatch   5. events digest mismatch   (249–250 equivalents)
+6. records truncation → records line-JSON/key errors for ALL lines → records body-decode/field errors for ALL lines
+7. events truncation  → events line-JSON/key errors for ALL lines  → events body-decode/field errors for ALL lines
+8. count mismatch (386–387)
+```
+
+v1.6 violated (6)/(7): its single interleaved pass decoded line 1's body before checking line 5's keys, so a bad body
+masked a bad key set that Step-1 reports first; and its plain `json.loads` accepted duplicate keys and `NaN`/`Infinity`,
+which Step-1's `_parse_json` (runstore.py:194–201: `object_pairs_hook = _no_duplicate_keys`, `parse_constant` →
+`ManifestError`) rejects — different accept sets. Both defects are corrected below, together with Step-1's
+normalization net (381–385). The reader is now five bounded stages over two reads per file:
+
+```
+function LOAD_RUN(run_dir, *, pinned_manifest_sha256) -> LoadedRun:   # normative; REPLACES Step-1 load_run (D24/D35)
+    manifest = load_manifest(run_dir/manifest.json, pinned_sha256 = pinned_manifest_sha256)   # 1: unchanged; V15-04
+    rec = scan_structure(records.jsonl, _RECORD_KEYS)   # 2: read OSError (verbatim 246–250) + sha256 over ALL bytes
+    ev  = scan_structure(events.jsonl,  _EVENT_KEYS)    # 3: read OSError second, matching Step-1's read order
+    if rec.hex != manifest.records_file_sha256:         # 4: digests BEFORE any parse — outside the net, as Step-1
+        raise ManifestError("records.jsonl does not match the manifest digest (altered or substituted)")
+    if ev.hex != manifest.events_file_sha256:           # 5:
+        raise ManifestError("events.jsonl does not match the manifest digest (altered or substituted log)")
+    try:                                                # Step-1's normalization net span (381–385), verbatim types:
+        check_lines(rec, "records.jsonl")               #   (ValueError, TypeError, KeyError, AttributeError,
+        if rec.struct_err is not None: raise rec.struct_err        # 6b: ALL record line-JSON/key errors (first wins)
+        records = decode_pass(records.jsonl, _RECORD_KEYS, rec.hex)  # 6c: body decode + fields for ALL records
+        check_lines(ev, "events.jsonl")                 # 7a: events truncation only after records are fully decoded
+        if ev.struct_err is not None: raise ev.struct_err          # 7b: ALL events line-JSON/key errors
+        events = decode_pass(events.jsonl, _EVENT_KEYS, ev.hex)     # 7c
+        if len(records) != manifest.record_count or len(events) != manifest.event_count:
+            raise ManifestError("record or event count does not match the manifest")   # 8: verbatim (386–387)
+    except ManifestError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, OverflowError) as exc:
+        raise ManifestError(f"persisted run artifact is malformed: {exc!r}") from exc   # verbatim (384–385)
     return LoadedRun(tuple(records), tuple(events), manifest)
 
-scan_stream(path) -> Scan:                         # *runner*: one 64 KiB pass, hashing + structure facts only
-    h = sha256(); n_lines = 0; since_nl = 0; over_cap = None; last = b""
-    for chunk in read_chunks(path, CHUNK_BYTES):    # <= 65,536 B transient; the file is NEVER buffered (V15-02)
-        h.update(chunk)                            # incremental hashing: O(1) memory for any file size
-        line_no = n_lines + 1                      # the line currently open (1-based)
-        nl = chunk.rfind(b"\n")
-        since_nl = len(chunk) - nl - 1 if nl >= 0 else since_nl + len(chunk)   # bytes since the last terminator
-        n_lines += chunk.count(b"\n")
-        if since_nl > MAX_LINE and over_cap is None: over_cap = line_no       # first breach only, for the message
-        last = chunk[-1:]
-    return Scan(h.hexdigest(), truncated = bool(n_lines or since_nl) and last != b"\n", over_cap = over_cap)
-
-check_lines(scan, what):                           # raised AFTER both digests, BEFORE that file is parsed
-    if scan.truncated:     raise ManifestError(f"{what} is truncated (no final newline)")                  # verbatim
-    if scan.over_cap:      raise ManifestError(f"{what} line {scan.over_cap} exceeds the maximum line length")
-
-parse_records(path, expected_hex) -> list:         # *runner*: pass 2 — SOLE owner of every line (V15-02)
-    out = []; h = sha256(); n = 0
-    with open(path, "rb") as f:                    # OSError → verbatim "{what} is missing or unreadable: …" (246–250)
+scan_structure(path, keys) -> Scan2:       # *runner*: ONE bounded read — hash + line facts + FIRST structure error
+    h = sha256(); n = 0; over_cap = None; struct_err = None; last = b""
+    with open(path, "rb") as f:             # OSError → verbatim "{what} is missing or unreadable: …"
         while True:
-            raw = f.readline(MAX_LINE + 2)         # CAP by API: returns <= MAX_LINE+2 bytes — bounded by construction
+            raw = f.readline(MAX_LINE + 2)  # CAP by API: <= MAX_LINE+2 bytes per read — bounded by construction
             if raw == b"": break
-            n += 1; h.update(raw)                  # re-hash while parsing: closes the two-pass TOCTOU window
-            if len(raw) - (1 if raw.endswith(b"\n") else 0) > MAX_LINE:
-                raise ManifestError(f"records.jsonl line {n} exceeds the maximum line length")   # mid-read swap only
-            if not raw.endswith(b"\n"):
-                raise ManifestError("records.jsonl is truncated (no final newline)")             # mid-read swap only
-            tag = f"records.jsonl line {n}"
-            try:
-                text = raw.decode("utf-8"); del raw # §6.5 phase 3 release order — `raw` has NO other reference:
-                obj = json.loads(text); del text     # no generator, no second owner (a generator would keep the line
-            except (ValueError, UnicodeDecodeError) as exc:                                      # alive across parse)
-                raise ManifestError(f"{tag} is not valid JSON: {exc}") from exc                  # verbatim (194–199)
-            if not isinstance(obj, dict) or set(obj) != _RECORD_KEYS:
-                raise ManifestError(f"{tag}: unexpected or missing keys")                        # verbatim (284)
-            try:
-                value = obj.pop("body_b64")          # removes the <= 5,592,408 B str from the dict FIRST
-                if isinstance(value, str):
-                    raw2 = value.encode("ascii"); del value   # ASCII copy, THEN release the str (encode peak 11.18 MB)
+            n += 1; h.update(raw)           # incremental hashing: O(1) memory for any file size
+            last = raw[-1:]                 # truncation fact: final byte of the final line read
+            if raw.endswith(b"\n"):
+                if len(raw) - 1 > MAX_LINE and over_cap is None: over_cap = n        # newline-terminated breach
+            elif len(raw) > MAX_LINE and over_cap is None: over_cap = n              # capped read, no newline
+            if struct_err is None:          # parse structure ONLY until the first error; afterwards just hash
+                try:
+                    obj = parse_line(raw, f"{path.name} line {n}")   # Step-1 JSON dialect (below)
+                except ManifestError as exc:
+                    struct_err = exc        # DEFERRED: digest checks (4/5) must run first, exactly as Step-1 does
                 else:
-                    raw2 = _req_str(value, f"{tag} body_b64") # always raises: verbatim message (304–307)
+                    if not isinstance(obj, dict) or set(obj) != keys:
+                        struct_err = ManifestError(f"{path.name} line {n}: unexpected or missing keys")  # verbatim 284
+                    del obj                 # DISCARD — no body decoded, nothing retained: O(1) memory per line
+    return Scan2(hex = h.hexdigest(), truncated = n > 0 and last != b"\n",
+                 over_cap = over_cap, struct_err = struct_err)
+
+check_lines(scan, what):                    # truncation → MAX_LINE, in Step-1's truncation-first position
+    if scan.truncated: raise ManifestError(f"{what} is truncated (no final newline)")                # verbatim 280–281
+    if scan.over_cap:  raise ManifestError(f"{what} line {scan.over_cap} exceeds the maximum line length")
+    # the MAX_LINE cap above is the SOLE documented acceptance divergence from Step-1 (D35): valid records fit it by
+    # construction (body <= MAX_BODY_BYTES ⇒ line <= MAX_LINE), and accepting unbounded lines would violate the
+    # Domain B budget that V15-02/D30 mandate. G-V16-05 differential-tests every other input.
+
+parse_line(raw, what) -> dict:              # Step-1 `_parse_json` dialect (runstore.py:194–201), memory-ordered
+    try:
+        text = raw.decode("utf-8"); del raw # the ONLY deviation from calling `_parse_json` verbatim: release the
+        return json.loads(text,             # line bytes BEFORE parsing (holding line+text+parsed = 16,781,149 B,
+              object_pairs_hook = _no_duplicate_keys,      # measured, banned by §6.5 phase 3). It changes NO
+              parse_constant = lambda c: (_ for _ in ()).throw(  # observable outcome: the bytes are already copied
+                  ManifestError(f"{what}: {c} is not allowed")))  # into text; G-V16-05 differential-tests both.
+    except ManifestError:                   # duplicate keys / NaN / Infinity — verbatim, unwrapped (Step-1 195–196)
+        raise
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ManifestError(f"{what} is not valid JSON: {exc}") from exc                   # verbatim (197–201)
+
+decode_pass(path, keys, expected_hex) -> list:  # *runner*: SECOND read — body decode + fields; re-hashes (TOCTOU)
+    out = []; h = sha256(); n = 0
+    with open(path, "rb") as f:
+        while True:
+            raw = f.readline(MAX_LINE + 2)
+            if raw == b"": break
+            n += 1; h.update(raw)           # re-hash while decoding: closes the two-pass TOCTOU window
+            ... same truncation/MAX_LINE re-checks as scan_structure (mid-read swap only, fail closed) ...
+            tag = f"{path.name} line {n}"
+            obj = parse_line(raw, tag)
+            if not isinstance(obj, dict) or set(obj) != keys: raise ManifestError(f"{tag}: unexpected or missing keys")
+            try:
+                value = obj.pop("body_b64")  # removes the <= 5,592,408 B str from the dict FIRST
+                if isinstance(value, str):
+                    raw2 = value.encode("ascii"); del value  # ASCII copy, THEN release the str (encode peak 11.18 MB)
+                else:
+                    raw2 = _req_str(value, f"{tag} body_b64")  # always raises: verbatim message (304–307)
                 body = base64.b64decode(raw2, validate=True); del raw2   # BYTES in — b64decode(str) would peak at
-            except ValueError as exc:                # 15,381,335 B (banned, §6.5); ManifestError IS a ValueError (45)
-                raise ManifestError(f"{tag}: invalid body: {exc}") from exc # so _req_str errors re-wrap exactly as 352–353
+            except ValueError as exc:        # 15,381,335 B (banned, §6.5); ManifestError IS a ValueError (45)
+                raise ManifestError(f"{tag}: invalid body: {exc}") from exc  # so _req_str errors re-wrap exactly as 352–353
             out.append(assemble_record(obj, body, tag))   # field half of _record_from_json UNCHANGED (354–357)
     if h.hexdigest() != expected_hex:
-        raise ManifestError("records.jsonl does not match the manifest digest (altered or substituted)")   # TOCTOU
+        raise ManifestError(f"{path.name} does not match the manifest digest (altered or substituted)")  # TOCTOU
     return out
-
-assemble_record(obj, body, tag) -> RequestRecord:   # *runner* = the unchanged field half of _record_from_json:
-    ...                                             # _req_range/_req_str/_opt/_req_headers over the remaining 11 keys,
-                                                    # `body` passed through, argument order and messages of 354–357
-
-parse_events(path, expected_hex) -> list:           # same discipline; events <= ~800 B, no body_b64, no release dance:
-    ...                                             # readline loop + re-hash + _EVENT_KEYS check (verbatim 284) +
-                                                    # _event_from_json(obj, n) UNCHANGED (362+), then the same TOCTOU hash
 ```
 
-Why a function and not a line generator: a suspended generator keeps its last yielded line alive while the caller
-parses it — that third reference (`line bytes + text + parsed body_b64` = ≈16.8 MB) blows the phase-3 bound. The
-reader above is the line's sole owner at every instant, which is what makes the §6.5 release order hold. Valid records
-fit `MAX_LINE` by construction (body ≤ `MAX_BODY_BYTES`, plan-constrained path/headers, bounded incident `error`
-strings); any longer line — only producible by foreign or corrupt content — fails closed before parsing. The file is
-read twice (hash pass + parse pass): offline verification, ≤ ~140 MB of I/O for a full session, O(1) memory either way.
+Why each stage exists and how the memory stays bounded (§6.5 phase 3): the structure stage parses one line, checks its
+key set and DISCARDS the dict — a suspended generator or a retained list would keep every `body_b64` string alive
+(Step-1's own 139.8 MB failure); the decode stage is the line's sole owner at every instant with the v1.6 release order
+(decode → release → parse → release → encode → release → `b64decode(bytes)`), peaking at the same ≤ 11,202,224 B bound
+(measured 11,188,261 B decode / ≤ structure-pass value, Appendix A). Two reads per file (hash+structure, then decode)
+≈ 3 × `records.jsonl` + 3 × `events.jsonl` ≈ 205 MB of sequential I/O for a full session — offline verification,
+O(1) memory either way. Valid records fit `MAX_LINE` by construction (body ≤ `MAX_BODY_BYTES`, plan-constrained
+path/headers, bounded incident `error` strings); any longer line — only producible by foreign or corrupt content —
+fails closed before parsing (the one documented acceptance divergence, D35). Files mutated between the two reads are
+caught by the decode stage's end-of-pass re-hash (digest error) or fail parsing — strictly fail-closed, a superset of
+Step-1's rejections for stable inputs; for every stable input the accept-reject set and the first-raised
+`ManifestError` message are identical to Step-1's, modulo the `MAX_LINE` cap (G-V16-05).
 
 5.2 **Publication — exact `renameat2(RENAME_NOREPLACE)` contract (V13-02, V13-03).** This sequence publishes either a run
 directory, the quarantine directory, or the receipt file; the normative unit is `publish_dir()`/`publish_file()`. On Linux,
@@ -613,10 +672,18 @@ function PUBLISH_COMPONENT(pfd, staging_name, final_name, expect: Stat | None) -
     try:      os.stat(final_name, dir_fd = pfd, follow_symlinks = False); exists = True
     except FileNotFoundError: exists = False
     if exists: raise PublishConflict(final_name)                  # → quarantine path (§5.5), never overwrite
-    # 3. Staging identity: directory, same parent, inode pinned at creation:
+    # 3. Staging identity: same parent, inode pinned against `expect` (V16-07): the os.fstat() of the descriptor
+    #    that CREATED the staging name — the receipt temp (§5.2.4) — or of the descriptor it was opened through
+    #    (directory targets), captured by the caller, never re-derived from the path:
     st_src = os.stat(staging_name, dir_fd = pfd, follow_symlinks = False)
-    require stat.S_ISDIR(st_src.st_mode)                          # run/quarantine targets are directories
+    if stat.S_ISREG(st_src.st_mode):
+        require expect is not None                        # FILE staging (the receipt temp) MUST carry its creation fstat
+    else:
+        require stat.S_ISDIR(st_src.st_mode)              # run/quarantine targets are directories
     require expect is None or (st_src.st_dev, st_src.st_ino) == (expect.st_dev, expect.st_ino)
+        # with §5.2.4's mandatory `expect` this is an unconditional PRE-syscall pin for the receipt: a same-UID
+        # substitution of .<run_id>.receipt.tmp between close and renameat2 is detected BEFORE the syscall; the
+        # residual stat→syscall window is closed after it by step 5's post-rename proof
     # 4. THE SYSCALL — both directory fds anchored to the locked parent, RENAME_NOREPLACE:
     #      renameat2(int pfd, const char *staging_name, int pfd, const char *final_name, unsigned int flags)
     #      flags = RENAME_NOREPLACE = 1 (Linux <linux/fs.h>); names relative to pfd, NOT to the CWD, NOT to AT_FDCWD
@@ -636,7 +703,9 @@ function PUBLISH_COMPONENT(pfd, staging_name, final_name, expect: Stat | None) -
     #    no `pass`, no swallowed branch, no fall-through — each path raises the single fatal type with its cause
     #    chained (consequences below §5.2.4; classification limits §5.2.5):
     st_dst = os.stat(final_name, dir_fd = pfd, follow_symlinks = False)
-    if not stat.S_ISDIR(st_dst.st_mode) or (st_dst.st_dev, st_dst.st_ino) != (st_src.st_dev, st_src.st_ino):
+    # identity + type proof (V16-07): inode equality, and type RELATIVE to st_src — which step 3 already typed:
+    # a directory stays a directory, the receipt temp stays a regular file; any inode or kind change = IMPPOSTOR
+    if (st_dst.st_dev, st_dst.st_ino) != (st_src.st_dev, st_src.st_ino) or stat.S_ISDIR(st_dst.st_mode) != stat.S_ISDIR(st_src.st_mode):
         try:
             publish_quarantine_of(final_name)          # renameat2(NOREPLACE) final → <run_id>.unverified (§5.5)
         except BaseException as q_exc:                 # PublishConflict (EEXIST), PublishUnavailable, OSError, …
@@ -666,11 +735,21 @@ against by test (G-V13-03): `os.rename(src, dst)` (silently overwrites on POSIX)
 and any two-step check-then-rename without `RENAME_NOREPLACE`. The `EEXIST` errno — not a pre-check — is the authoritative
 no-clobber guarantee.
 
-5.2.4 **Receipt publication** uses the same function with `expect = None`, `staging_name = ".<run_id>.receipt.tmp"`
-(created by `O_EXCL` in `RUN_ROOT`, fully written and fsynced first), `final_name = <run_id>.receipt.json`,
-`S_ISDIR` replaced by `S_ISREG` (a file-type parameter of the function). A crash before the syscall leaves only the temp
-name (ignored by the resolver → T4); after the syscall the receipt is complete (→ T6 path). Torn receipts under the final
-name are impossible by construction.
+5.2.4 **Receipt publication (v1.7, V16-07: temporary-inode binding).** The receipt temp is created by
+`tmp_fd = os.open(".<run_id>.receipt.tmp", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o644, dir_fd = pfd)` in
+`RUN_ROOT`, fully written and fsynced through THAT descriptor; then `st_tmp = os.fstat(tmp_fd)` is captured on the
+creation descriptor BEFORE `os.close(tmp_fd)` and passed as `expect` into
+`publish_file(pfd, ".<run_id>.receipt.tmp", "<run_id>.receipt.json", expect = st_tmp)` (`final_name =
+<run_id>.receipt.json`; the step-3 type check accepts a regular file). Publication with `expect = None` is **BANNED**
+for the receipt (G-V16-07): between `close` and `renameat2` a same-UID process may substitute the temp name, and
+`expect` makes step 3 compare the temp's `(st_dev, st_ino)` against the inode of the descriptor that created it
+BEFORE the syscall — a substitution raises before publication, and a substitution inside the residual stat→syscall
+window is caught by step 5's post-rename proof (`PublishIdentityMismatch`). Either way CP3 fails → the run stays
+**T4 (terminal, operator review; §7.5/D33)** — or **T3** in the residual where step 5 could not move the impostor
+aside and foreign bytes stand under the final name (the operator's `receipt_pin` never matches them); terminal either
+way, and T6 requires the authenticated publication of THIS temp's bytes. A crash before the syscall leaves only the temp name (ignored by the
+resolver → T4); after the syscall the receipt is complete (→ T6 path). Torn receipts under the final name are
+impossible by construction.
 
 5.2.5 **Filesystem threat model and TOCTOU closure (V14-07; explicit UID trust boundary, V15-06).** Boundary:
 `RUN_ROOT` SHALL be an **absolute** path on the evidence filesystem, opened with `O_NOFOLLOW`, not group/other-writable
@@ -728,8 +807,10 @@ physically removing a directory requires this same `renameat2`; if the kernel or
 portable mechanism exists to move it — the guarantee is therefore classification-level (never successful, never
 receipted, always reported), not removal-level.
 
-5.3 **Post-publication persistence:** `os.fsync(pfd)` (CP2) makes the rename durable; a failure here halts the sequence
-BEFORE the receipt → T4, and recovery re-runs fsync then CP3 (K11).
+5.3 **Post-publication persistence (v1.7, V16-03/D33):** `os.fsync(pfd)` (CP2) makes the rename durable; a failure
+here halts the sequence BEFORE the receipt → **T4 — a TERMINAL incomplete state requiring operator review**: no
+automatic recovery re-runs fsync or CP3, because the complete receipt draft existed only in memory and died with the
+process (K11: the operator re-verifies against the out-of-band pin and decides; a rerun is a new `run_id`).
 
 5.4 **Write-read-audit self-verification (VERIFYING), before any publication:**
 
@@ -799,13 +880,14 @@ same interruption semantics (socket shutdown makes `read` raise → `Cancelled` 
 changes (chunks instead of one 4 MiB+1 buffer). On `INCIDENT_MEMORY` the orchestrator sees `status` already known from
 `getresponse()` (200) with the memory error → record `(200, INCIDENT-MEMORY)` → B5 (§3.3.3).
 
-6.5 **Domain B derivation — per-phase measured bounds (v1.6, V15-07; V14-03 corrected v1.4's "none concurrent"
+6.5 **Domain B derivation — per-phase measured bounds (v1.6/v1.7, V15-07/V16-04; V14-03 corrected v1.4's "none concurrent"
 claim; v1.5's formula-only numbers did not survive measurement against the code those paths would actually run).**
 Every peak below is the maximum LIVE allocation at a single instant of the normative sequences (§6.4 request path,
 §5.1.1 seal, §5.1.2 verify), measured with `tracemalloc` on CPython 3.12 over worst-case inputs (a full
 `MAX_BODY_BYTES` response; a record line at the `MAX_LINE` cap) and derived from the code that exists at the anchor.
 The phases are sequential (single-flight; seal runs after all requests; verify runs after seal), so the budget is the
-maximum phase peak, not their sum.
+maximum phase peak, not their sum. Probe methodology, the raw CPython 3.12.3 measurement tables and the native-headroom
+accounting behind `HTTP_HEADROOM` are recorded in Appendix A (V16-04).
 
 ```
 Phase 1 — request (per response, §6.4): scratch may reallocate while extending (old + new ≤ 2 × MAX_BODY_BYTES),
@@ -834,7 +916,9 @@ Phase 3 — verify, §5.1.2 incremental `load_run` (V15-02): the reader holds at
                                                       buffer + ~2,624 json/dict overhead -> 11,196,453 B ≤ bound)
     (banned patterns, measured: `base64.b64decode(str)` re-encodes the whole string → 15,381,335 B;
      `json.loads(raw bytes)` with the buffer referenced → bytes + decoded str + parsed = 16,781,149 B;
-     Step-1's whole-file `_read` + `_jsonl` → ≥ 139.8 MB. All three exceed the budget and are BANNED.)
+     Step-1's whole-file `_read` + `_jsonl` → ≥ 139.8 MB. All three exceed the budget and are BANNED.
+     The v1.7 structure pass (§5.1.2) parses + key-checks + discards with the same release order and therefore
+     shares this bound; raw values: Appendix A.)
 
 budget = max(peak₁, peak₂, peak₃) = 11,202,224 B
 TRANSIENT_BUDGET_BYTES = 12,582,912 B (12 MiB); margin = 1,380,688 B (12.3 %) over the largest phase.
@@ -842,12 +926,14 @@ TRANSIENT_BUDGET_BYTES = 12,582,912 B (12 MiB); margin = 1,380,688 B (12.3 %) ov
 
 Every phase peak is a hard cap enforced at its allocation sites: phase 1 by the §6.4 checks; phases 2/3 by construction
 — the writer never allocates a whole line and never calls `record_to_json`, the reader never reads a whole file and
-never holds line bytes + text + parsed simultaneously (G-V14-02/G-V15-01/G-V15-02/G-V13-04). **Domain A single-copy
+never holds line bytes + text + parsed simultaneously (G-V14-02/G-V15-01/G-V15-02/G-V16-05/G-V13-04), with the raw
+measurements and native-headroom accounting in Appendix A (G-V16-04). **Domain A single-copy
 rule (verify/observe):** before `load_run` runs, the orchestrator releases the live `pacer.records` references — the
 bytes are already on disk — and the explicitly loaded `run` is released (`del run`) BEFORE `audit_run` loads its own
 copy (audit.py:626), so at any instant at most ONE full body set exists (≤ 50 MiB). Total process envelope: A 50 MiB +
 B 12 MiB + C 2 MiB ≈ 64 MiB (runner and `observe()` alike). Any future change to `MAX_BODY_BYTES`, the writer or the
-reader MUST re-derive all three phases before changing `TRANSIENT_BUDGET_BYTES` (decisions D13, D19, D30).
+reader MUST re-derive all three phases under the Appendix A protocol before changing `TRANSIENT_BUDGET_BYTES`
+(decisions D13, D19, D30, D34).
 
 6.6 **Domain C by construction.** `RUN_RECORD_LIMIT = 2000` records (plan bound ≈ 750/day; hard stop → `INCIDENT-RECORD-LIMIT`
 abort, `derived = None`, `abort_seq = len(records)`): metadata ≤ 2000 × 400 B = 800 KiB; event log ≤ 1000 × 800 B = 800 KiB;
@@ -927,13 +1013,22 @@ CP1b post-rename content re-verification (v1.5, V14-07; pin-only call restated V
      <run_id>.unverified (§5.2.5), stop → T5; a crash here equals K10 (final, no receipt) → observe() re-verifies →
      T4 or T3 — an impostor never receives a receipt
 CP2  os.fsync(pfd) returns 0                                   # namespace durable; failure → stop → T4 (K11)
-CP3  receipt published: temp write + fsync + renameat2(RENAME_NOREPLACE) into <run_id>.receipt.json + fsync(pfd)
+CP3  receipt published (V16-07: temporary-inode binding):
+     tmp_fd = os.open(".<run_id>.receipt.tmp", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0o644, dir_fd = pfd)
+     → write canonical receipt JSON → os.fsync(tmp_fd)
+     → st_tmp = os.fstat(tmp_fd)     # captured on the CREATION descriptor, BEFORE close (V16-07)
+     → os.close(tmp_fd)
+     → publish_file(pfd, ".<run_id>.receipt.tmp", "<run_id>.receipt.json", expect = st_tmp)
+         # renameat2(RENAME_NOREPLACE); step 3 pins (st_dev, st_ino) pre-syscall, step 5 proves it post-rename
+     → os.fsync(pfd)
      → phase = COMMITTED; resolve (§9.2); receipt fields carry terminal_state, outcome, reason, exit_code
 ```
 
 State after each crash point: before CP1 → staging exists → K7/K0 → T2 or T5; CP1/CP1b→CP2 → final exists, no receipt →
-`observe()` re-verifies and may complete CP2/CP3 (recovery only: fsync + publish receipt, never re-rename) → T4→T6;
-after CP3 → T6. Power loss between CP1 and CP2 may lose the rename (not yet fsynced): final absent AND staging absent →
+`observe()` re-verifies and classifies **T4 — TERMINAL, operator review** (v1.7 removed the old "may complete CP2/CP3"
+recovery, V16-03/D33: the complete receipt draft existed only in memory and died with the process — no CP1-durable
+draft exists, so no code path may write, fsync or publish a receipt after CP1; K10–K12 resolve T4 only); after CP3 →
+T6. Power loss between CP1 and CP2 may lose the rename (not yet fsynced): final absent AND staging absent →
 T2 — never a half-visible directory (the rename itself is atomic).
 
 7.6 **Exit-code table:** `T6 ∧ COMPLETE-VALID → 0`; `T6 ∧ INCONCLUSIVE-TIMING → 1`; `T6 ∧ FAILED → 1`; `T0 → 2`;
@@ -1025,9 +1120,9 @@ default N: any transport condition not listed → `CONNECT_ERROR` record → str
 | K7 | crash after all three files durable, before renameat2 | complete staging, no final | quarantine (never complete an interrupted commit — D14) | T5 | CP1 is the commit point |
 | K8 | renameat2 returns EEXIST (foreign destination under the lock) | foreign final + our staging | quarantine ours; report conflict | T5 | no-clobber by errno, not by pre-check |
 | K9 | signal inside renameat2 | syscall atomic: staging XOR final | bounded deferral (§7.4); resolver takes whichever exists | T5 or T4/T6 | atomicity of one rename |
-| K10 | crash after CP1 (incl. during CP1b re-verification), before CP2 fsync | final visible (process crash) or absent (power loss) | process crash → re-verify → T4→(fsync, receipt)→T6; power loss → T2 | T4 or T2 | never partial: rename atomic; fsync gates durability; CP1b content proof precedes any receipt |
-| K11 | fsync(pfd) (CP2) returns EIO | final complete, receipt absent | stop before CP3; recovery retries fsync, re-verifies, publishes receipt | T4 → T6 | receipt never precedes durable rename |
-| K12 | crash during receipt write | temp receipt only (or none) → final without receipt | recovery publishes receipt after re-verification | T4 → T6 | temp+renameat2: no torn receipt under the final name |
+| K10 | crash after CP1 (incl. during CP1b re-verification), before CP2 fsync | final visible (process crash) or absent (power loss) | process crash → re-verify → T4 (terminal, operator review — V16-03); power loss → T2 | T4 or T2 | never partial: rename atomic; fsync gates durability; CP1b content proof precedes any receipt; T4 terminal (no CP1-durable receipt draft, D33) |
+| K11 | fsync(pfd) (CP2) returns EIO | final complete, receipt absent | stop before CP3; classify T4 (terminal) — operator re-verifies against the out-of-band pin and decides; NO automatic fsync-retry/CP3 (V16-03) | T4 | receipt never precedes durable rename; the in-memory draft cannot be reconstituted (D33) |
+| K12 | crash during receipt write | temp receipt only (or none) → final without receipt | temp residue ignored by the resolver (§5.2.4); classify T4 (terminal, operator review) — NO automatic receipt republication (V16-03) | T4 | temp+renameat2: no torn receipt under the final name; the complete draft died with the process (D33) |
 
 ## 9. Refusal journal, terminal-state resolver, protocol outcome mapping
 
@@ -1046,28 +1141,56 @@ default N: any transport condition not listed → `CONNECT_ERROR` record → str
 3. os.fsync(fd)                 # file content durable
 4. os.close(fd)
 5. os.fsync(pfd)                # directory entry durable — only now is the refusal authoritative
-6. print sha256(the file's exact bytes) with flush — the out-of-band journal pin (§10.1, V14-05)
+6. print sha256(the file's exact bytes) with flush — the out-of-band journal pin (§10.1, V14-05); MANDATORY for
+   the T0 classification: observe() requires journal_pin supplied AND matching, else T3 (V16-01, D31)
 ```
 
 Every refusal reason above aborts without egress (except `SYNC-INADEQUATE-AT-START`, which records `record_count` of the
 completed sync group). A crash before step 5 leaves a torn or missing journal: the resolver MUST NOT read it as a refusal
 — it resolves **T2**, never T0 (the v1.3 finding: a pre-flight crash must not masquerade as an intentional refusal). After
 step 5, `record_count = 0` refusals resolve T0; with `record_count > 0` the journal still resolves T0 (no run artifacts may
-exist for the `run_id`; if any do — including a quarantine — the contradiction resolves T3). The strict parser recomputes
-`journal_digest` over the other eight keys (naive edits fail), and `observe()` additionally compares the file's byte
-SHA-256 against `journal_pin` when the operator recorded it (V14-05): the self-digest alone is tamper-evidence, not
-authentication, because anyone with `RUN_ROOT` write access can recompute it.
+exist for the `run_id`; if any do — including a quarantine — the contradiction resolves T3) — and in BOTH cases only
+when `journal_pin` is supplied and matches. The strict parser recomputes `journal_digest` over the other eight keys
+(naive edits fail), and `observe()` COMPARES the file's byte SHA-256 against `journal_pin` **as a mandatory check
+(v1.7, V16-01/D31): `journal_pin is None` → T3, mismatch → T3 — T0 is unreachable without the out-of-band pin**. The
+self-digest alone is tamper-evidence, never authentication: anyone with `RUN_ROOT` write access can recompute it, so a
+self-digest by itself must never grant authoritative status (v1.6's optional-pin reading is removed).
 
 9.2 **Resolver precedence (normative `observe()`), deterministic given disk state only** (`pin`, `egress_count`,
-`receipt_pin`, `journal_pin` supplied out of band when available). V15-04 fail-closed rule: **`pin` is MANDATORY to
-verify or recover a final** — `receipt_pin` is a hex string, never a manifest pin, and Step-1's `load_manifest` fails
-closed without the pin (runstore.py:255–258), so a present final with `pin is None` resolves `T5 if conflict else T3`
-BEFORE any load; T4/T6 are unreachable without the independently supplied manifest pin, and "structural-only"
-verification of finals does not exist. `receipt_pin`/`journal_pin` remain optional tamper-evidence over their own
-files; full forgery by an adversary that controls records, files AND pins together stays out of scope — stated limit of
-`runstore`, §10.1. v1.5 harmonized this pseudocode with the §9.3 table over ALL edge-case artifact combinations
-(V14-06): inputs are five artifacts (refusal, staging, final, receipt, quarantine) × receipt validity × the closed
-outcome enum × (`pin`, `egress_count`) presence; every combination resolves to exactly one row of §9.3.
+`receipt_pin`, `journal_pin` supplied out of band). v1.7 fail-closed rules (V16-01/D31): **ALL THREE pins are
+MANDATORY and each is checked before its target's state may be claimed** — (i) `pin` is MANDATORY to verify or recover
+a final (V15-04 unchanged): `receipt_pin` is a hex string, never a manifest pin, Step-1's `load_manifest` fails closed
+without the pin (runstore.py:255–258), so a present final with `pin is None` resolves `T5 if conflict else T3` BEFORE
+any load, and T4/T6 are unreachable without the independently supplied manifest pin ("structural-only" verification of
+finals does not exist); (ii) `journal_pin` is MANDATORY for T0 — absent or mismatched → T3 (§9.1); (iii) `receipt_pin`
+is MANDATORY for T1/T6 — absent or mismatched → T3 (R3 below). Self-digests (`journal_digest`, `receipt_digest`) are
+re-verified as necessary but NEVER sufficient: a self-digest alone grants no authoritative state, because anyone with
+`RUN_ROOT` write access can recompute it (V16-01). Full forgery by an adversary that controls records, files AND pins
+together stays out of scope — stated limit of `runstore`, §10.1. v1.5 harmonized this pseudocode with the §9.3 table
+over ALL edge-case artifact combinations (V14-06): inputs are five artifacts (refusal, staging, final, receipt,
+quarantine) × receipt validity × the closed outcome enum × (`pin`, `egress_count`, `journal_pin`, `receipt_pin`)
+presence; every combination resolves to exactly one row of §9.3. v1.7 adds two structural rules: **R2** every
+quarantine attempt inside `observe()` goes through `try_quarantine` (V16-02 — no exception may escape the resolver),
+and **R3/R4** the receipt is authenticated BEFORE any of its fields is used, with audit check (g) mirrored explicitly
+before `audit_run` (V16-06).
+
+The classification helper (normative, V16-02/D32) — NEVER raises; used at EVERY quarantine site inside `observe()`:
+
+```
+function TRY_QUARANTINE(name) -> CONFLICT | QUARANTINE-FAILED:   # observe()-internal; never raises (V16-02)
+    try:
+        publish_quarantine_of(name)            # renameat2(NOREPLACE) name → <run_id>.unverified (§5.5)
+        return CONFLICT                        # moved aside; the conflict signature now stands (K1/K8)
+    except PublishConflict:
+        return CONFLICT                        # EEXIST: an unverified sibling already exists — also a conflict
+    except (PublishUnavailable, PublishIdentityMismatch, OSError):
+        return QUARANTINE-FAILED               # EPERM/EIO/ENOSPC/EXDEV/ENOSYS/… — classified, never propagated
+```
+
+Seal-time quarantine (§5.2 step 5, D28/V15-05) is NOT routed through this helper: there a failed impostor quarantine
+is strictly fatal by design. The helper covers only `observe()`'s two staging-quarantine sites (V16-02): every outcome
+becomes a deterministic fail-closed terminal state — CONFLICT keeps the conflict flag, QUARANTINE-FAILED resolves T5 —
+so no `EEXIST`/`EPERM`/`EIO`/`ENOSPC` can escape `observe()` as an exception.
 
 ```
 function OBSERVE(run_id, pin | None, egress_count | None, receipt_pin | None, journal_pin | None) -> TerminalState:
@@ -1079,14 +1202,20 @@ function OBSERVE(run_id, pin | None, egress_count | None, receipt_pin | None, jo
         raw = read_bytes(refusal)
         j = parse_strict(raw)                            # exact 9-key set, exact types, journal_digest verified
         if j is None or not j.format == "obs-refusal/1": return T2      # torn/invalid → crash, NEVER T0
-        if journal_pin is not None and sha256(raw) != journal_pin: return T3        # forged journal (V14-05)
+        if journal_pin is None or sha256(raw) != journal_pin:
+                                     return T3            # V16-01: journal_pin MANDATORY — absent/mismatch fails
+                                                          # closed; self-digest alone never grants T0 (D31)
         if final_exists(run_id) or staging_exists(run_id) or q_pre:
                                      return T3           # refusal ∧ artifacts/quarantine contradiction
-        return T0                                        # (record_count reported, not resolved here)
+        return T0                                        # journal_pin present ∧ byte-SHA-256 matched (V16-01);
+                                                          # (record_count reported, not resolved here)
     # 2. final run directory
     if final_exists(run_id):
         conflict = q_pre                                 # our quarantined attempt alongside a final (K8 signature)
-        if staging_exists(run_id): quarantine(staging); conflict = True  # stale sibling (K1/K8); T unchanged
+        if staging_exists(run_id):                        # stale sibling (K1/K8); T unchanged when it moves:
+            qc = try_quarantine(staging)                 # V16-02: NEVER raises — every outcome classified
+            if qc is QUARANTINE-FAILED: return T5        # final + UNMOVABLE stale staging → fail closed (§9.3 T5)
+            conflict = True                              # CONFLICT: moved aside, or unverified sibling already there
         # Verification-failure precedence (V14-06): K8's foreign final cannot authenticate against our pin and fails
         # load/audit → T5 + conflict report; an own final failing with no conflict → T3. A final that PASSES
         # verification ignores `conflict`, so re-observation of a run whose stale sibling was quarantined stays
@@ -1095,31 +1224,41 @@ function OBSERVE(run_id, pin | None, egress_count | None, receipt_pin | None, jo
         if pin is None: return T5 if conflict else T3     # V15-04: never load a final without its manifest pin
         run = load_run(final, pinned = pin)              # receipt_pin is a hex string — never passed as a pin
         if run fails structurally:      return T5 if conflict else T3
-        # wrapper_count: exactly two admissible INDEPENDENT sources (V15-03) — (1) the out-of-band egress_count
-        # print (§10.1(1b): transport.sent, flushed beside the manifest pin) and (2) receipt.wrapper_count (minted
-        # from transport.sent at CP3, parsed early below). Any count derived from the record stream is BANNED: it
-        # would make audit check (g) tautological (audit.py:289–296 requires a caller-supplied counter, 623–626).
+        # R3 (V16-01/V16-06): the receipt is AUTHENTICATED before ANY of its fields is used — receipt_pin is
+        # MANDATORY for T1/T6 (absent → T3, byte-SHA-256 mismatch → T3, D31). No count and no outcome from an
+        # unauthenticated receipt may reach the audit or the classifier.
         raw = read_bytes(receipt_path) if receipt_exists(run_id) else None
         receipt = parse_strict(raw) if raw is not None else None   # exact key set, receipt_digest verified (V14-05)
-        wc = egress_count if egress_count is not None else (receipt.wrapper_count if receipt is not None else None)
-        result = audit_run(..., wrapper_count = wc, abort_seq = abort_condition_seq(run.records), ...)
-        if not result.ok:               return T5 if conflict else T3   # neither source → check (g) fails → here
-        if not receipt_exists(run_id):  return T4          # final NAME only; .receipt.tmp ignored (§5.2.4)
-        if receipt is None or receipt.run_id != run_id:
+        if receipt_exists(run_id):
+            if receipt is None or receipt.run_id != run_id:
                                      return T3            # torn/foreign receipt → FAILED-AUDIT (V14-06)
-        if receipt_pin is not None and sha256(raw) != receipt_pin:
-                                     return T3            # forged receipt (V14-05)
-        if receipt.manifest_sha256 != pin:
+            if receipt_pin is None or sha256(raw) != receipt_pin:
+                                     return T3            # V16-01: receipt_pin MANDATORY — self-digest never enough
+            if receipt.manifest_sha256 != pin:
                                      return T3            # content chain broken (pin non-None above; V15-04)
+        # wrapper_count: exactly two admissible INDEPENDENT sources (V15-03) — (1) the out-of-band egress_count
+        # print (§10.1(1b): transport.sent, flushed beside the manifest pin) and (2) receipt.wrapper_count — now
+        # only from an AUTHENTICATED receipt (R3). Any count derived from the record stream is BANNED: it would make
+        # audit check (g) tautological (audit.py:289–296 requires a caller-supplied counter, 623–626).
+        wc = egress_count if egress_count is not None else (receipt.wrapper_count if receipt is not None else None)
+        # R4 (V16-06/D36): explicit mirror of audit check (g) BEFORE audit_run — wc must be an integer (not bool,
+        # not None) and must equal len(run.records); any other combination fails closed (conflict → T5, else T3)
+        # instead of reaching audit_run and failing only "by incident":
+        if not isinstance(wc, int) or isinstance(wc, bool) or wc != len(run.records):
+                                     return T5 if conflict else T3   # check (g) mirror: supplied / int / == len
+        result = audit_run(..., wrapper_count = wc, abort_seq = abort_condition_seq(run.records), ...)
+        if not result.ok:               return T5 if conflict else T3   # after R4 only a TOCTOU change lands here
+        if not receipt_exists(run_id):  return T4          # final NAME only; .receipt.tmp ignored (§5.2.4);
+                                     # preconditions: pin ∧ audit pass ∧ wc from egress_count (V16-03/V16-06)
         if egress_count is not None and receipt.wrapper_count != egress_count:
                                      return T3            # independent egress sources disagree (V15-03)
-        if receipt.outcome == "ABORTED":       return T1
+        if receipt.outcome == "ABORTED":       return T1   # receipt authenticated (R3), count cross-checked above
         if receipt.outcome in {"COMPLETE-VALID", "INCONCLUSIVE-TIMING", "FAILED"}: return T6
         return T3                                        # outcome outside the closed enum → FAILED-AUDIT (V14-06)
     # 3. staging without final
     if staging_exists(run_id):
-        if not q_pre: quarantine(staging)                # name taken → PublishConflict, report, fall through
-        return T5                                        # staging present → T5 either way (K1/K7)
+        if not q_pre: try_quarantine(staging)            # V16-02: NEVER raises; EEXIST/EPERM/EIO/… classified
+        return T5                                        # staging present → T5 on EVERY outcome (K1/K7), fail closed
     # 4. pre-existing quarantine alone (stale K-row result)
     if q_pre:                                            return T5
     # 5. nothing
@@ -1130,25 +1269,29 @@ function OBSERVE(run_id, pin | None, egress_count | None, receipt_pin | None, jo
 
 | T | Name | Defining persisted state (all conditions) | Exit | Recovery allowed |
 |---|---|---|---|---|
-| T0 | REFUSED | valid `obs-refusal/1` ∧ no final ∧ no staging ∧ no quarantine | 2 | none (terminal) |
-| T1 | ABORTED-SEALED | final ∧ verify+audit pass ∧ receipt valid ∧ `receipt.outcome = ABORTED` (incident ladder, N/T/E rows, or signal reason) | 1 / 130 / 143 | none; owner reports to reviewer before rerun |
+| T0 | REFUSED | valid `obs-refusal/1` ∧ `journal_pin` supplied ∧ sha256(journal bytes) = `journal_pin` (V16-01) ∧ no final ∧ no staging ∧ no quarantine | 2 | none (terminal) |
+| T1 | ABORTED-SEALED | final ∧ verify+audit pass ∧ receipt valid (incl. `receipt_pin` supplied ∧ sha256(receipt bytes) = `receipt_pin`, V16-01) ∧ `receipt.outcome = ABORTED` (incident ladder, N/T/E rows, or signal reason) | 1 / 130 / 143 | none; owner reports to reviewer before rerun |
 | T2 | INCONCLUSIVE-CRASH | nothing for `run_id`, or journal present but torn/invalid, or (power loss) rename lost before CP2 | 1 | none automatic: rerun is a NEW `run_id` |
-| T3 | FAILED-AUDIT | final present that fails verification — including a final presented with no out-of-band manifest pin, fail-closed V15-04 — with NO staging/quarantine conflict ∨ receipt invalid (torn/foreign/digest-or-pin mismatch/`wrapper_count` disagreement V15-03/outcome outside the enum) ∨ refusal ∧ artifacts/quarantine contradiction | 1 | none; quarantine-or-report per reviewer |
-| T4 | SEALED-UNRECEIPTED | final ∧ pin supplied ∧ verify+audit pass ∧ receipt absent (no pin ⇒ resolves T3/T5, never T4 — V15-04) | 1 | `observe()` may complete CP2+CP3 ONLY with the independently supplied manifest pin (`receipt_pin` is never a manifest pin; fsync, publish receipt) → re-resolve T6 |
-| T5 | QUARANTINED | staging found without final (K1/K7), or `<run_id>.unverified/` present with final absent (any K-row/`INVALID-PACING`/seal failure/E11/N14 path), or final present that fails verification while staging/quarantine is also present (K8 conflict, reported), or a final presented without its manifest pin while a conflict exists (V15-04 fail-closed) | 1 | none (fresh `run_id` for a rerun) |
-| T6 | COMMITTED | S holds (§2.4); `receipt.outcome` ∈ {COMPLETE-VALID, INCONCLUSIVE-TIMING, FAILED} | 0 / 1 / 1 | none |
+| T3 | FAILED-AUDIT | final present that fails verification — including a final presented with no out-of-band manifest pin, fail-closed V15-04 — with NO staging/quarantine conflict ∨ receipt invalid (torn/foreign/digest-or-pin mismatch/`receipt_pin` absent or mismatched V16-01/`wrapper_count` disagreement V15-03/outcome outside the enum) ∨ refusal present with `journal_pin` absent or mismatched (V16-01) ∨ refusal ∧ artifacts/quarantine contradiction | 1 | none; quarantine-or-report per reviewer |
+| T4 | SEALED-UNRECEIPTED | final ∧ pin supplied ∧ verify+audit pass (incl. check (g): `egress_count` supplied, integer, `== len(records)` — V16-06) ∧ receipt absent (no pin ⇒ resolves T3/T5, never T4 — V15-04; no admissible independent count ⇒ T5/T3, never T4 — V16-06) | 1 | NONE — TERMINAL incomplete state requiring operator review (v1.7, V16-03/D33): no CP1-durable receipt draft exists, so no code path may write/fsync/publish a receipt after CP1; a rerun uses a new `run_id` |
+| T5 | QUARANTINED | staging found without final (K1/K7), or `<run_id>.unverified/` present with final absent (any K-row/`INVALID-PACING`/seal failure/E11/N14 path), or final present that fails verification while staging/quarantine is also present (K8 conflict, reported), or final present whose stale staging sibling cannot be moved aside (`try_quarantine` → QUARANTINE-FAILED, V16-02), or a final presented without its manifest pin while a conflict exists (V15-04 fail-closed) | 1 | none (fresh `run_id` for a rerun) |
+| T6 | COMMITTED | S holds (§2.4 — incl. `receipt_pin` supplied ∧ sha256(receipt bytes) = `receipt_pin`, V16-01); `receipt.outcome` ∈ {COMPLETE-VALID, INCONCLUSIVE-TIMING, FAILED} | 0 / 1 / 1 | none |
 
-Exhaustiveness argument (v1.5, V14-06; extended v1.6 for V15-03/V15-04): the inputs are the five filesystem
-artifacts (refusal, staging, final, receipt, quarantine), receipt validity (torn / foreign / digest-or-pin mismatch /
-valid) and the closed outcome enum (three values ∪ invalid), plus the out-of-band inputs `pin` and `egress_count`
-(present/absent each — V15-04/V15-03). Steps 1→5 partition them: refusal present → T0/T2/T3 (by validity ×
-artifact/quarantine contradiction); refusal absent ∧ final present → T3/T5 (verification × conflict; `pin` absent is a
-verification failure that fails closed — never T4/T6), T4 (receipt absent ∧ pin supplied), T1/T6 (by outcome), T3
-(invalid receipt, `egress_count` vs `receipt.wrapper_count` disagreement, or enum); refusal and final absent ∧ staging
-present → T5; only quarantine present → T5; nothing → T2. The V15-05 residual (a final whose step-5 quarantine rename
-failed) is exactly a final that fails verification → T3 (or T5 with a conflict) — never T4/T6, never a silent success.
-Each combination hits exactly one `return` and maps to exactly one table row; G-V14-06 enumerates the full
-cross-product (including `pin`/`egress_count` presence) and asserts pseudocode result == row predicate.
+Exhaustiveness argument (v1.5, V14-06; extended v1.6 for V15-03/V15-04; v1.7 for V16-01/V16-02/V16-06): the inputs
+are the five filesystem artifacts (refusal, staging, final, receipt, quarantine), receipt validity (torn / foreign /
+digest-or-pin mismatch / `receipt_pin` absent / valid) and the closed outcome enum (three values ∪ invalid), plus the
+out-of-band inputs `pin`, `egress_count`, `journal_pin`, `receipt_pin` (present/absent each — V15-04/V15-03/V16-01)
+and both quarantine outcomes (CONFLICT / QUARANTINE-FAILED, V16-02). Steps 1→5 partition them: refusal present →
+T0 (valid ∧ `journal_pin` present ∧ byte-matched ∧ no artifacts) / T2 (torn) / T3 (`journal_pin` absent or mismatched,
+or artifacts/quarantine contradiction); refusal absent ∧ final present → T5 (staging sibling unmovable —
+QUARANTINE-FAILED — or verification × conflict; `pin` absent fails closed before any load — never T4/T6) / T4 (receipt
+absent ∧ pin supplied ∧ `egress_count` admits check (g)) / T1/T6 (authenticated receipt × outcome; `receipt_pin` absent
+or mismatched → T3) / T3 (invalid/unauthenticated receipt, `egress_count` vs `receipt.wrapper_count` disagreement, or
+enum); refusal and final absent ∧ staging present → T5 (every quarantine outcome, V16-02); only quarantine present →
+T5; nothing → T2. The V15-05 residual (a final whose step-5 quarantine rename failed) is exactly a final that fails
+verification → T3 (or T5 with a conflict) — never T4/T6, never a silent success. Each combination hits exactly one
+`return` and maps to exactly one table row; G-V14-06 enumerates the full cross-product (all four out-of-band inputs,
+both quarantine outcomes) and asserts pseudocode result == row predicate.
 
 9.4 **Protocol v0.5 outcome → record/persisted representation mapping (concrete).**
 
@@ -1170,23 +1313,26 @@ cross-product (including `pin`/`egress_count` presence) and asserts pseudocode r
 
 ## 10. Provenance, pin, outer index
 
-10.1 **Pin discipline and out-of-band egress count (three pins + one scalar; v1.6 / V14-05, V15-03/V15-04).** (1) `write_run` returns `sha256(manifest.json)`; the runner
+10.1 **Pin discipline and out-of-band egress count (three pins + one scalar; v1.7 / V14-05, V15-03/V15-04, V16-01).** (1) `write_run` returns `sha256(manifest.json)`; the runner
 (a) prints it with a flush before CP1, (b) embeds it in the receipt at CP3, and (c) requires the operator to record it
 out-of-band (committed evidence file / ticket) before review. (1b) The runner also prints, with a flush beside the manifest pin (same moment, before CP1), the
 out-of-band egress count `egress_count = transport.sent` — the transport's wrapper counter, final once sealing starts.
 This is the first admissible independent `wrapper_count` source for `audit_run`/`observe()` (V15-03): live runs pass
-`transport.sent` directly (§5.4); `observe()` uses the printed `egress_count` when supplied, else
-`receipt.wrapper_count`; a count derived from the record stream is banned (audit check (g), audit.py:289–296), and
-disagreement between the two independent sources resolves T3 (§9.2). (2) After CP3 the runner prints
-`sha256(<run_id>.receipt.json bytes)` with a flush — the receipt pin; `observe()` compares it when `receipt_pin`
-is supplied; `receipt_pin` is NEVER used as a manifest pin — a final without `pin` fails closed before any load
-(§9.2, V15-04). (3) After refusal step 5 the runner prints `sha256(<run_id>.refusal.json bytes)` with a flush — the
-journal pin (9.1). `observe()` takes the pins as inputs; none is ever derived from the file being verified when
+`transport.sent` directly (§5.4); `observe()` uses the printed `egress_count` when supplied, else the
+AUTHENTICATED `receipt.wrapper_count` (§9.2 R3, V16-01); a count derived from the record stream is banned (audit
+check (g), audit.py:289–296), and disagreement between the two independent sources resolves T3 (§9.2). (2) After CP3
+the runner prints `sha256(<run_id>.receipt.json bytes)` with a flush — the receipt pin; `observe()` **REQUIRES**
+`receipt_pin`: absent → T3, byte-SHA-256 mismatch → T3 — T1/T6 are unreachable without it (V16-01/D31);
+`receipt_pin` is NEVER used as a manifest pin — a final without `pin` fails closed before any load (§9.2, V15-04).
+(3) After refusal step 5 the runner prints `sha256(<run_id>.refusal.json bytes)` with a flush — the journal pin
+(§9.1); `observe()` **REQUIRES** `journal_pin`: absent → T3, mismatch → T3 — T0 is unreachable without it
+(V16-01/D31). `observe()` takes the pins as inputs; none is ever derived from the file being verified when
 authentication (not mere structure) is claimed. The self-digests (`journal_digest`, `receipt_digest`) are
 tamper-evidence only — anyone with `RUN_ROOT` write access can recompute them — while the out-of-band prints
-are what make recomputation detectable. Stated limits, unchanged from `runstore`: whoever controls records, log, files
-AND pins together can forge a consistent set; whoever controls only `RUN_ROOT` can edit files but not pins the operator
-recorded elsewhere.
+are what make recomputation detectable, and v1.6's optional-pin reading (self-digest alone → authoritative T0/T1/T6)
+is REMOVED: without the matching out-of-band print there is no authoritative state, only T3 (V16-01). Stated limits,
+unchanged from `runstore`: whoever controls records, log, files AND pins together can forge a consistent set;
+whoever controls only `RUN_ROOT` can edit files but not pins the operator recorded elsewhere.
 
 10.2 **`obs-outer-index/1` (receipt) exact key set** (strict parse, exact types, no duplicates — same discipline as the
 manifest): `format, run_id, plan_sha256, manifest_sha256, record_count, event_count, wrapper_count, abort_seq,
@@ -1204,7 +1350,7 @@ and is the second admissible independent egress source (§10.1(1b), V15-03).
 free-form `error` string (records) or the receipt's `reason`/`diagnostics` (protocol §0/§3.3 alignment: record shapes stay
 frozen under `obs-run-manifest/1`).
 
-## 11. Gates and decisions (v1.4 additions; v1.6 adds G-V15-01–07 and D24–D30; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable)
+## 11. Gates and decisions (v1.7 adds G-V16-01–07 and D31–D37; v1.6 adds G-V15-01–07 and D24–D30; v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable)
 
 | Gate | Assertion | Killer-test sketch |
 |---|---|---|
@@ -1218,7 +1364,7 @@ frozen under `obs-run-manifest/1`).
 | G-V14-03 | three-phase peak bounds | allocation spy: request-conversion moment ≤ 8,781,824 B, seal ≤ 151,552 B, verify line parse ≤ 11,202,224 B, budget 12,582,912 B (measured proofs §6.5, V15-07); mutation: materialize one full line at seal or one full file → killer fails; `pacer.records` released before `load_run` (single-copy Domain A) |
 | G-V14-04 | clock API conformance (V14-04) | AST/grep gate: pseudocode mentions only `now_ns` / `sleep_until_ns`; instrumented Clock raises on any other name; asserted `sleep_until_ns` target ∈ [now, start_at]; GV-6 loop still starts at `300,030,003,001 ns` |
 | G-V14-05 | receipt/journal integrity | flip one byte in the receipt → digest mismatch → T3; recompute digest but not the out-of-band pin → pin mismatch → T3; same for the refusal journal (torn → T2, forged-with-recomputed-digest → T3); mutation: drop the digest/pin check → killer fails |
-| G-V14-06 | resolver/table agreement | property test enumerates refusal × staging × final × receipt(torn\|foreign\|digest\|pin\|valid) × quarantine × outcome enum × `pin` present/absent × `egress_count` present/absent: pseudocode returns exactly one T and §9.3's row predicate matches; K8→T5, quarantine-only→T5, torn receipt→T3, unknown outcome→T3, refusal+quarantine→T3, final without `pin`→T3/T5 never T4/T6, `egress_count`≠`receipt.wrapper_count`→T3 pinned |
+| G-V14-06 | resolver/table agreement | property test enumerates refusal × staging × final × receipt(torn\|foreign\|digest\|pin\|valid) × quarantine × outcome enum × `pin`/`egress_count`/`journal_pin`/`receipt_pin` present/absent × quarantine outcome (CONFLICT/QUARANTINE-FAILED): pseudocode returns exactly one T and §9.3's row predicate matches; K8→T5, quarantine-only→T5, torn receipt→T3, unknown outcome→T3, refusal+quarantine→T3, final without `pin`→T3/T5 never T4/T6, refusal without `journal_pin`→T3, receipt without `receipt_pin`→T3, `egress_count`≠`receipt.wrapper_count`→T3, unmovable stale staging→T5 pinned |
 | G-V14-07 | TOCTOU + filesystem boundary | `RUN_ROOT` mode 0777 → refuse; symlink final component → `O_NOFOLLOW` open fails; spy swaps the staging name between stat and renameat2 → step-5 mismatch → published final quarantined (never left standing); content swap between §5.4 and CP1 → CP1b → quarantine → T5 |
 | G-V14-08 | 250 ms second-signal bound | subprocess: injected `fsync` sleeping 2 s inside CP2 + second SIGINT → exit 130 at 250 ± 50 ms, final present, no receipt → `observe()` T4; fast checkpoint → exit after bookkeeping < 250 ms → T6; non-checkpoint second signal → immediate exit; a third signal does not extend the bound |
 | G-V15-01 | metadata-only seal (V15-01) | allocation spy + AST gate over a full `MAX_BODY_BYTES` record: the writer calls `record_meta_json` only — `record_to_json`/`r.body` never referenced — and never materializes `body_b64`; seal peak ≤ 151,552 B; mutation: reintroduce `record_to_json(r)` → killer fails (measured 5,592,408 B string ×2 per record) |
@@ -1228,11 +1374,19 @@ frozen under `obs-run-manifest/1`).
 | G-V15-05 | fatal quarantine (V15-05) | inject EPERM/ENOSPC into the step-5 impostor quarantine rename → `PublishIdentityMismatch` raised with cause chained (no `except: pass`), runner dies before CP1b/CP2/CP3, no receipt; observe() on the leftover state → exactly one T-row (T3/T5); spy asserts the impostor never classifies T4/T6 |
 | G-V15-06 | same-UID trust boundary (V15-06) | `RUN_ROOT` not owned by `os.geteuid()` or group/other-writable → `PublishUnavailable` at lock, before any artifact; fstat/stat UID+mode proof asserted; doc gate: §5.2.5 states kernel-prevention (different-UID) vs detection (same-UID) explicitly |
 | G-V15-07 | 12 MiB budget proof (V15-07) | tracemalloc CI gate: three phase peaks ≤ 8,781,824 / 151,552 / 11,202,224 B under 12,582,912 B, with the §6.5 measured values recorded; mutations: whole-file read, retained-chunk loop, or held `json.loads(bytes)` buffer → killer fails |
+| G-V16-01 | mandatory out-of-band pins (V16-01) | resolver property test (G-V14-06 dimensions): refusal with `journal_pin = None` or one flipped byte → T3, never T0; receipt with `receipt_pin = None` or flipped byte → T3, never T1/T6 — a CORRECTLY RECOMPUTED self-digest does not help; grep gate: the old optional-pin form (`journal_pin is not None and …` / `receipt_pin is not None and …`) absent from §9.1/§9.2; mutation: restore an optional-pin check → killer fails |
+| G-V16-02 | catch-and-classify quarantine (V16-02) | inject EEXIST/EPERM/EIO/ENOSPC/EXDEV/ENOSYS into BOTH `observe()` staging-quarantine sites → `observe()` returns exactly one T-row and NEVER raises (final + unmovable staging → T5 immediately; staging-only → T5 on every outcome); spy: no quarantine exception crosses the `observe()` boundary; seal-time step-5 impostor quarantine still raises fatally (D28 unchanged) |
+| G-V16-03 | T4 terminal, no receipt reconstitution (V16-03) | AST/grep gate: no receipt `publish_file`/`fsync(pfd)` call reachable after CP1 outside the CP3 sequence; crash injection at K10/K11/K12 → `observe()` = T4 and STAYS T4 on every subsequent observation (idempotent, no CP2/CP3 completion, no receipt file ever appears); mutation: add receipt-republish recovery → killer fails |
+| G-V16-04 | reproducible memory accounting (V16-04) | CI reruns the Appendix A protocol (probe1–probe7, CPython 3.12.3, fixed inputs) → recorded values must match Appendix A: 8,462,496 / 148,113 / 11,188,261 / 11,188,197 B, native `mallinfo2` Δ 277,120 B → conservative phase-1 total 8,739,616 ≤ 8,781,824 B; a drifted value or missing Appendix row fails the gate |
+| G-V16-05 | loader precedence + dialect equivalence (V16-05) | differential test: for every input class (bad body on line 1 + bad keys on line 5; duplicate key; `NaN`; non-UTF-8; truncated; line > `MAX_LINE`; digest mismatch; count mismatch) assert Step-1's `load_run` and the new `load_run` raise the SAME `ManifestError` message at the SAME precedence position on the same bytes — sole exemption: lines > `MAX_LINE` (new rejects, Step-1 cannot); mutation: decode a body before all-lines structure validation → killer fails |
+| G-V16-06 | audit check (g) alignment (V16-06) | property test: every `wc` that reaches `audit_run` is `int` (not `bool`, not `None`) and `== len(records)` — the R4 mirror enforces it pre-audit; `wc` ∈ {absent, bool, str, ≠ len} → T5-with-conflict or T3, and `audit_run` is NEVER called with an invalid `wc`; ordering spy: an unauthenticated receipt's `wrapper_count` never reaches the audit (R3 before use); mutation: delete the R4 mirror → killer fails |
+| G-V16-07 | receipt temp-inode binding (V16-07) | spy substitutes `.<run_id>.receipt.tmp` for a foreign file between `close(tmp_fd)` and `publish_file` → step-3 `expect` mismatch → publication refused BEFORE `renameat2` (or, for a swap after the step-3 stat, step-5 `PublishIdentityMismatch`) → CP3 fails → `observe()` = T4 (the real receipt never published) or T3 (foreign bytes standing under the final name fail `receipt_pin`) — NEVER T6; grep gate: §5.2.4 passes `expect = st_tmp`, never `expect = None` for a file target |
 
 Decisions (new): **D11** dynamic target supplied as `target_fn` evaluated per admission read (static path retained);
 **D12** on budget breach, discard the whole body (`b""` + `error=INCIDENT-MEMORY`) rather than persisting a partial one;
 **D13** `TRANSIENT_BUDGET_BYTES` may be changed only together with the §6.5 derivation; **D14** recovery NEVER completes an
-interrupted commit — pre-CP1 staging is always quarantined; **D15** skip decisions → event log, admitted decisions →
+interrupted commit — pre-CP1 staging is always quarantined, and post-CP1 the run is TERMINAL-incomplete (T4, operator
+review): v1.7 removed the old CP2/CP3 completion, no CP1-durable receipt draft exists (V16-03, D33); **D15** skip decisions → event log, admitted decisions →
 receipt (§4.4); **D16** refusal journal is a `RUN_ROOT` sibling keyed by `run_id` (never inside a run directory);
 **D17** `abort_seq` convention: live runs pass `pacer.abort_seq`, `observe()` re-derives via `abort_condition_seq` (§3.3.2);
 **D18** `write_run` is REPLACED in Step 2 (same name/signature/return; descriptor-relative + streaming + fsync, §5.1.1;
@@ -1243,25 +1397,49 @@ refusal gain self-digests (`receipt_digest`, `journal_digest`) plus out-of-band 
 leaving it in place; **D22** a daemon `obs-watchdog` thread enforces the 250 ms second-signal bound during blocking
 syscalls; **D23** resolver precedence: entry snapshot over five artifacts with steps 1→5, verification-failure
 precedence (`conflict → T5`, else T3) and a closed receipt-outcome enum;
-**D24** `load_run` is a genuine two-pass incremental reader — pass 1 streams ≤ 64 KiB chunks with incremental sha256
-and byte-level line facts (Step-1 error precedence preserved: rec digest → ev digest → rec structure → rec parse →
-ev structure → ev parse → count), pass 2 parses with `f.readline(MAX_LINE + 2)` and the normative per-line release
-order (decode → release → parse → release → encode → release → `b64decode(bytes)`); a whole-file read or a held
-bytes/text/parsed triple is banned from verification (V15-02);
+**D24** `load_run` is a bounded-pass incremental reader in FIVE stages (v1.7 restates this for V16-05 — v1.6's
+wording claimed "Step-1 error precedence preserved" while its interleaved pass violated it): structure scan of ALL
+lines (incremental sha256 + line facts + first structure error deferred, per-line dicts discarded), digest checks,
+records structure-all-lines → records decode-all-lines (`f.readline(MAX_LINE + 2)`, normative release order
+decode → release → parse → release → encode → release → `b64decode(bytes)`, decode re-hashes for TOCTOU), then events
+the same, then count — Step-1's exact precedence (rec digest → ev digest → rec truncation → rec structure → rec decode
+→ ev … → count) and its exact JSON dialect (`_no_duplicate_keys`, `parse_constant` rejection, normalization net); a
+whole-file read or a held bytes/text/parsed triple is banned from verification (V15-02/V16-05);
 **D25** the seal's writer is metadata-only (`record_meta_json`, 11 keys, never touches `r.body`) with byte-equal
 `{`-head / `",`-tail framing (probe-verified against `_lines([record_to_json…])` incl. a 4 MiB body) and the JSONL
 terminator; `record_to_json` is banned from the writer (V15-01);
 **D26** `wrapper_count` comes only from the out-of-band `egress_count` print or `receipt.wrapper_count`;
 disagreement → T3, neither → check (g) fails → T5/T3, structural derivation banned (V15-03);
 **D27** `pin` is mandatory to verify or recover a final; `receipt_pin` is never a manifest pin; `pin` absent + final
-present → T5/T3 before any load; recovery (CP2+CP3) only with the independently supplied pin (V15-04);
+present → T5/T3 before any load; no post-CP1 recovery exists at all — T4 is terminal (V15-04, V16-03/D33);
 **D28** quarantine publication failure is strictly fatal (`PublishIdentityMismatch`, cause chained, never `except:
 pass`); the runner dies before any receipt exists and the residual impostor can only resolve T3/T5 (V15-05);
 **D29** filesystem trust boundary: different-UID writers are kernel-prevented (owner-only mode + `O_NOFOLLOW` +
 fstat/stat identity re-proof), same-UID writers are inside the trust boundary and only detected (step-5 inode proof,
 CP1b, pins → T3/T5) — stated, never claimed prevented (V15-06);
 **D30** `TRANSIENT_BUDGET_BYTES = 12,582,912` is OFFICIAL against the §6.5 measured three-phase proofs; any change to
-`MAX_BODY_BYTES`, the writer or the reader re-derives all three phases before the budget may change (V15-07).
+`MAX_BODY_BYTES`, the writer or the reader re-derives all three phases before the budget may change (V15-07);
+**D31** all three out-of-band pins are MANDATORY: `journal_pin` for T0, `receipt_pin` for T1/T6, `pin` for any final
+verification/recovery — pin absent or byte-SHA-256 mismatch → T3; self-digests (`journal_digest`, `receipt_digest`)
+are re-checked as necessary but never sufficient for an authoritative state (V16-01);
+**D32** every quarantine attempt inside `observe()` runs through `try_quarantine`, which never raises
+(`PublishConflict` → CONFLICT; `PublishUnavailable`/`PublishIdentityMismatch`/`OSError` → QUARANTINE-FAILED → T5);
+seal-time impostor quarantine remains strictly fatal (D28) (V16-02);
+**D33** T4 is a TERMINAL incomplete state requiring operator review: no code path may write, fsync or publish a
+receipt after CP1 (the complete draft lived only in memory — no CP1-durable draft exists), K10–K12 resolve T4 only,
+and `observe()` is idempotent on T4 (V16-03);
+**D34** every §6.5 phase bound and the `HTTP_HEADROOM` term are substantiated by the Appendix A protocol — fixed
+worst-case inputs, `tracemalloc` over the exact normative sequences, raw values recorded in the document, native
+headroom measured via glibc `mallinfo2` — and any budget change re-runs it (V16-04);
+**D35** `load_run` reproduces Step-1's error precedence and JSON dialect exactly (five bounded stages; all-lines
+structure before any body decode), with lines longer than `MAX_LINE` as the SOLE documented acceptance divergence —
+impossible under the frozen schema and mandated by the Domain B budget (V16-05);
+**D36** `observe()` mirrors audit check (g) explicitly before `audit_run` (supplied, integer-not-bool, `==
+len(records)`) and only ever passes an `egress_count`/authenticated-`receipt.wrapper_count` value; receipt
+authentication (R3) precedes every use of a receipt field (V16-06);
+**D37** receipt publication binds the temp inode: `st_tmp = os.fstat(tmp_fd)` on the creation descriptor before
+close, passed as `expect` into `publish_file()` — never `expect = None` for a file target; substitution → CP3 fails
+→ T4 (or T3 if foreign bytes stand at the final name) — a substituted receipt never authenticates (V16-07).
 
 ## 12. Normative constants (single table; source of truth `tools/obs/params.py` + runner additions)
 
@@ -1275,8 +1453,8 @@ CP1b, pins → T3/T5) — stated, never claimed prevented (V15-06);
 | `MAX_BODY_BYTES` / `SESSION_BODY_BUDGET_BYTES` | 4,194,304 B / 52,428,800 B | transport.py / runner, §6 |
 | `MAX_LINE` | 5,592,920 B (4 × ⌈MAX_BODY_BYTES / 3⌉ + 512) | runstore `_jsonl` framing; §5.1.2/§6.5 phase 3 (V15-02) |
 | `CHUNK_BYTES` | 65,536 B | §6.4 |
-| `HTTP_HEADROOM` / `SEAL_SLICE_BYTES` | 262,144 B / 49,152 B (3-aligned) | §6.5 phase 1 / §5.1.1 (V14-03) |
-| `TRANSIENT_BUDGET_BYTES` | 12,582,912 B (12 MiB) | §6.1/§6.5 measured proofs (V13-04; re-derived V14-03, D19; OFFICIAL V15-07, D30) |
+| `HTTP_HEADROOM` / `SEAL_SLICE_BYTES` | 262,144 B / 49,152 B (3-aligned) | §6.5 phase 1 / §5.1.1 (V14-03); native-headroom substantiation Appendix A.5 (V16-04) |
+| `TRANSIENT_BUDGET_BYTES` | 12,582,912 B (12 MiB) | §6.1/§6.5 measured proofs (V13-04; re-derived V14-03, D19; OFFICIAL V15-07, D30; reproducible via Appendix A protocol, V16-04/D34) |
 | `HARNESS_FIXED_BUDGET_BYTES` / `RUN_RECORD_LIMIT` | 2,097,152 B / 2,000 | §6.6 |
 | `MAX_DECOMPRESSED_BYTES` / `MAX_EXPANSION_RATIO` | 52,428,800 B / 1000:1 | §6.7 |
 | `DELTA` / `W_MAX_NS` / `RETENTION_NS` / `FALLBACK_NS` | 1/10000 (100 ppm); 250 ms; 600 s; 60 s | params.py, protocol §5.2/5.3 |
@@ -1289,7 +1467,99 @@ CP1b, pins → T3/T5) — stated, never claimed prevented (V15-06);
 **Runner additions (normative here; Step-2 code).** `TRANSIENT_BUDGET_BYTES`, `MAX_LINE`, `SEAL_SLICE_BYTES`,
 `HTTP_HEADROOM`, `CHUNK_BYTES` and the §5.1.1/§5.1.2 contracts are normative in this document; `params.py` remains
 the source of truth for the OBS parameters above. Any new runner constant joins this table in the next reviewed
-revision — the budget may change only with a re-derived §6.5 (D13/D19/D30).
+revision — the budget may change only with a re-derived §6.5 under the Appendix A protocol (D13/D19/D30/D34).
 
-End of v1.6. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
+## 13. Appendix A — Memory-accounting probe methodology, raw measurements and native headroom (V16-04; informative)
+
+This appendix is the reproducibility record for every §6.5 number: how it was measured, on what, with what raw values —
+the evidence V16-04 found missing from the document itself. All values below were re-measured for this revision (v1.7)
+on the verification environment. The probe scripts are review artifacts, not repository files (§0 anchor).
+
+### A.1 Environment and measurement protocol
+
+* **Interpreter:** CPython 3.12.3 — the target interpreter of `tools/obs/` (OpenSSL 3.0.13), Linux x86-64, glibc with
+  `mallinfo2`; stdlib only (`json`, `base64`, `hashlib`, `tracemalloc`, `ssl`, `socket`, `ctypes`). No JIT, no
+  third-party packages.
+* **Measurement method:** `tracemalloc.start()` → execute the EXACT normative sequence (the pseudocode of §5.1.1 /
+  §5.1.2 / §6.4–§6.5 transcribed line-for-line, same order, same `del` points) → `tracemalloc.get_traced_memory()` →
+  record the PEAK → `stop()`. `tracemalloc` traces Python-object allocations only; native buffers (SSL, socket,
+  glibc arenas) are accounted separately in A.5.
+* **Inputs:** worst-case BY CONSTRUCTION, fully deterministic — no randomness, no seeds: every probe builds its input
+  inline from the §12 constants (`MAX_BODY_BYTES = 4,194,304`, `MAX_LINE = 5,592,920`,
+  `SESSION_BODY_BUDGET_BYTES = 52,428,800`, …) using Step-1's own `_canonical` (sort_keys, separators `(",",":")`),
+  so byte lengths are exact (the worst-case record line INCLUDING its JSONL terminator measures 5,592,919 B ≤ `MAX_LINE = 5,592,920` — probe7's exact input).
+* **Pass criterion:** each phase peak ≤ its §6.5 bound (8,781,824 / 151,552 / 11,202,224 B), the three sequential
+  phases never summed, max ≤ `TRANSIENT_BUDGET_BYTES = 12,582,912`. A probe whose measured value EXCEEDS its bound
+  documents a BANNED pattern (A.4), enforced by mutation tests in the §11 gates.
+
+### A.2 Probe inventory (v1.7)
+
+| Probe | What it measures | Normative target |
+|---|---|---|
+| probe1 | phase-1 request conversion (worst-case record incl. base64 of a 4 MiB body) | §6.5 phase 1 |
+| probe2 | phase-2 seal fragments (meta-fragment, digest-line, `b64encode`-slice; superseded for full-line values by probe3/4) | §6.5 phase 2 |
+| probe3 | phase-3 decode pass, normative `del` release order, `MAX_LINE` line | §5.1.2 `decode_pass` |
+| probe4 | phase-3 decode pass, fresh-buffer variant (same release order) | §5.1.2 `decode_pass` |
+| probe5 | byte-equality: §5.1.1 writer vs `_lines([record_to_json…])` (1,020 records, 5,894,085 B) | G-V14-02 |
+| probe6 | native headroom over a real local-TLS HTTP request (`mallinfo2` + `tracemalloc`) | `HTTP_HEADROOM`, A.5 |
+| probe7 | phase-3 STRUCTURE pass peak (parse + key-set check + discard; no body decode) | §5.1.2 `scan_structure` |
+
+### A.3 Raw measurements (CPython 3.12.3, this revision)
+
+| Case | Bound (B) | Measured peak (B) | Verdict |
+|---|---|---|---|
+| phase 1 — request conversion, Python-level (probe1) | 8,781,824 | 8,462,496 | PASS (slack 319,328) |
+| phase 1 — + named `HTTP_HEADROOM` (262,144; §6.5 arithmetic) | 8,781,824 | 8,724,640 | PASS (slack 57,184) |
+| phase 1 — + RAW native arena peak (probe6, A.5) | 8,781,824 | 8,739,616 | PASS (slack 42,208) |
+| phase 2 — streaming seal, normative `del` order (probe3 path) | 151,552 | 148,113 | PASS (slack 3,439) |
+| phase 3 — decode pass, `MAX_LINE` line (probe3) | 11,202,224 | 11,188,261 | PASS |
+| phase 3 — decode pass, fresh-buffer variant (probe4) | 11,202,224 | 11,188,197 | PASS |
+| phase 3 — structure pass, `MAX_LINE` line (probe7) | 11,202,224 | 11,188,197 | PASS |
+| phase 3 — §6.5 adjusted value (11,188,261 + 8,192 file buffer, §6.5 phase 3) | 11,202,224 | 11,196,453 | PASS |
+| phase 2 — WITHOUT the normative `del` (anti-pattern) | 151,552 | 5,656,645 | BANNED |
+| phase 2 — meta fragment / digest line / b64encode slice | 151,552 | 2,099 / 1,410 / 147,524 | PASS |
+| banned — `base64.b64decode(str)` (stdlib re-encodes the whole string) | 11,202,224 | 15,381,335 | BANNED |
+| banned — `json.loads(bytes)` with the buffer held | 11,202,224 | 16,781,149 | BANNED |
+| banned — Step-1's whole-file `_read` + `_jsonl` (50 MiB session) | 12,582,912 | ≥ 139,810,133 | BANNED |
+
+Reconciliation: budget = max(8,781,824; 151,552; 11,202,224) = 11,202,224 ≤ 12,582,912 B (margin 1,380,688 B,
+12.3 %); worst measured phase-3 peak 11,196,453 B ≤ bound. The structure pass (probe7) peaks below the decode pass
+because it releases the line and the dict in the same order without the base64 dance — it cannot exceed the decode
+bound that already includes both.
+
+### A.4 Banned patterns (normative summary; each is a plausible shortcut a mutation test kills)
+
+1. `base64.b64decode(str)` — the stdlib re-encodes the full string to bytes first (+4.2 MB over the phase-3 bound).
+2. Holding `line bytes + decoded text + parsed dict` simultaneously (e.g. `json.loads(raw_bytes)` with the buffer
+   referenced) — 16,781,149 B.
+3. Any whole-file read of records/events (`path.read_bytes()`, `raw.split(b"\n")`) — Step-1's ≥ 139.8 MB failure.
+4. Retaining parsed lines/records across a pass (suspended generators, an output list in the structure pass).
+5. Materializing a whole record line at seal (`record_to_json` / `r.body` / the `body_b64` string).
+
+### A.5 Native headroom — the `HTTP_HEADROOM = 262,144 B` term (probe6)
+
+`tracemalloc` sees only Python objects; SSL buffers, socket staging and glibc arena metadata are native. Probe6
+measures that native term directly against a real local-TLS request (ephemeral `http.server` + `ssl` loopback socket,
+first-ever cold request, sampled twice):
+
+* **native arena peak** — glibc `mallinfo2().uordblks` after minus before the request: **277,120 B** (identical in
+  both runs);
+* **Python peak** for the same request: **8,398,928 B** / **8,399,008 B** (two runs);
+* **RSS was rejected as the method:** page-level RSS masks the footprint (shared arenas, allocator reuse) and
+  understates it; `mallinfo2` reports the arena's own in-use bytes directly.
+
+Substantiation of the §6.5 phase-1 bound under BOTH headroom terms: named term → 8,462,496 + 262,144 = **8,724,640 ≤
+8,781,824** (slack 57,184); raw measured native → 8,462,496 + 277,120 = **8,739,616 ≤ 8,781,824** (slack 42,208).
+The bound therefore holds even when the named 262,144 B constant is replaced by the FULL raw native measurement —
+the ceiling does not depend on rounding the headroom term down. (A real combined measurement of the request itself:
+8,399,008 + 277,120 = 8,676,048 B, slack 105,776 B.)
+
+### A.6 Budget reconciliation (normative §6.5 restated with the measured evidence)
+
+The three phases run sequentially (single-flight; seal after all requests; verify after seal), so the budget is the
+max phase peak, never the sum: max ≤ 11,202,224 B ≤ `TRANSIENT_BUDGET_BYTES = 12,582,912 B`. Domain A is released
+before verify starts (single-copy rule, §5.4/§6.5), so phase-1 objects cannot coexist with phase-3 peaks. Any future
+change to `MAX_BODY_BYTES`, the writer or the reader re-runs this whole protocol (D34) before the budget may change.
+
+End of v1.7. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
 document, not an implementation choice.
