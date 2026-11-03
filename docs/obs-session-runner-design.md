@@ -1,16 +1,24 @@
-# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v1.5 (NORMATIVE)
+# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v1.6 (NORMATIVE)
 
 Status: design only. No live request is authorized by this document. Milestone 1 remains **BLOCKED** until the reviewer accepts
-the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.4**: it resolves all eight
-findings of the v1.4 review (V14-01…V14-08, §1) and re-states every affected section at implementation granularity; where v1.4
-and this document disagree, this document governs, and sections not restated here remain normative as written in v1.4.
+the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.5**: it resolves all seven
+findings of the v1.5 review (V15-01…V15-07, §1.0) and re-states every affected section at implementation granularity; where
+v1.5 and this document disagree, this document governs, and sections not restated here remain normative as written in v1.5.
 
-Anchor: repository `ReadyPlayer36/PublicCryptrade`, commit `dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f`
-(branch `impl-obs-harness-provenance`; lineage `impl-obs-step1` → `f337862e52dada43f425cee05154e18f212987aa` → this commit),
-reviewed against the actual Step-1 code in `tools/obs/` at that commit. V14-01 branch-sync result: `tools/obs/` is
-byte-identical between `f337862e…` and `dbfe53c…` (only this document changed between them, `git diff --stat` shows
-`docs/obs-session-runner-design.md` alone), so every v1.5 correction below is a design-text-versus-code discrepancy, not
-code drift; the document's one hard line-number citation (`audit.py`, lines 70–86) was re-verified at this commit.
+Anchor: repository `ReadyPlayer36/PublicCryptrade`, commit `673f9a2ace30a449267adace9af0f9d94865bda1`
+(branch `impl-obs-harness-provenance`; lineage `impl-obs-step1` → `f337862e52dada43f425cee05154e18f212987aa` →
+`dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f` → this commit), reviewed against the actual Step-1 code in `tools/obs/` at
+that commit. V15 branch-sync result: `tools/obs/` is byte-identical between `dbfe53c…` and `673f9a2…` (only this
+document changed between them; `git diff dbfe53c 673f9a2 -- tools/obs/` is empty), so every v1.6 correction below is a
+design-text-versus-code discrepancy, not code drift. Hard citations re-verified at this commit: `audit.py` lines 70–86
+(`abort_condition_seq`), 289–296 (check (g): `wrapper_count` must be a caller-supplied integer — the "independent
+egress counter") and 623–626 (`audit_run` reloads the run via `load_run` at 626); `runstore.py` 45 (`ManifestError(ValueError)`),
+172/217 (`_canonical`/`_lines`), 206–209 (`record_to_json` base64-encodes the body), 246–250/279–286 (`_read`/`_jsonl`
+whole-file load), 253–258 (`load_manifest` fails closed without a 64-hex pin), 291–328 (field validators), 348–357
+(`_record_from_json` decodes `body_b64` from a str), 370–388 (`load_run`), and `eventlog.py` 50–58 (digest-line format;
+`bytes(r.body)` is `r.body` — probe-verified identity, so bodies hash in place). Phase memory numbers in §6.5 are
+measurements over the exact normative sequences on CPython 3.12 (`tracemalloc`, worst-case inputs); the probe scripts
+are review artifacts, not repository files.
 Imperative key words MUST, MUST NOT, SHALL, SHOULD, SHOULD NOT are normative. "§n" refers to a section of this document;
 "protocol §n" refers to `docs/obs-protocol.md` v0.5. Code identifiers in `monospace` refer to real symbols in `tools/obs/`
 unless explicitly marked *runner* (Step-2 code that this document specifies).
@@ -24,10 +32,12 @@ vectors GV-1…GV-9, and everything already validated in Step-1 (`pacer.py`, `tr
 `estimator.py`, `audit.py`, `eventlog.py`, `runstore.py`, `specs.py`, `clock.py`, `params.py`).
 
 0.2 The runner SHALL use only these validated building blocks with their existing semantics; this document never permits a
-relaxed check in them. Where Step 2 extends a Step-1 entry point (**three** places exist: the dynamic-target admission
-parameter of `execute`, §3.1, the chunked body-read path, §6.4, and — added by v1.5 for V14-01/V14-02 — the evidence writer
-`write_run`, §5.1/§5.1.1), the extension MUST preserve every observable outcome of the current implementation (record shapes,
-error strings, counters, and for `write_run` the exact bytes it writes) and land with the regression tests named in §11.
+relaxed check in them. Where Step 2 extends a Step-1 entry point (**four** places exist: the dynamic-target admission
+parameter of `execute`, §3.1, the chunked body-read path, §6.4, the evidence writer `write_run`, §5.1/§5.1.1 (added by
+v1.5 for V14-01/V14-02), and — added by v1.6 for V15-02 — the evidence reader `load_run`, §5.1.2), the extension MUST
+preserve every observable outcome of the current implementation (record shapes, error strings, error precedence,
+counters, and for `write_run` the exact bytes it writes / for `load_run` the exact accept-reject set and `LoadedRun`
+contents) and land with the regression tests named in §11.
 
 0.3 Persisted artifacts (all names are exact):
 
@@ -39,6 +49,7 @@ error strings, counters, and for `write_run` the exact bytes it writes) and land
 | `manifest.json` SHA-256 pin | (bare hex) | emitted by `write_run` return value | before CP1, out-of-band (§10.1) |
 | `<run_id>.receipt.json` SHA-256 | (bare hex) | emitted by `ReceiptPublisher` after CP3 | out-of-band (§10.1, V14-05) |
 | `<run_id>.refusal.json` SHA-256 | (bare hex) | emitted by `RefusalWriter` after step 5 | out-of-band (§10.1, V14-05) |
+| `transport.sent` decimal count | (bare decimal) | emitted by the runner beside the manifest pin, before CP1 | out-of-band (§10.1, V15-03) |
 
 0.4 Directory layout under `RUN_ROOT` (a single directory on the evidence filesystem; `RUN_ROOT` is a plan parameter):
 
@@ -60,9 +71,21 @@ checks (a)–(g) of `audit_pace`, `validate_missed_window_decision` + `validate_
 (single-flight, record append, `abort_seq` convention), `watchdog.py::run_with_deadline` (absolute deadline + 1 s
 cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pin), `params.py` (all numeric constants).
 
-## 1. Revision maps — V14 findings resolved in v1.5; V13 findings retained
+## 1. Revision maps — V15 findings resolved in v1.6; V14/V13 findings retained
 
-### 1.0 V14 findings resolved in v1.5
+### 1.0 V15 findings resolved in v1.6
+
+| ID | Finding (v1.5 review) | Where resolved | Resolution in one line |
+|---|---|---|---|
+| V15-01 | `stream_records` called `record_to_json(r)` twice per record (head and tail), each call base64-encoding the whole body (≤ 5,592,408 B string ×2 per record) — the seal's own framing destroyed even v1.4's declared 131,072 B phase-2 bound; it also mis-stated `body_b64`'s canonical position (it sorts FIRST, before `boundary_ms`, not between `boundary_ms` and `end_ns`), its head/tail byte joins produced invalid JSON, and the JSONL line terminator was never written | §5.1.1, §6.5 phase 2, D25, G-V15-01 | New metadata-only `record_meta_json(r)` (11 keys, never touches `r.body`; `record_to_json` banned from the writer), corrected `{`-head / `",`-tail framing proven byte-equal to `_lines([record_to_json…])` incl. a 4 MiB body (probe-verified), seal peak ≤ 151,552 B (measured 148,113 B) |
+| V15-02 | `load_run` (runstore.py:370–388) reads whole files (`_read` → `read_bytes`) and splits them in memory (`raw.split(b"\n")`) holding every parsed record — verification of a 50 MiB session peaks at ≥ 139.8 MB, not 12 MiB; §6.5 phase 3 assumed an incremental reader that no code specified | new §5.1.2, §6.5 phase 3, §0.2, D24, G-V15-02 | New §5.1.2 incremental `load_run`: 64 KiB chunk reads, digest pass first (Step-1 error precedence preserved), `MAX_LINE`-capped line reader, decode → release → parse → release → encode → release → `b64decode(bytes)` record decoding (measured 11,188,261 B ≤ 11,202,224 B); declared the fourth Step-2 extension point with a byte-exact contract |
+| V15-03 | §9.2 passed `wrapper_count = receipt.outer_count or structurally-derived`: `outer_count` is not a receipt key (`wrapper_count` is), `receipt` was referenced before it was parsed, and any value derived from the record stream makes audit check (g) tautological (audit.py:289–296 requires an INDEPENDENT counter, 623–624) | §9.2, §2.4, §10.1, §10.2, D26, G-V15-03 | `wrapper_count` sourced only from (1) the out-of-band `egress_count` print (`transport.sent`, flushed beside the manifest pin) or (2) `receipt.wrapper_count` (minted from `transport.sent` at CP3); disagreement → T3; absent both → check (g) fails → T5/T3; structural derivation explicitly banned |
+| V15-04 | `load_run(final, pinned = pin if pin else receipt_pin(final))` called `receipt_pin` (a hex string, not a function) as if it produced a manifest pin; without `pin`, Step-1's `load_manifest` fails closed anyway (runstore.py:255–258), so v1.5's "structural verification still runs" was unimplementable for finals | §9.2, §9.3 T3/T4 rows, §7.5, §10.1, D27, G-V15-04 | `pin` mandatory to verify or recover a final: `pin` absent + final present → T5/T3 (fail closed, never T4/T6, no CP2/CP3 recovery); recovery (CP2+CP3) only with the independently supplied manifest pin; `receipt_pin` never used as a manifest pin |
+| V15-05 | §5.2 step 5 swallowed a failed impostor quarantine (`except PublishUnavailable: pass`), leaving the impostor standing under `<run_id>` while the comment claimed T3; `PublishConflict` (EEXIST) escaped unhandled; `observe()`'s own quarantine calls could raise out of the resolver | §5.2 step 5, §5.2.5, §9.2, D28, G-V15-05 | Quarantine failure strictly fatal: no `pass`, every branch raises `PublishIdentityMismatch` with the cause chained, the runner dies before CP1b/CP2/CP3 so no receipt can exist; `observe()` catches quarantine failures and still returns exactly one T-row; classification-level guarantee with the residual stated |
+| V15-06 | §5.2.5 bounded the mode (`& 0o022 == 0`) but never stated the UID trust boundary: no owner check (`st_uid`), no explicit statement about same-UID processes (which can rename inside `RUN_ROOT` without taking the flock) | §5.2 step 1, §5.2.5, D29, G-V15-06 | Owner validation `st_pfd.st_uid == os.geteuid()` at lock time; explicit two-tier boundary: different-UID writers kernel-prevented (owner-only mode + `O_NOFOLLOW` + identity re-proof), same-UID writers detected-not-prevented (step-5 inode proof, CP1b, pins → quarantine/T3/T5), §10.1 residual restated |
+| V15-07 | The 12 MiB budget was asserted with formula-only phase peaks that did not match the code those paths would run (v1.5 phase 2 assumed 124,928 B while its own `record_to_json` calls cost ~11 MB; phase 3's `+1,024` term was 757 B short of measurement; no measured evidence) | §6.1, §6.5, §12, G-V13-04, G-V14-03, G-V15-07, D30 | Official `TRANSIENT_BUDGET_BYTES = 12,582,912` (D30) with per-instant measured proofs: peak₁ ≤ 8,781,824 (measured 8,724,640), peak₂ ≤ 151,552 (measured 148,113), peak₃ ≤ 11,202,224 (measured 11,188,261); budget = max ≤ 12,582,912, margin 1,380,688 B (12.3 %); banned patterns measured: `b64decode(str)` 15,381,335, `json.loads(bytes)` held 16,781,149, retained chunks 5,656,645 |
+
+### 1.1 V14 findings resolved in v1.5 (retained)
 
 | ID | Finding (v1.4 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
@@ -75,7 +98,7 @@ cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pi
 | V14-07 | TOCTOU: the step-3 `stat(staging)` → `renameat2` window was closed only by a post-hoc assert that aborted *after* publishing an impostor; no `RUN_ROOT` permission/symlink boundary; no content re-proof after rename | §5.2 steps 1/3/5, new §5.2.5, §7.5 CP1b, G-V14-07 | Absolute `RUN_ROOT`, `O_NOFOLLOW` open, owner-only mode check; pre-syscall re-stat; identity mismatch → quarantine the published name (never left standing); CP1b content re-verification against the pin before CP3; residual limits stated |
 | V14-08 | The 250 ms second-signal deferral had no enforcement mechanism: a main-thread handler cannot run while the main thread is inside a blocking synchronous syscall | §2.1, §7.4, §8.4 E3, D22, G-V14-08 | Named daemon watchdog thread `obs-watchdog` arms once from the handler and exits the process via `os._exit` at the bound; deferred exit point after syscall + bookkeeping; EINTR/PEP-475 and D-state limits stated |
 
-### 1.1 V13 findings resolved in v1.4 (retained)
+### 1.2 V13 findings resolved in v1.4 (retained)
 
 | ID | Finding (re-audit) | Where resolved | Resolution in one line |
 |---|---|---|---|
@@ -139,7 +162,9 @@ quarantined (`<run_id>.unverified/`), or entirely absent — never a partial run
 ```
 S ⟺ phase = COMMITTED
   ∧ receipt published AND parses AND its manifest_sha256 equals the pin of manifest.json
-  ∧ observe() re-verification passes (load_run with pin + audit_run with wrapper_count = transport.sent)
+  ∧ observe() re-verification passes (load_run with pin + audit_run with wrapper_count from an independent egress
+    source — live: transport.sent; observe(): egress_count, else receipt.wrapper_count; never structurally derived,
+    V15-03)
   ∧ PACE-5 (g) egress equality holds: jsonl_count = wrapper_count = manifest_count
   ∧ PLAN_TERMINAL: every planned boundary is recorded or carries a verified skip reason (boundary_skips /
     group-level MISSED-WINDOW evidence), and the event log ends with TIMELINE_END covering every record
@@ -425,34 +450,148 @@ function WRITE_RUN(pfd, staging_name, records, events) -> str:   # normative; th
         raise ManifestError(...) from exc                        # → seal abort → quarantine (§5.5) → T5
     return sha256(manifest bytes)                                # the out-of-band pin (§10.1)
 
+record_meta_json(r):                     # V15-01: METADATA-ONLY serializer (*runner*; never reads r.body)
+    return {"seq": r.seq, "role": r.role, "path": r.path, "start_ns": r.start_ns, "end_ns": r.end_ns,
+            "status": r.status, "error": r.error, "group_name": r.group_name, "group_kind": r.group_kind,
+            "boundary_ms": r.boundary_ms, "headers": [list(h) for h in r.headers]}
+        # exactly record_to_json(r) minus the "body_b64" entry — same key set, same value shapes — so canonical(lo)
+        # and canonical(hi) below reconstruct _canonical(record_to_json(r)) byte for byte. record_to_json(r) itself
+        # is BANNED here: it base64-encodes r.body (runstore.py:206–209) — a <= 5,592,408 B string, twice per record.
+
 stream_records(fd, records):                # ONE record in flight; never a whole line, never the whole file
     file_sha = sha256(); rec_sha = sha256()
     for r in records:
-        rec_sha.update(records_digest_line(r))                   # eventlog.py:54 line format; body hashed in place (no copy)
-        head_part = canonical({k: v for k, v in record_to_json(r).items() if k < "body_b64"})[:-1]   # drop '}'
-        tail_part = canonical({k: v for k, v in record_to_json(r).items() if k > "body_b64"})[1:]     # drop '{'
-        piece = head_part + b',"body_b64":"'
+        rec_sha.update(records_digest_line(r))    # eventlog.py:54–56 line format; bytes(r.body) is r.body (identity,
+                                                  # probe-verified) — the body is hashed IN PLACE, never copied
+        meta = record_meta_json(r)                # <= ~2.1 KiB canonical; V15-01: no body content is read here
+        lo = {k: v for k, v in meta.items() if k < "body_b64"}   # EMPTY: under _RECORD_KEYS "body_b64" sorts FIRST
+        hi = {k: v for k, v in meta.items() if k > "body_b64"}   # the other 11 keys, canonical order
+        head = canonical(lo)[:-1].encode() + (b"," if lo else b"")   # drop '}'; the comma exists ONLY when lo does
+        piece = head + b'"body_b64":"'          # v1.5 wrote {,"body_b64":" for empty lo — invalid JSON (V15-01)
         write_all(fd, piece); file_sha.update(piece)             # write_all = loop over os.write for partial writes
         for off in range(0, len(r.body), 49_152):                # 49_152 = 3 × 16_384: base64-aligned, no mid-line padding
-            chunk = base64.b64encode(r.body[off : off + 49_152]) # ≤ 65_536 B transient — the ONLY body-sized allocation
+            chunk = base64.b64encode(r.body[off : off + 49_152]) # slice 49,152 + chunk <= 65,536 + encoder scratch 32,768
             write_all(fd, chunk); file_sha.update(chunk)
-        piece = b'","' + tail_part
-        write_all(fd, piece); file_sha.update(piece)
+            del chunk                         # release BEFORE the next slice: retaining chunks peaks at 5,656,645 B
+        tail = (b'"' + b"," + canonical(hi)[1:].encode()) if hi else b'"' + b"}"   # close value + ',' + tail keys (drop '{')
+        tail += b"\n"                        # JSONL terminator (v1.5 never wrote it — byte equality requires it)
+        write_all(fd, tail); file_sha.update(tail)
     return file_sha.hexdigest(), rec_sha.hexdigest()
 ```
 
-All normative: (i) **byte equality** — the output equals `_lines([record_to_json(r) for r in records])` record for record
-(the framing above reconstructs `_canonical`'s sort_keys order with `body_b64` in its sorted position between
-`boundary_ms` and `end_ns`), so pins, digests and Step-1's serializer stay interchangeable — G-V14-02 pins it on
-randomized records incl. a 4 MiB body, unicode and escapes; (ii) **one record in flight** — the largest allocation is one
-48 KiB slice plus its ≤ 64 KiB base64 chunk (seal peak ≤ 131,072 B, §6.5 phase 2); (iii) **fsync order F1→F4** — a crash
-at any point leaves exactly the K2–K7 state; (iv) `records_digest` and `records_file_sha256` are computed from the same
-bytes written, never from a re-serialization; (v) `mkdir` of staging remains the runner's exclusive-create step
-(`os.mkdir(name, dir_fd=pfd)`, `EEXIST` → K1 quarantine of the stale tree, never a merge) — `WRITE_RUN` never mkdirs.
+All normative: (i) **byte equality** — the output equals `_lines([record_to_json(r) for r in records])` record for
+record (the framing reconstructs `_canonical`'s sort_keys order exactly; under the frozen `_RECORD_KEYS`, `body_b64`
+sorts FIRST — "body_b64" < "boundary_ms" — so `lo` is empty and the head is exactly `{`; v1.5's claim that `body_b64`
+sat between `boundary_ms` and `end_ns`, its `{"`/`","` joins, and its missing line terminator were all wrong and are
+replaced above), so pins, digests and Step-1's serializer stay interchangeable — G-V14-02/G-V15-01 pin it on
+randomized records incl. a 4 MiB body, unicode and escapes (probe-verified byte-equality, file sha and
+`records_digest` all exact); (ii) **one record in flight, metadata only** — `record_to_json(r)` is NEVER called in
+this path (it would allocate the full ≤ 5,592,408 B base64 string twice per record); the largest allocations are one
+48 KiB slice + one ≤ 64 KiB base64 chunk + the encoder's 32,768 B working buffer + ≤ 4,096 B of digest line, head/tail
+fragments and framing (seal peak ≤ 151,552 B, measured 148,113 B, §6.5 phase 2), and `chunk` is released before the
+next slice; (iii) **fsync order F1→F4** — a crash at any point leaves exactly the K2–K7 state; (iv) `records_digest`
+and `records_file_sha256` are computed from the same bytes written, never from a re-serialization; (v) `mkdir` of
+staging remains the runner's exclusive-create step (`os.mkdir(name, dir_fd=pfd)`, `EEXIST` → K1 quarantine of the stale
+tree, never a merge) — `WRITE_RUN` never mkdirs.
 Failure mapping: a write `OSError` → K2/K3/K4; manifest write → K5; any `fsync` failure → K6; crash after F4 → K7
 (complete durable staging, no final → quarantine, D14). The Step-1 path-based `write_run(run_dir, …)` wrapper keeps its
 old behavior (mkdir-if-absent + these same bytes) so Step-1's regression tests stay green; live sealing calls the
 fd-based entry with the locked `pfd`.
+
+5.1.2 **Normative reader — incremental, bounded, single-copy (V15-02; the fourth Step-2 extension point, §0.2;
+D24).** The Step-1 `load_run` (runstore.py:370–388) reads each file whole (`_read` → `path.read_bytes()`, 246–250),
+splits it in memory (`raw.split(b"\n")`, `_jsonl` 279–286), parses every line and holds all records: for a 50 MiB
+session that peaks at ≥ 139.8 MB of transient (≥ 2 × 4/3 × `SESSION_BODY_BUDGET_BYTES` of jsonl bytes plus every parsed
+`body_b64` string) — an order of magnitude above the Domain B budget — and it cannot support §6.5 phase 3's 12 MiB
+verification bound. Step 2 REPLACES `load_run` (decision **D24**: same name, same keyword-only signature, same
+`LoadedRun`, same `ManifestError` messages, same error precedence, same accept-reject set — the tests of §11 pin the
+contract) with the reader below. `audit_run` (audit.py:626) calls `load_run` and inherits it unchanged;
+`load_manifest` (runstore.py:253) is unchanged — its manifest is ≤ 1 KiB by the 8-key schema (bounded full read) and
+it already fails closed without a well-formed 64-hex pin (255–258, V15-04). Step-1's error precedence
+(runstore.py:373–380) is: records digest → events digest → records structure → records parse → events structure →
+events parse → count; the two passes below reproduce it exactly.
+
+```
+function LOAD_RUN(run_dir, *, pinned_manifest_sha256) -> LoadedRun:   # normative; REPLACES Step-1 load_run (D24)
+    manifest = load_manifest(run_dir/manifest.json, pinned_sha256 = pinned_manifest_sha256)   # unchanged; V15-04
+    rec_scan = scan_stream(records.jsonl)             # PASS 1: incremental hash + byte-level line facts, no parsing
+    ev_scan  = scan_stream(events.jsonl)
+    if rec_scan.hex != manifest.records_file_sha256:
+        raise ManifestError("records.jsonl does not match the manifest digest (altered or substituted)")     # verbatim
+    if ev_scan.hex != manifest.events_file_sha256:
+        raise ManifestError("events.jsonl does not match the manifest digest (altered or substituted log)")  # verbatim
+    check_lines(rec_scan, "records.jsonl")            # truncation (verbatim) / line > MAX_LINE (new, fail closed) —
+    records = parse_records(records.jsonl, rec_scan.hex)   # BEFORE any parse, exactly as Step-1 checks first
+    check_lines(ev_scan, "events.jsonl")
+    events  = parse_events(events.jsonl, ev_scan.hex)
+    if len(records) != manifest.record_count or len(events) != manifest.event_count:
+        raise ManifestError("record or event count does not match the manifest")                                 # verbatim
+    return LoadedRun(tuple(records), tuple(events), manifest)
+
+scan_stream(path) -> Scan:                         # *runner*: one 64 KiB pass, hashing + structure facts only
+    h = sha256(); n_lines = 0; since_nl = 0; over_cap = None; last = b""
+    for chunk in read_chunks(path, CHUNK_BYTES):    # <= 65,536 B transient; the file is NEVER buffered (V15-02)
+        h.update(chunk)                            # incremental hashing: O(1) memory for any file size
+        line_no = n_lines + 1                      # the line currently open (1-based)
+        nl = chunk.rfind(b"\n")
+        since_nl = len(chunk) - nl - 1 if nl >= 0 else since_nl + len(chunk)   # bytes since the last terminator
+        n_lines += chunk.count(b"\n")
+        if since_nl > MAX_LINE and over_cap is None: over_cap = line_no       # first breach only, for the message
+        last = chunk[-1:]
+    return Scan(h.hexdigest(), truncated = bool(n_lines or since_nl) and last != b"\n", over_cap = over_cap)
+
+check_lines(scan, what):                           # raised AFTER both digests, BEFORE that file is parsed
+    if scan.truncated:     raise ManifestError(f"{what} is truncated (no final newline)")                  # verbatim
+    if scan.over_cap:      raise ManifestError(f"{what} line {scan.over_cap} exceeds the maximum line length")
+
+parse_records(path, expected_hex) -> list:         # *runner*: pass 2 — SOLE owner of every line (V15-02)
+    out = []; h = sha256(); n = 0
+    with open(path, "rb") as f:                    # OSError → verbatim "{what} is missing or unreadable: …" (246–250)
+        while True:
+            raw = f.readline(MAX_LINE + 2)         # CAP by API: returns <= MAX_LINE+2 bytes — bounded by construction
+            if raw == b"": break
+            n += 1; h.update(raw)                  # re-hash while parsing: closes the two-pass TOCTOU window
+            if len(raw) - (1 if raw.endswith(b"\n") else 0) > MAX_LINE:
+                raise ManifestError(f"records.jsonl line {n} exceeds the maximum line length")   # mid-read swap only
+            if not raw.endswith(b"\n"):
+                raise ManifestError("records.jsonl is truncated (no final newline)")             # mid-read swap only
+            tag = f"records.jsonl line {n}"
+            try:
+                text = raw.decode("utf-8"); del raw # §6.5 phase 3 release order — `raw` has NO other reference:
+                obj = json.loads(text); del text     # no generator, no second owner (a generator would keep the line
+            except (ValueError, UnicodeDecodeError) as exc:                                      # alive across parse)
+                raise ManifestError(f"{tag} is not valid JSON: {exc}") from exc                  # verbatim (194–199)
+            if not isinstance(obj, dict) or set(obj) != _RECORD_KEYS:
+                raise ManifestError(f"{tag}: unexpected or missing keys")                        # verbatim (284)
+            try:
+                value = obj.pop("body_b64")          # removes the <= 5,592,408 B str from the dict FIRST
+                if isinstance(value, str):
+                    raw2 = value.encode("ascii"); del value   # ASCII copy, THEN release the str (encode peak 11.18 MB)
+                else:
+                    raw2 = _req_str(value, f"{tag} body_b64") # always raises: verbatim message (304–307)
+                body = base64.b64decode(raw2, validate=True); del raw2   # BYTES in — b64decode(str) would peak at
+            except ValueError as exc:                # 15,381,335 B (banned, §6.5); ManifestError IS a ValueError (45)
+                raise ManifestError(f"{tag}: invalid body: {exc}") from exc # so _req_str errors re-wrap exactly as 352–353
+            out.append(assemble_record(obj, body, tag))   # field half of _record_from_json UNCHANGED (354–357)
+    if h.hexdigest() != expected_hex:
+        raise ManifestError("records.jsonl does not match the manifest digest (altered or substituted)")   # TOCTOU
+    return out
+
+assemble_record(obj, body, tag) -> RequestRecord:   # *runner* = the unchanged field half of _record_from_json:
+    ...                                             # _req_range/_req_str/_opt/_req_headers over the remaining 11 keys,
+                                                    # `body` passed through, argument order and messages of 354–357
+
+parse_events(path, expected_hex) -> list:           # same discipline; events <= ~800 B, no body_b64, no release dance:
+    ...                                             # readline loop + re-hash + _EVENT_KEYS check (verbatim 284) +
+                                                    # _event_from_json(obj, n) UNCHANGED (362+), then the same TOCTOU hash
+```
+
+Why a function and not a line generator: a suspended generator keeps its last yielded line alive while the caller
+parses it — that third reference (`line bytes + text + parsed body_b64` = ≈16.8 MB) blows the phase-3 bound. The
+reader above is the line's sole owner at every instant, which is what makes the §6.5 release order hold. Valid records
+fit `MAX_LINE` by construction (body ≤ `MAX_BODY_BYTES`, plan-constrained path/headers, bounded incident `error`
+strings); any longer line — only producible by foreign or corrupt content — fails closed before parsing. The file is
+read twice (hash pass + parse pass): offline verification, ≤ ~140 MB of I/O for a full session, O(1) memory either way.
 
 5.2 **Publication — exact `renameat2(RENAME_NOREPLACE)` contract (V13-02, V13-03).** This sequence publishes either a run
 directory, the quarantine directory, or the receipt file; the normative unit is `publish_dir()`/`publish_file()`. On Linux,
@@ -464,11 +603,12 @@ function PUBLISH_COMPONENT(pfd, staging_name, final_name, expect: Stat | None) -
     # 0. Preconditions (both names are SINGLE components of the same locked parent):
     for name in (staging_name, final_name):
         require name not in ("", ".", "..") and "/" not in name and "\0" not in name      # component validation
-    # 1. Identity of the locked descriptor vs the path (parent must not have been swapped) + boundary check (V14-07):
+    # 1. Identity of the locked descriptor vs the path (parent must not have been swapped) + boundary checks:
     st_pfd  = os.fstat(pfd)                                       # the descriptor we locked (§5.2.1)
     st_path = os.stat(RUN_ROOT, follow_symlinks=True)             # absolute path only (§5.2.5); what the path names now
     require (st_pfd.st_dev, st_pfd.st_ino) == (st_path.st_dev, st_path.st_ino)            # else abort, no publication
     require (st_pfd.st_mode & 0o022) == 0                         # RUN_ROOT not group/other-writable (§5.2.5 boundary)
+    require st_pfd.st_uid == os.geteuid()                         # RUN_ROOT owned by THIS uid (V15-06, §5.2.5)
     # 2. Destination must not exist (advisory pre-check; renameat2 is the enforcement):
     try:      os.stat(final_name, dir_fd = pfd, follow_symlinks = False); exists = True
     except FileNotFoundError: exists = False
@@ -491,14 +631,17 @@ function PUBLISH_COMPONENT(pfd, staging_name, final_name, expect: Stat | None) -
         if err == errno.EEXIST: raise PublishConflict(final_name)   # raced despite §5.2 step 2 → quarantine
         raise PublishUnavailable(f"renameat2 failed: errno {err}")  # ENOSYS/EINVAL/EOPNOTSUPP/EXDEV/EPERM: NO FALLBACK
     # 5. Post-rename identity: rename preserves (dev, ino) — proves WE moved OUR staging, not an impostor.
-    #    V14-07: a mismatch (source name swapped between step 3 and the syscall) is NOT a bare assert that aborts
-    #    AFTER an impostor has been published — the just-published final is immediately quarantined under the same
-    #    lock, so it never remains standing under the final name (see §5.2.5):
+    #    V14-07/V15-05: a mismatch (source name swapped between step 3 and the syscall) means the directory now under
+    #    final_name is an IMPPOSTOR. Its quarantine is ATTEMPTED UNCONDITIONALLY and every failure is STRICTLY FATAL:
+    #    no `pass`, no swallowed branch, no fall-through — each path raises the single fatal type with its cause
+    #    chained (consequences below §5.2.4; classification limits §5.2.5):
     st_dst = os.stat(final_name, dir_fd = pfd, follow_symlinks = False)
     if not stat.S_ISDIR(st_dst.st_mode) or (st_dst.st_dev, st_dst.st_ino) != (st_src.st_dev, st_src.st_ino):
-        try:      publish_quarantine_of(final_name)              # renameat2(NOREPLACE) final → <run_id>.unverified (§5.5)
-        except PublishUnavailable: pass                          # still fatal below; observe() resolves T3, never silent
-        raise PublishIdentityMismatch(final_name)                # stop, report; state resolves T5 (or T3 at observe)
+        try:
+            publish_quarantine_of(final_name)          # renameat2(NOREPLACE) final → <run_id>.unverified (§5.5)
+        except BaseException as q_exc:                 # PublishConflict (EEXIST), PublishUnavailable, OSError, …
+            raise PublishIdentityMismatch(final_name) from q_exc # cause CHAINED; never `pass`; the runner dies HERE
+        raise PublishIdentityMismatch(final_name)      # mismatch fatal even when the quarantine succeeded
     return st_dst
 ```
 
@@ -529,26 +672,61 @@ no-clobber guarantee.
 name (ignored by the resolver → T4); after the syscall the receipt is complete (→ T6 path). Torn receipts under the final
 name are impossible by construction.
 
-5.2.5 **Filesystem threat model and TOCTOU closure (V14-07).** Boundary: `RUN_ROOT` SHALL be an **absolute** path on the
-evidence filesystem, opened with `O_NOFOLLOW`, and not group/other-writable (`st_mode & 0o022 == 0`, checked against
-`fstat(pfd)` at lock time — otherwise `PublishUnavailable`). Cooperating publishers are serialized by the flock; a
-*non-cooperating* writer with access to `RUN_ROOT` is the threat this section closes:
+5.2.5 **Filesystem threat model and TOCTOU closure (V14-07; explicit UID trust boundary, V15-06).** Boundary:
+`RUN_ROOT` SHALL be an **absolute** path on the evidence filesystem, opened with `O_NOFOLLOW`, not group/other-writable
+(`st_mode & 0o022 == 0`) and **owned by the runner's effective UID** (`st_uid == os.geteuid()`); both properties are
+checked against `fstat(pfd)` at lock time (§5.2 step 1) — either failure → `PublishUnavailable`, before any artifact
+exists.
+
+**Same-UID vs different-UID (V15-06, the trust boundary stated explicitly).** *Different-UID processes are PREVENTED,
+kernel-enforced:* owner-only mode (no group/other write bit) + `O_NOFOLLOW` + the fstat/stat identity re-proof mean a
+process running as another UID cannot create, rename or replace any name inside `RUN_ROOT`, cannot substitute a symlink
+for a path component, and cannot make the locked descriptor disagree with the path unnoticed. *Same-UID processes are
+INSIDE the trust boundary for prevention — DETECTED, never prevented:* any process running as the runner's effective UID
+owns `RUN_ROOT`'s write bit and can therefore create, rename (including swapping `.<run_id>.staging` for a foreign
+directory) and unlink names **without ever taking the flock** — `flock` serializes cooperating lock-holders only, and is
+explicitly not a security boundary. The design does not claim to stop such a writer (it cannot, without privileges the
+runner does not have); it claims that every resulting inconsistency is observable and terminal: step 5's inode proof
+catches the rename swap (quarantine + strictly fatal, §5.2 step 5 / V15-05), CP1b re-verifies content against the
+out-of-band pin before any receipt exists (§7.5), and every later `observe()` re-verifies the artifacts against the
+manifest/receipt/journal pins (→ T3/T5, never silent success). The residual for a same-UID adversary — control of both
+`RUN_ROOT` and the pin store — is `runstore`'s authentication limit of §10.1 applied to the filesystem surface, stated
+under *After CP1b* below.
+
+Cooperating publishers are serialized by the flock; a *non-cooperating* writer with access to `RUN_ROOT` is the threat
+the following items close:
 
 * **Source-identity race (stat → renameat2).** The step-3 `stat(staging_name)` window can never be fully eliminated
   (`renameat2` takes names, not descriptors), so it is closed by detection *with consequence*: the step-5 post-rename
   inode proof compares the published inode against the pre-syscall stat, and on mismatch the runner immediately
-  quarantines the published name (§5.2 step 5) — an impostor is never left standing under `<run_id>`, and the run
-  resolves T5 (or T3 if quarantine itself is impossible), never silent success. Step 3 re-stats immediately before the
-  syscall to shrink the window; the re-stat narrows, the proof closes.
+  quarantines the published name (§5.2 step 5) — the impostor is moved out from under `<run_id>`, or, if the filesystem
+  refuses that rename, the failure is strictly fatal (V15-05) and the standing impostor can only ever resolve T5/T3,
+  never silent success. Step 3 re-stats immediately before the syscall to shrink the window; the re-stat narrows, the
+  proof closes.
 * **Content race (verify → rename).** Inode identity does not prove content: staging files may be modified between §5.4
-  self-verification and CP1. CP1b (§7.5) re-runs `load_run(final, pinned = pin)` while the lock is still held, before any
-  receipt exists; a swap in either window is caught by the pin and quarantined (→ T5).
+  self-verification and CP1. CP1b (§7.5) re-runs `load_run(final, pinned_manifest_sha256 = pin)` while the lock is
+  still held, before any receipt exists; a swap in either window is caught by the pin and quarantined (→ T5).
 * **After CP1b.** A concurrent writer may still edit the final directory before or after the receipt; that cannot be
   prevented without permissions, so it is *detected*: every later `observe()` re-verifies content against the out-of-band
   manifest pin (→ T3) and against the receipt/journal pins of §10.1. Stated limits: a root/filesystem-administrator
   adversary, and anyone who controls both `RUN_ROOT` and the out-of-band pin locations, are outside this design — exactly
   the `runstore` authentication limit (§10.1), now stated for the whole filesystem surface. `flock` itself only
   serializes cooperating processes; it is not claimed as a security boundary.
+
+**V15-05 — fatal-quarantine consequences (normative).** `PublishIdentityMismatch` raised in step 5 is
+unconditionally fatal: the seal aborts, the process exits non-zero, and CP1b/CP2/CP3 are NEVER reached for this
+`run_id` — so no receipt can exist for an impostor, and an impostor can never classify as T4/T6 (T6 requires a valid
+receipt; T4 requires an audit pass against the out-of-band manifest `pin`, which the impostor's content fails →
+`observe()` resolves T3, or T5 when a staging/quarantine sibling is also present, per §9.3). In the normal case the
+impostor is moved out from under the final name by the quarantine rename — the filesystem has just proven that very
+`renameat2` works on this directory, so a refusal here would be the second call failing after the first succeeded.
+The two remaining cases are: `PublishConflict` (`<run_id>.unverified` already exists → the impostor stands beside a
+pre-existing quarantine → `observe()` sees final + quarantine = the K8 signature → T5, never success) and an
+I/O/permission error (the impostor stands under the final name until an operator removes it; it still fails `load_run`
+against the pin → T3, which is terminal — quarantine-or-report per reviewer, never T4/T6). Stated residual:
+physically removing a directory requires this same `renameat2`; if the kernel or filesystem refuses even that, no
+portable mechanism exists to move it — the guarantee is therefore classification-level (never successful, never
+receipted, always reported), not removal-level.
 
 5.3 **Post-publication persistence:** `os.fsync(pfd)` (CP2) makes the rename durable; a failure here halts the sequence
 BEFORE the receipt → T4, and recovery re-runs fsync then CP3 (K11).
@@ -558,15 +736,19 @@ BEFORE the receipt → T4, and recovery re-runs fsync then CP3 (K11).
 ```
 pin = WRITE_RUN(pfd, staging_name, records, events)        # exclusive create + streamed + fsync F1–F4 (§5.1.1)
 run = load_run(staging, pinned_manifest_sha256 = pin)      # strict types, digests, self-digest, chain head
+abort_seq = pacer.abort_seq                                # captured from the live pacer BEFORE releasing `run`
+del run                                                    # single-copy Domain A: audit_run loads its own copy
+                                                           # internally (audit.py:626) — never two live copies (V15-07)
 result = audit_run(staging, pinned_manifest_sha256 = pin, wrapper_count = transport.sent,
-                   abort_seq = pacer.abort_seq, profile = (OBS01_PROFILE | OBS02_PROFILE),
+                   abort_seq = abort_seq, profile = (OBS01_PROFILE | OBS02_PROFILE),
                    skips = pacer_skips, expected_boundaries = plan.boundaries, boundary_skips = plan.boundary_skips)
 require result.ok and transport.sent == len(pacer.records) and session_budget.retained_total <= SESSION_BODY_BUDGET_BYTES
 ```
 
 A failure ⇒ the staging tree is quarantined (§5.5) and the run resolves T5 (or T3 if the same defect is found on a
-published run by `observe()`). The reloaded `run` (not live objects) is what gets published: nothing is serialized from
-mutable state after this point.
+published run by `observe()`). What gets published is the verified PERSISTED bytes (loaded and audited above, then
+released): nothing is serialized from mutable state after this point, and at most one copy of the body set is loaded
+at a time (§6.5 single-copy rule).
 
 5.5 **Quarantine (`<run_id>.unverified/`).** Implemented by `publish_dir()` with the same `pfd`, flock and
 `renameat2(RENAME_NOREPLACE)` sequence: staging (or stale staging, or an EEXIST loser) is atomically moved aside; never a
@@ -581,7 +763,7 @@ copy, never a partial delete; the quarantined tree keeps every byte written (evi
 |---|---|---|---|---|
 | A — retained | complete response bodies held in `pacer.records` until seal | `SESSION_BODY_BUDGET_BYTES` | 52,428,800 (50 MiB) | §6.4 chunk check + §6.2 commit gate |
 | A — per response | one response body | `MAX_BODY_BYTES` | 4,194,304 (4 MiB) | transport read loop (header pre-check advisory; read loop authoritative) |
-| B — transient | live non-retained allocations: chunk buffer, body scratch + its `bytes` copy, HTTP internals, seal slices, verify-line parse buffers | `TRANSIENT_BUDGET_BYTES` | 12,582,912 (12 MiB) — re-derived, V14-03 | §6.5 three-phase arithmetic + allocation sites below |
+| B — transient | live non-retained allocations: chunk buffer, body scratch + its `bytes` copy, HTTP internals, seal slices, verify-line parse buffers | `TRANSIENT_BUDGET_BYTES` | 12,582,912 (12 MiB) — OFFICIAL, measured proofs V15-07 (D30) | §6.5 three-phase measured bounds + allocation sites below |
 | C — fixed harness | record metadata (bodies excluded), event log, plan, skips, manifest, receipt draft, `SessionBudget` scalars | `HARNESS_FIXED_BUDGET_BYTES` | 2,097,152 (2 MiB) | bounded by construction (§6.6) |
 
 6.2 **Single owner.** `SessionBudget.retained_total` (integer bytes of Domain A) exists once, owned by the orchestrator,
@@ -617,10 +799,13 @@ same interruption semantics (socket shutdown makes `read` raise → `Cancelled` 
 changes (chunks instead of one 4 MiB+1 buffer). On `INCIDENT_MEMORY` the orchestrator sees `status` already known from
 `getresponse()` (200) with the memory error → record `(200, INCIDENT-MEMORY)` → B5 (§3.3.3).
 
-6.5 **Domain B derivation — simultaneous peaks (v1.5; V14-03 corrects v1.4's "none concurrent" claim).** v1.4 counted
-single allocations; the reviewer showed each phase holds *several* body-sized objects at once. Every peak below is
-derived from the code that exists at the anchor; the phases are sequential (single-flight; seal runs after all requests;
-verify runs after seal), so the budget is the maximum phase peak, not their sum.
+6.5 **Domain B derivation — per-phase measured bounds (v1.6, V15-07; V14-03 corrected v1.4's "none concurrent"
+claim; v1.5's formula-only numbers did not survive measurement against the code those paths would actually run).**
+Every peak below is the maximum LIVE allocation at a single instant of the normative sequences (§6.4 request path,
+§5.1.1 seal, §5.1.2 verify), measured with `tracemalloc` on CPython 3.12 over worst-case inputs (a full
+`MAX_BODY_BYTES` response; a record line at the `MAX_LINE` cap) and derived from the code that exists at the anchor.
+The phases are sequential (single-flight; seal runs after all requests; verify runs after seal), so the budget is the
+maximum phase peak, not their sum.
 
 ```
 Phase 1 — request (per response, §6.4): scratch may reallocate while extending (old + new ≤ 2 × MAX_BODY_BYTES),
@@ -628,31 +813,41 @@ Phase 1 — request (per response, §6.4): scratch may reallocate while extendin
     peak₁ ≤ 2 × MAX_BODY_BYTES + CHUNK_BYTES + HTTP_HEADROOM + allocator margin
           = 8,388,608 + 65,536 + 262,144 + 65,536 = 8,781,824 B
     (HTTP_HEADROOM = 262,144 B: http.client + ssl user-space buffers, header dict, malloc overhead — design
-     constant, asserted by the G-V13-04 allocation spy.)
+     constant, asserted by the G-V13-04 allocation spy. Measured core without headroom: 8,462,496 B →
+     8,724,640 B with headroom ≤ 8,781,824 B.)
 
-Phase 2 — seal, with the §5.1.1 streaming writer: ONE 48 KiB body slice + ONE ≤ 64 KiB base64 chunk + writer
-          buffer + framing bytes:
-    peak₂ ≤ 49,152 + 65,536 + 8,192 + 2,048 = 124,928 B  (cap 131,072 B)
-    (v1.4's model — the full base64 string AND the full JSON line of the same record — is 2 × 5,592,408 =
-     11,184,816 B; the CURRENT Step-1 write_run does far worse: every record's base64 string alive in one list
-     PLUS the whole joined file, ≥ 2 × 4/3 × SESSION_BODY_BUDGET ≈ 139.8 MB. Both are excluded by D18.)
+Phase 2 — seal, §5.1.1 metadata-only writer (V15-01): ONE 48 KiB body slice + ONE ≤ 64 KiB base64 chunk + the
+          CPython base64 encoder's 32,768 B working buffer + ≤ 4,096 B of digest line, head/tail fragments and
+          framing — all live at the `b64encode` instant; `chunk` is `del`ed before the next slice:
+    peak₂ ≤ 49,152 + 65,536 + 32,768 + 4,096 = 151,552 B   (measured 148,113 B)
+    (banned patterns, measured: retaining chunks across iterations 5,656,645 B; v1.5's two `record_to_json(r)`
+     calls per record allocate the full ≤ 5,592,408 B base64 string twice — G-V15-01 kills both. v1.4's model
+     (full base64 string + full JSON line = 11,184,816 B) and the current Step-1 write_run (≥ 139.8 MB) remain
+     excluded by D18.)
 
-Phase 3 — verify (`load_run`): json.loads holds the line AND the parsed body_b64 string simultaneously:
+Phase 3 — verify, §5.1.2 incremental `load_run` (V15-02): the reader holds at most ONE line buffer, its decoded
+          text and the parsed `body_b64` string at once, plus the file object's 8 KiB buffer and json/dict
+          overhead; the per-line release order is normative (read ≤ MAX_LINE+2 → decode → `del` line bytes →
+          json.loads → `del` text → `.encode("ascii")` → `del` the str → `b64decode(bytes)` → `del` raw):
     MAX_LINE = 4 × ⌈MAX_BODY_BYTES / 3⌉ + 512 (framing) = 5,592,920 B
-    peak₃ ≤ 2 × MAX_LINE + 1,024 = 11,186,864 B
-    (afterwards b64decode peaks lower: str + body = 9,586,709 B; the reader never materializes a second line)
+    peak₃ ≤ 2 × MAX_LINE + 16,384 = 11,202,224 B   (measured 11,188,261 B on a MAX_LINE line; +8,192 file
+                                                      buffer + ~2,624 json/dict overhead -> 11,196,453 B ≤ bound)
+    (banned patterns, measured: `base64.b64decode(str)` re-encodes the whole string → 15,381,335 B;
+     `json.loads(raw bytes)` with the buffer referenced → bytes + decoded str + parsed = 16,781,149 B;
+     Step-1's whole-file `_read` + `_jsonl` → ≥ 139.8 MB. All three exceed the budget and are BANNED.)
 
-budget = max(peak₁, peak₂, peak₃) = 11,186,864 B
-TRANSIENT_BUDGET_BYTES = 12,582,912 B (12 MiB); margin = 1,396,048 B (12.5 %) over the largest phase.
+budget = max(peak₁, peak₂, peak₃) = 11,202,224 B
+TRANSIENT_BUDGET_BYTES = 12,582,912 B (12 MiB); margin = 1,380,688 B (12.3 %) over the largest phase.
 ```
 
-Every phase peak is a hard cap enforced at its allocation sites: phase 1 by the §6.4 checks, phases 2/3 by construction
-(no whole-line, no whole-file materialization — a writer or reader that ever allocates a full line or full file FAILS
-the allocation spy; G-V14-02/G-V13-04). **Domain A single-copy rule (verify):** before `load_run` runs, the orchestrator
-releases the live `pacer.records` references — the bytes are already on disk — so at any instant at most ONE full body
-set exists (≤ 50 MiB) instead of a live copy plus a reloaded copy. Total process envelope: A 50 MiB + B 12 MiB + C 2 MiB
-≈ 64 MiB (runner and `observe()` alike). Any future change to `MAX_BODY_BYTES` or the writer MUST re-derive all three
-phases before changing `TRANSIENT_BUDGET_BYTES` (decisions D13, D19).
+Every phase peak is a hard cap enforced at its allocation sites: phase 1 by the §6.4 checks; phases 2/3 by construction
+— the writer never allocates a whole line and never calls `record_to_json`, the reader never reads a whole file and
+never holds line bytes + text + parsed simultaneously (G-V14-02/G-V15-01/G-V15-02/G-V13-04). **Domain A single-copy
+rule (verify/observe):** before `load_run` runs, the orchestrator releases the live `pacer.records` references — the
+bytes are already on disk — and the explicitly loaded `run` is released (`del run`) BEFORE `audit_run` loads its own
+copy (audit.py:626), so at any instant at most ONE full body set exists (≤ 50 MiB). Total process envelope: A 50 MiB +
+B 12 MiB + C 2 MiB ≈ 64 MiB (runner and `observe()` alike). Any future change to `MAX_BODY_BYTES`, the writer or the
+reader MUST re-derive all three phases before changing `TRANSIENT_BUDGET_BYTES` (decisions D13, D19, D30).
 
 6.6 **Domain C by construction.** `RUN_RECORD_LIMIT = 2000` records (plan bound ≈ 750/day; hard stop → `INCIDENT-RECORD-LIMIT`
 abort, `derived = None`, `abort_seq = len(records)`): metadata ≤ 2000 × 400 B = 800 KiB; event log ≤ 1000 × 800 B = 800 KiB;
@@ -725,8 +920,10 @@ synchronous syscall, so the bound is enforced by the `obs-watchdog` thread (§2.
 ```
 CP1  rc == 0 from renameat2(pfd, ".<run_id>.staging", pfd, "<run_id>", RENAME_NOREPLACE)
      → phase = COMMITTING/SEALED;  pin and abort_seq were already flushed out-of-band (§5.1)
-CP1b post-rename content re-verification (v1.5, V14-07), lock still held: run = load_run(final, pinned = pin) and
-     the manifest digest verifies → otherwise quarantine the published final via renameat2(NOREPLACE) into
+CP1b post-rename content re-verification (v1.5, V14-07; pin-only call restated V15-04), lock still held:
+     run = load_run(final, pinned_manifest_sha256 = pin)   # the out-of-band MANIFEST pin of §10.1 — receipt_pin is
+     NEVER used as a manifest pin, and observe() without `pin` resolves T3 (or T5), never T4/T6 — and the manifest
+     digest verifies → otherwise quarantine the published final via renameat2(NOREPLACE) into
      <run_id>.unverified (§5.2.5), stop → T5; a crash here equals K10 (final, no receipt) → observe() re-verifies →
      T4 or T3 — an impostor never receives a receipt
 CP2  os.fsync(pfd) returns 0                                   # namespace durable; failure → stop → T4 (K11)
@@ -861,14 +1058,19 @@ exist for the `run_id`; if any do — including a quarantine — the contradicti
 SHA-256 against `journal_pin` when the operator recorded it (V14-05): the self-digest alone is tamper-evidence, not
 authentication, because anyone with `RUN_ROOT` write access can recompute it.
 
-9.2 **Resolver precedence (normative `observe()`), deterministic given disk state only** (`pin`, `receipt_pin`,
-`journal_pin` supplied out of band when available; without them, structural verification still runs and full forgery
-remains out of scope — stated limit of `runstore`, §10.1). v1.5 harmonizes this pseudocode with the §9.3 table over ALL
-edge-case artifact combinations (V14-06): inputs are five artifacts (refusal, staging, final, receipt, quarantine) ×
-receipt validity × the closed outcome enum; every combination resolves to exactly one row of §9.3.
+9.2 **Resolver precedence (normative `observe()`), deterministic given disk state only** (`pin`, `egress_count`,
+`receipt_pin`, `journal_pin` supplied out of band when available). V15-04 fail-closed rule: **`pin` is MANDATORY to
+verify or recover a final** — `receipt_pin` is a hex string, never a manifest pin, and Step-1's `load_manifest` fails
+closed without the pin (runstore.py:255–258), so a present final with `pin is None` resolves `T5 if conflict else T3`
+BEFORE any load; T4/T6 are unreachable without the independently supplied manifest pin, and "structural-only"
+verification of finals does not exist. `receipt_pin`/`journal_pin` remain optional tamper-evidence over their own
+files; full forgery by an adversary that controls records, files AND pins together stays out of scope — stated limit of
+`runstore`, §10.1. v1.5 harmonized this pseudocode with the §9.3 table over ALL edge-case artifact combinations
+(V14-06): inputs are five artifacts (refusal, staging, final, receipt, quarantine) × receipt validity × the closed
+outcome enum × (`pin`, `egress_count`) presence; every combination resolves to exactly one row of §9.3.
 
 ```
-function OBSERVE(run_id, pin | None, receipt_pin | None, journal_pin | None) -> TerminalState:
+function OBSERVE(run_id, pin | None, egress_count | None, receipt_pin | None, journal_pin | None) -> TerminalState:
     # ENTRY SNAPSHOT — read before any mutation this observation performs, so a step-2 self-quarantine (or a
     # stale-sibling quarantine by an earlier observation) never flips the state seen by a later one:
     q_pre = exists(<run_id>.unverified)                  # pre-existing quarantine (K8 / prior K-row)
@@ -888,21 +1090,29 @@ function OBSERVE(run_id, pin | None, receipt_pin | None, journal_pin | None) -> 
         # Verification-failure precedence (V14-06): K8's foreign final cannot authenticate against our pin and fails
         # load/audit → T5 + conflict report; an own final failing with no conflict → T3. A final that PASSES
         # verification ignores `conflict`, so re-observation of a run whose stale sibling was quarantined stays
-        # T4/T1/T6. Without an out-of-band pin the two cases are indistinguishable — stated limit (§10.1).
-        run = load_run(final, pinned = pin if pin else receipt_pin(final))
+        # T4/T1/T6. With no out-of-band pin the two cases are indistinguishable AND unverifiable: both fail closed
+        # before any load (V15-04) — stated limit (§10.1).
+        if pin is None: return T5 if conflict else T3     # V15-04: never load a final without its manifest pin
+        run = load_run(final, pinned = pin)              # receipt_pin is a hex string — never passed as a pin
         if run fails structurally:      return T5 if conflict else T3
-        result = audit_run(..., wrapper_count = receipt.outer_count or structurally-derived,
-                           abort_seq = abort_condition_seq(run.records), ...)
-        if not result.ok:               return T5 if conflict else T3
+        # wrapper_count: exactly two admissible INDEPENDENT sources (V15-03) — (1) the out-of-band egress_count
+        # print (§10.1(1b): transport.sent, flushed beside the manifest pin) and (2) receipt.wrapper_count (minted
+        # from transport.sent at CP3, parsed early below). Any count derived from the record stream is BANNED: it
+        # would make audit check (g) tautological (audit.py:289–296 requires a caller-supplied counter, 623–626).
+        raw = read_bytes(receipt_path) if receipt_exists(run_id) else None
+        receipt = parse_strict(raw) if raw is not None else None   # exact key set, receipt_digest verified (V14-05)
+        wc = egress_count if egress_count is not None else (receipt.wrapper_count if receipt is not None else None)
+        result = audit_run(..., wrapper_count = wc, abort_seq = abort_condition_seq(run.records), ...)
+        if not result.ok:               return T5 if conflict else T3   # neither source → check (g) fails → here
         if not receipt_exists(run_id):  return T4          # final NAME only; .receipt.tmp ignored (§5.2.4)
-        raw = read_bytes(receipt_path)
-        receipt = parse_strict(raw)                       # exact key set, receipt_digest verified (V14-05)
         if receipt is None or receipt.run_id != run_id:
                                      return T3            # torn/foreign receipt → FAILED-AUDIT (V14-06)
         if receipt_pin is not None and sha256(raw) != receipt_pin:
                                      return T3            # forged receipt (V14-05)
-        if pin is not None and receipt.manifest_sha256 != pin:
-                                     return T3            # content chain broken (no pin ⇒ structural only)
+        if receipt.manifest_sha256 != pin:
+                                     return T3            # content chain broken (pin non-None above; V15-04)
+        if egress_count is not None and receipt.wrapper_count != egress_count:
+                                     return T3            # independent egress sources disagree (V15-03)
         if receipt.outcome == "ABORTED":       return T1
         if receipt.outcome in {"COMPLETE-VALID", "INCONCLUSIVE-TIMING", "FAILED"}: return T6
         return T3                                        # outcome outside the closed enum → FAILED-AUDIT (V14-06)
@@ -923,18 +1133,22 @@ function OBSERVE(run_id, pin | None, receipt_pin | None, journal_pin | None) -> 
 | T0 | REFUSED | valid `obs-refusal/1` ∧ no final ∧ no staging ∧ no quarantine | 2 | none (terminal) |
 | T1 | ABORTED-SEALED | final ∧ verify+audit pass ∧ receipt valid ∧ `receipt.outcome = ABORTED` (incident ladder, N/T/E rows, or signal reason) | 1 / 130 / 143 | none; owner reports to reviewer before rerun |
 | T2 | INCONCLUSIVE-CRASH | nothing for `run_id`, or journal present but torn/invalid, or (power loss) rename lost before CP2 | 1 | none automatic: rerun is a NEW `run_id` |
-| T3 | FAILED-AUDIT | final present that fails verification with NO staging/quarantine conflict ∨ receipt invalid (torn/foreign/digest-or-pin mismatch/outcome outside the enum) ∨ refusal ∧ artifacts/quarantine contradiction | 1 | none; quarantine-or-report per reviewer |
-| T4 | SEALED-UNRECEIPTED | final ∧ verify+audit pass ∧ receipt absent | 1 | `observe()` may complete CP2+CP3 ONLY if pin verifies (fsync, publish receipt) → re-resolve T6 |
-| T5 | QUARANTINED | staging found without final (K1/K7), or `<run_id>.unverified/` present with final absent (any K-row/`INVALID-PACING`/seal failure/E11/N14 path), or final present that fails verification while staging/quarantine is also present (K8 conflict, reported) | 1 | none (fresh `run_id` for a rerun) |
+| T3 | FAILED-AUDIT | final present that fails verification — including a final presented with no out-of-band manifest pin, fail-closed V15-04 — with NO staging/quarantine conflict ∨ receipt invalid (torn/foreign/digest-or-pin mismatch/`wrapper_count` disagreement V15-03/outcome outside the enum) ∨ refusal ∧ artifacts/quarantine contradiction | 1 | none; quarantine-or-report per reviewer |
+| T4 | SEALED-UNRECEIPTED | final ∧ pin supplied ∧ verify+audit pass ∧ receipt absent (no pin ⇒ resolves T3/T5, never T4 — V15-04) | 1 | `observe()` may complete CP2+CP3 ONLY with the independently supplied manifest pin (`receipt_pin` is never a manifest pin; fsync, publish receipt) → re-resolve T6 |
+| T5 | QUARANTINED | staging found without final (K1/K7), or `<run_id>.unverified/` present with final absent (any K-row/`INVALID-PACING`/seal failure/E11/N14 path), or final present that fails verification while staging/quarantine is also present (K8 conflict, reported), or a final presented without its manifest pin while a conflict exists (V15-04 fail-closed) | 1 | none (fresh `run_id` for a rerun) |
 | T6 | COMMITTED | S holds (§2.4); `receipt.outcome` ∈ {COMPLETE-VALID, INCONCLUSIVE-TIMING, FAILED} | 0 / 1 / 1 | none |
 
-Exhaustiveness argument (v1.5, V14-06): the inputs are the five filesystem artifacts (refusal, staging, final,
-receipt, quarantine), receipt validity (torn / foreign / digest-or-pin mismatch / valid) and the closed outcome enum
-(three values ∪ invalid). Steps 1→5 partition them: refusal present → T0/T2/T3 (by validity ×
-artifact/quarantine contradiction); refusal absent ∧ final present → T3/T5 (verification × conflict),
-T4 (receipt absent), T1/T6 (by outcome), T3 (invalid receipt or enum); refusal and final absent ∧ staging present
-→ T5; only quarantine present → T5; nothing → T2. Each combination hits exactly one `return` and maps
-to exactly one table row; G-V14-06 enumerates the full cross-product and asserts pseudocode result == row predicate.
+Exhaustiveness argument (v1.5, V14-06; extended v1.6 for V15-03/V15-04): the inputs are the five filesystem
+artifacts (refusal, staging, final, receipt, quarantine), receipt validity (torn / foreign / digest-or-pin mismatch /
+valid) and the closed outcome enum (three values ∪ invalid), plus the out-of-band inputs `pin` and `egress_count`
+(present/absent each — V15-04/V15-03). Steps 1→5 partition them: refusal present → T0/T2/T3 (by validity ×
+artifact/quarantine contradiction); refusal absent ∧ final present → T3/T5 (verification × conflict; `pin` absent is a
+verification failure that fails closed — never T4/T6), T4 (receipt absent ∧ pin supplied), T1/T6 (by outcome), T3
+(invalid receipt, `egress_count` vs `receipt.wrapper_count` disagreement, or enum); refusal and final absent ∧ staging
+present → T5; only quarantine present → T5; nothing → T2. The V15-05 residual (a final whose step-5 quarantine rename
+failed) is exactly a final that fails verification → T3 (or T5 with a conflict) — never T4/T6, never a silent success.
+Each combination hits exactly one `return` and maps to exactly one table row; G-V14-06 enumerates the full
+cross-product (including `pin`/`egress_count` presence) and asserts pseudocode result == row predicate.
 
 9.4 **Protocol v0.5 outcome → record/persisted representation mapping (concrete).**
 
@@ -956,11 +1170,17 @@ to exactly one table row; G-V14-06 enumerates the full cross-product and asserts
 
 ## 10. Provenance, pin, outer index
 
-10.1 **Pin discipline (three pins, v1.5 / V14-05).** (1) `write_run` returns `sha256(manifest.json)`; the runner
+10.1 **Pin discipline and out-of-band egress count (three pins + one scalar; v1.6 / V14-05, V15-03/V15-04).** (1) `write_run` returns `sha256(manifest.json)`; the runner
 (a) prints it with a flush before CP1, (b) embeds it in the receipt at CP3, and (c) requires the operator to record it
-out-of-band (committed evidence file / ticket) before review. (2) After CP3 the runner prints
+out-of-band (committed evidence file / ticket) before review. (1b) The runner also prints, with a flush beside the manifest pin (same moment, before CP1), the
+out-of-band egress count `egress_count = transport.sent` — the transport's wrapper counter, final once sealing starts.
+This is the first admissible independent `wrapper_count` source for `audit_run`/`observe()` (V15-03): live runs pass
+`transport.sent` directly (§5.4); `observe()` uses the printed `egress_count` when supplied, else
+`receipt.wrapper_count`; a count derived from the record stream is banned (audit check (g), audit.py:289–296), and
+disagreement between the two independent sources resolves T3 (§9.2). (2) After CP3 the runner prints
 `sha256(<run_id>.receipt.json bytes)` with a flush — the receipt pin; `observe()` compares it when `receipt_pin`
-is supplied. (3) After refusal step 5 the runner prints `sha256(<run_id>.refusal.json bytes)` with a flush — the
+is supplied; `receipt_pin` is NEVER used as a manifest pin — a final without `pin` fails closed before any load
+(§9.2, V15-04). (3) After refusal step 5 the runner prints `sha256(<run_id>.refusal.json bytes)` with a flush — the
 journal pin (9.1). `observe()` takes the pins as inputs; none is ever derived from the file being verified when
 authentication (not mere structure) is claimed. The self-digests (`journal_digest`, `receipt_digest`) are
 tamper-evidence only — anyone with `RUN_ROOT` write access can recompute them — while the out-of-band prints
@@ -976,30 +1196,38 @@ budgets}, diagnostics {late_wakes, weight_max_seen}, receipt_digest`. It is a si
 stored inside the run directory (it must remain individually no-replace publishable and independently stat-able for T4).
 `receipt_digest = sha256(canonical of all the other receipt keys)` — the manifest self-digest discipline (V14-05):
 the strict parser recomputes it, and after CP3 the runner prints the receipt's byte SHA-256 out-of-band (§10.1),
-which `observe()` verifies when `receipt_pin` is supplied.
+which `observe()` verifies when `receipt_pin` is supplied. `wrapper_count` is minted from `transport.sent` at CP3
+and is the second admissible independent egress source (§10.1(1b), V15-03).
 
 10.3 **Frozen schemas:** `records.jsonl` object keys = `_RECORD_KEYS` (12 keys, exact); `events.jsonl` keys = `_EVENT_KEYS`;
 `manifest.json` keys = the 8 manifest keys; refusal and receipt keys as specified above. Any new detail belongs in the
 free-form `error` string (records) or the receipt's `reason`/`diagnostics` (protocol §0/§3.3 alignment: record shapes stay
 frozen under `obs-run-manifest/1`).
 
-## 11. Gates and decisions (v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable)
+## 11. Gates and decisions (v1.4 additions; v1.6 adds G-V15-01–07 and D24–D30; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable)
 
 | Gate | Assertion | Killer-test sketch |
 |---|---|---|
 | G-V13-01 | ladder branch order == `abort_condition_seq` order | generate record streams hitting B1/B2/B3/B4 boundaries (non-200 mid-streak; `CANCEL_FAILED` with `status=None`; streak 2→3; 200 reset); assert runner abort `seq` == `abort_condition_seq` result; mutation: swap B1/B2 → must fail |
 | G-V13-02 | exact syscall arguments | fake libc records `(pfd, b".<id>.staging", pfd, b"<id>", 1)`; component names with `/`, `..`, `\0` rejected pre-call; EEXIST → `PublishConflict` |
 | G-V13-03 | identity checks + no fallback | spy asserts `os.rename`/`os.replace`/`os.link`/`shutil.move` NEVER called during publish; parent-path swap (fstat≠stat) aborts; ENOSYS/EINVAL → `PublishUnavailable` (no fallback path exists); post-rename inode mismatch quarantines the published name, then raises (V14-07) |
-| G-V13-04 | budgets | chunk loop at `budget−1 / budget / budget+1` bytes; 4 MiB+1 response; §6.5 three-phase peaks pinned to ≤ 8,781,824 / 131,072 / 11,186,864 B under the 12,582,912 B budget; gzip bomb hits 1000:1 and 50 MiB ceilings; mutation: remove chunk check → killer fails |
+| G-V13-04 | budgets | chunk loop at `budget−1 / budget / budget+1` bytes; 4 MiB+1 response; §6.5 three-phase peaks pinned to ≤ 8,781,824 / 151,552 / 11,202,224 B under the 12,582,912 B budget (measured 8,724,640 / 148,113 / 11,196,453 B, V15-07); gzip bomb hits 1000:1 and 50 MiB ceilings; mutation: remove chunk check → killer fails |
 | G-V13-05 | pseudocode conformance | instrumented clock counts reads: exactly one per admission iteration and predicate-read == `start_ns`; GV-6 loop wakes twice and starts at `300,030,003,001 ns`; interrupt flag set between iterations → no record |
 | G-V14-01 | doc anchors match the branch | CI: the §0 anchor commit == HEAD of `impl-obs-harness-provenance`; `git diff <anchor> -- tools/obs/` empty for the doc-only-claim window; `audit.py:70` still opens `def abort_condition_seq` |
 | G-V14-02 | streaming writer byte-equality + fsync order | randomized records (4 MiB body, unicode, escapes): §5.1.1 output == `_lines([record_to_json…])` byte-for-byte; spy asserts fsync order F1–F4 before return and that no allocation ≥ one whole line/file occurs; crash injection at each write/fsync → K2–K7 state |
-| G-V14-03 | three-phase peak bounds | allocation spy: request-conversion moment ≤ 8,781,824 B, seal ≤ 131,072 B, verify line parse ≤ 11,186,864 B, budget 12,582,912 B; mutation: materialize one full line at seal or one full file → killer fails; `pacer.records` released before `load_run` (single-copy Domain A) |
+| G-V14-03 | three-phase peak bounds | allocation spy: request-conversion moment ≤ 8,781,824 B, seal ≤ 151,552 B, verify line parse ≤ 11,202,224 B, budget 12,582,912 B (measured proofs §6.5, V15-07); mutation: materialize one full line at seal or one full file → killer fails; `pacer.records` released before `load_run` (single-copy Domain A) |
 | G-V14-04 | clock API conformance (V14-04) | AST/grep gate: pseudocode mentions only `now_ns` / `sleep_until_ns`; instrumented Clock raises on any other name; asserted `sleep_until_ns` target ∈ [now, start_at]; GV-6 loop still starts at `300,030,003,001 ns` |
 | G-V14-05 | receipt/journal integrity | flip one byte in the receipt → digest mismatch → T3; recompute digest but not the out-of-band pin → pin mismatch → T3; same for the refusal journal (torn → T2, forged-with-recomputed-digest → T3); mutation: drop the digest/pin check → killer fails |
-| G-V14-06 | resolver/table agreement | property test enumerates refusal × staging × final × receipt(torn\|foreign\|digest\|pin\|valid) × quarantine × outcome enum: pseudocode returns exactly one T and §9.3's row predicate matches; K8→T5, quarantine-only→T5, torn receipt→T3, unknown outcome→T3, refusal+quarantine→T3 pinned |
+| G-V14-06 | resolver/table agreement | property test enumerates refusal × staging × final × receipt(torn\|foreign\|digest\|pin\|valid) × quarantine × outcome enum × `pin` present/absent × `egress_count` present/absent: pseudocode returns exactly one T and §9.3's row predicate matches; K8→T5, quarantine-only→T5, torn receipt→T3, unknown outcome→T3, refusal+quarantine→T3, final without `pin`→T3/T5 never T4/T6, `egress_count`≠`receipt.wrapper_count`→T3 pinned |
 | G-V14-07 | TOCTOU + filesystem boundary | `RUN_ROOT` mode 0777 → refuse; symlink final component → `O_NOFOLLOW` open fails; spy swaps the staging name between stat and renameat2 → step-5 mismatch → published final quarantined (never left standing); content swap between §5.4 and CP1 → CP1b → quarantine → T5 |
 | G-V14-08 | 250 ms second-signal bound | subprocess: injected `fsync` sleeping 2 s inside CP2 + second SIGINT → exit 130 at 250 ± 50 ms, final present, no receipt → `observe()` T4; fast checkpoint → exit after bookkeeping < 250 ms → T6; non-checkpoint second signal → immediate exit; a third signal does not extend the bound |
+| G-V15-01 | metadata-only seal (V15-01) | allocation spy + AST gate over a full `MAX_BODY_BYTES` record: the writer calls `record_meta_json` only — `record_to_json`/`r.body` never referenced — and never materializes `body_b64`; seal peak ≤ 151,552 B; mutation: reintroduce `record_to_json(r)` → killer fails (measured 5,592,408 B string ×2 per record) |
+| G-V15-02 | incremental `load_run` (V15-02) | spy: reads ≤ 64 KiB chunks (no `read_bytes`/whole-file), lines bounded by `f.readline(MAX_LINE + 2)`, digest pass precedes parse (Step-1 error precedence), per-line release order enforced; verify peak ≤ 11,202,224 B on a `MAX_LINE` line; mutation: hold bytes + str + parsed together → killer fails (measured 16,781,149 B) |
+| G-V15-03 | independent egress count (V15-03) | `wrapper_count` sourced only from the `egress_count` print or `receipt.wrapper_count`; mutation: derive it from the record stream → check-(g) tautology detector kills; injected disagreement → T3; neither source → T5/T3 |
+| G-V15-04 | pin fail-closed (V15-04) | resolver property test (G-V14-06 dimensions): final with `pin = None` → T3/T5, never T4/T6, no CP2/CP3; grep gate: `receipt_pin` never called as a function and never passed as `pinned_manifest_sha256` |
+| G-V15-05 | fatal quarantine (V15-05) | inject EPERM/ENOSPC into the step-5 impostor quarantine rename → `PublishIdentityMismatch` raised with cause chained (no `except: pass`), runner dies before CP1b/CP2/CP3, no receipt; observe() on the leftover state → exactly one T-row (T3/T5); spy asserts the impostor never classifies T4/T6 |
+| G-V15-06 | same-UID trust boundary (V15-06) | `RUN_ROOT` not owned by `os.geteuid()` or group/other-writable → `PublishUnavailable` at lock, before any artifact; fstat/stat UID+mode proof asserted; doc gate: §5.2.5 states kernel-prevention (different-UID) vs detection (same-UID) explicitly |
+| G-V15-07 | 12 MiB budget proof (V15-07) | tracemalloc CI gate: three phase peaks ≤ 8,781,824 / 151,552 / 11,202,224 B under 12,582,912 B, with the §6.5 measured values recorded; mutations: whole-file read, retained-chunk loop, or held `json.loads(bytes)` buffer → killer fails |
 
 Decisions (new): **D11** dynamic target supplied as `target_fn` evaluated per admission read (static path retained);
 **D12** on budget breach, discard the whole body (`b""` + `error=INCIDENT-MEMORY`) rather than persisting a partial one;
@@ -1014,7 +1242,26 @@ refusal gain self-digests (`receipt_digest`, `journal_digest`) plus out-of-band 
 **D21** CP1b content re-verification before CP3, and an identity mismatch quarantines the published final instead of
 leaving it in place; **D22** a daemon `obs-watchdog` thread enforces the 250 ms second-signal bound during blocking
 syscalls; **D23** resolver precedence: entry snapshot over five artifacts with steps 1→5, verification-failure
-precedence (`conflict → T5`, else T3) and a closed receipt-outcome enum.
+precedence (`conflict → T5`, else T3) and a closed receipt-outcome enum;
+**D24** `load_run` is a genuine two-pass incremental reader — pass 1 streams ≤ 64 KiB chunks with incremental sha256
+and byte-level line facts (Step-1 error precedence preserved: rec digest → ev digest → rec structure → rec parse →
+ev structure → ev parse → count), pass 2 parses with `f.readline(MAX_LINE + 2)` and the normative per-line release
+order (decode → release → parse → release → encode → release → `b64decode(bytes)`); a whole-file read or a held
+bytes/text/parsed triple is banned from verification (V15-02);
+**D25** the seal's writer is metadata-only (`record_meta_json`, 11 keys, never touches `r.body`) with byte-equal
+`{`-head / `",`-tail framing (probe-verified against `_lines([record_to_json…])` incl. a 4 MiB body) and the JSONL
+terminator; `record_to_json` is banned from the writer (V15-01);
+**D26** `wrapper_count` comes only from the out-of-band `egress_count` print or `receipt.wrapper_count`;
+disagreement → T3, neither → check (g) fails → T5/T3, structural derivation banned (V15-03);
+**D27** `pin` is mandatory to verify or recover a final; `receipt_pin` is never a manifest pin; `pin` absent + final
+present → T5/T3 before any load; recovery (CP2+CP3) only with the independently supplied pin (V15-04);
+**D28** quarantine publication failure is strictly fatal (`PublishIdentityMismatch`, cause chained, never `except:
+pass`); the runner dies before any receipt exists and the residual impostor can only resolve T3/T5 (V15-05);
+**D29** filesystem trust boundary: different-UID writers are kernel-prevented (owner-only mode + `O_NOFOLLOW` +
+fstat/stat identity re-proof), same-UID writers are inside the trust boundary and only detected (step-5 inode proof,
+CP1b, pins → T3/T5) — stated, never claimed prevented (V15-06);
+**D30** `TRANSIENT_BUDGET_BYTES = 12,582,912` is OFFICIAL against the §6.5 measured three-phase proofs; any change to
+`MAX_BODY_BYTES`, the writer or the reader re-derives all three phases before the budget may change (V15-07).
 
 ## 12. Normative constants (single table; source of truth `tools/obs/params.py` + runner additions)
 
@@ -1026,9 +1273,10 @@ precedence (`conflict → T5`, else T3) and a closed receipt-outcome enum.
 | `CONNECT/READ/WRITE/POOL_TIMEOUT_S` | 5.0 / 12.0 / 5.0 / 1.0 s; `SEND_TIMEOUT_S` 0.25 s | params.py |
 | `MAX_CONSECUTIVE_NO_RESPONSE` | 3 | params.py, ladder B3 |
 | `MAX_BODY_BYTES` / `SESSION_BODY_BUDGET_BYTES` | 4,194,304 B / 52,428,800 B | transport.py / runner, §6 |
+| `MAX_LINE` | 5,592,920 B (4 × ⌈MAX_BODY_BYTES / 3⌉ + 512) | runstore `_jsonl` framing; §5.1.2/§6.5 phase 3 (V15-02) |
 | `CHUNK_BYTES` | 65,536 B | §6.4 |
 | `HTTP_HEADROOM` / `SEAL_SLICE_BYTES` | 262,144 B / 49,152 B (3-aligned) | §6.5 phase 1 / §5.1.1 (V14-03) |
-| `TRANSIENT_BUDGET_BYTES` | 12,582,912 B (12 MiB) | §6.1/§6.5 (V13-04; re-derived V14-03, D19) |
+| `TRANSIENT_BUDGET_BYTES` | 12,582,912 B (12 MiB) | §6.1/§6.5 measured proofs (V13-04; re-derived V14-03, D19; OFFICIAL V15-07, D30) |
 | `HARNESS_FIXED_BUDGET_BYTES` / `RUN_RECORD_LIMIT` | 2,097,152 B / 2,000 | §6.6 |
 | `MAX_DECOMPRESSED_BYTES` / `MAX_EXPANSION_RATIO` | 52,428,800 B / 1000:1 | §6.7 |
 | `DELTA` / `W_MAX_NS` / `RETENTION_NS` / `FALLBACK_NS` | 1/10000 (100 ppm); 250 ms; 600 s; 60 s | params.py, protocol §5.2/5.3 |
@@ -1038,5 +1286,10 @@ precedence (`conflict → T5`, else T3) and a closed receipt-outcome enum.
 | `PUBLISH_LOCK_TIMEOUT_NS` / `INTERRUPT_POLL_NS` / `CHECKPOINT_DEFER_MAX_MS` | 30 s / 100 ms / 250 ms | §5.2.1, §7.1, §7.4 |
 | Host / paths / params | `data-api.binance.vision`; `/api/v3/time`, `/api/v3/klines` exactly; `symbol,interval,startTime,endTime,limit`; GET only | params.py, protocol §2 |
 
-End of v1.5. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
+**Runner additions (normative here; Step-2 code).** `TRANSIENT_BUDGET_BYTES`, `MAX_LINE`, `SEAL_SLICE_BYTES`,
+`HTTP_HEADROOM`, `CHUNK_BYTES` and the §5.1.1/§5.1.2 contracts are normative in this document; `params.py` remains
+the source of truth for the OBS parameters above. Any new runner constant joins this table in the next reviewed
+revision — the budget may change only with a re-derived §6.5 (D13/D19/D30).
+
+End of v1.6. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
 document, not an implementation choice.
