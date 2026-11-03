@@ -1,0 +1,23 @@
+$ /opt/pyvenv/bin/python /mnt/data/stage2_revision_work/repo/tools/validate_matrix.py /mnt/data/stage2_revision_work/repo/matrix.yaml --schema /mnt/data/stage2_revision_work/repo/matrix_schema.json --m1 /mnt/data/stage2_revision_work/repo/docs/source/milestone_1.md --m12 /mnt/data/stage2_revision_work/repo/docs/source/milestone_1_2.md
+PASS: YAML parsed
+PASS: JSON Schema validation
+PASS: canonical Markdown hashes verified
+PASS: source headings verified (M1 28 sections, 1.2 14 sections)
+PASS: source citations resolved (M1 §28 items 27, 1.2 §5 items 27)
+PASS: unique acceptance row IDs (104)
+PASS: labels, citations, artifact paths and evidence classes validated (104 rows)
+PASS: item bindings agree with citations/tests (58 item bindings)
+PASS: mutation killers are bound (18 killer nodeids)
+
+
+$ /opt/pyvenv/bin/python /mnt/data/stage2_revision_work/repo/tools/compare_source_markdown.py /mnt/data/stage2_revision_work/repo/docs/source/milestone_1.md reviewer/project_source_m1.md
+PASS: normalized canonical/project source content identical
+
+
+$ /opt/pyvenv/bin/python /mnt/data/stage2_revision_work/repo/tools/compare_source_markdown.py /mnt/data/stage2_revision_work/repo/docs/source/milestone_1_2.md reviewer/project_source_m1_2.md
+PASS: normalized canonical/project source content identical
+
+
+$ /opt/pyvenv/bin/python -m pytest -q /mnt/data/stage2_revision_work/repo/tests/tools/test_spec_tooling.py
+.............                                                            [100%]
+13 passed in 15.40s

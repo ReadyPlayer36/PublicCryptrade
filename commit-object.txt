@@ -1,0 +1,10 @@
+tree 7b22318669c8e91b77c4ec796f0b53ee05782fec
+parent a88a843f7c79354b193234fc3cdbfad9b661d098
+author Stage-2 Review Candidate <stage2-review-candidate@example.invalid> 1791870008 +0000
+committer Stage-2 Review Candidate <stage2-review-candidate@example.invalid> 1791870008 +0000
+
+test: harden Stage-2 acceptance scaffold before implementation
+
+Base tree matches public a88a843f7c79354b193234fc3cdbfad9b661d098 (tree 408a6a4263528d846a5277fab9f75f0ff036dd74). The local source bundle root was de1bd38e73d7b6cdd0ab2d2bc0c42d105ae470a2; its original commit identity/history is not present in the public repository, so original-bundle provenance is not claimed. This revision uses the public a88a843 commit as its parent. Any push of original bundle history is a separate operation on a separate branch.
+
+Tests and test-gate tooling only; no production behavior is implemented. Milestone 1 remains BLOCKED and implementation remains unauthorized.

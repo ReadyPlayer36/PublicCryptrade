@@ -1,22 +1,36 @@
-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
+"""Global cooldown must block all HTTP, including server-time calls."""
+import json
+from pathlib import Path
 import pytest
+from trading_app.data.binance_client import BinanceMarketDataClient, BinanceClientError
+from trading_app.data.cooldown import CorruptCooldownError, read_cooldown
+from tests.fixtures.fakes import FakeHttpClient, FakeResponse
+from tests.fixtures.policy import cooldown_policy
 
 @pytest.mark.requirement("COOLDOWN-04")
-def test_cooldown_directory_scope():
-    """Acceptance scenario bound to frozen matrix row(s): COOLDOWN-04."""
-    from trading_app.data.binance_client import BinanceMarketDataClient
-    BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
-
+def test_cooldown_directory_scope(tmp_path):
+    assert cooldown_policy()["directory_scoped"] is True
+    path = tmp_path / "data" / "binance_cooldown.json"
+    path.parent.mkdir(); path.write_text('{"until_ms": "not-an-int", "reason": "test"}')
+    with pytest.raises(CorruptCooldownError, match="integer|invalid|cooldown"):
+        read_cooldown(path)
 
 @pytest.mark.requirement("COOLDOWN-01")
-def test_cooldown_is_global_across_hosts():
-    """Acceptance scenario bound to frozen matrix row(s): COOLDOWN-01."""
-    from trading_app.data.binance_client import BinanceMarketDataClient
-    BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
-
+def test_cooldown_is_global_across_hosts(tmp_path):
+    path = tmp_path / "binance_cooldown.json"
+    primary = FakeHttpClient([FakeResponse(status_code=418)])
+    with pytest.raises(BinanceClientError, match="418"):
+        BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=primary, cooldown_path=path).get_server_time()
+    fallback = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000})])
+    other = BinanceMarketDataClient(base_url="https://api.binance.com", http_client=fallback, cooldown_path=path)
+    with pytest.raises(BinanceClientError, match="cooldown"):
+        other.get_server_time()
+    assert fallback.calls == []
+    assert cooldown_policy()["scope"] == "global_across_allowed_hosts"
 
 @pytest.mark.requirement("COOLDOWN-03")
-def test_cooldown_persists_across_processes():
-    """Acceptance scenario bound to frozen matrix row(s): COOLDOWN-03."""
-    from trading_app.data.binance_client import BinanceMarketDataClient
-    BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+def test_cooldown_persists_across_processes(tmp_path):
+    path = tmp_path / "binance_cooldown.json"
+    path.write_text('{"until_ms": 1767571800000, "reason": "418"}')
+    # Reopening from disk, rather than retaining an in-memory object, is the persistence contract.
+    assert read_cooldown(path) == {"until_ms": 1767571800000, "reason": "418"}

@@ -1,7 +1,14 @@
-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
+"""Future end acceptance scenario uses only fake HTTP responses offline."""
+from datetime import datetime, timezone
 import pytest
+from trading_app.data.binance_client import BinanceMarketDataClient
+from tests.fixtures.fakes import FakeHttpClient, FakeResponse
+from tests.fixtures.klines import make_rows
 
 @pytest.mark.requirement("LIVE-04")
 def test_future_end_clamp_and_strict_end():
-    """Acceptance scenario bound to frozen matrix row(s): LIVE-04."""
-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
+    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767574201234}), FakeResponse(payload=make_rows(1767571200000, 10))])
+    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", finality_lag_ms=0, http_client=http)
+    result = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=datetime.fromtimestamp(1767571200, timezone.utc), end=datetime.fromtimestamp(1767601200, timezone.utc))
+    assert len(result) == 10 and result[-1][0] == 1767574200000 - 300000
+    assert http.calls[1][1]["endTime"] == 1767574200000 - 1

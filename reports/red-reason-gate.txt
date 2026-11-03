@@ -1,0 +1,1 @@
+RED-REASON GATE PASS: 138 failure(s) are NotImplementedError from src/trading_app; all passes are allowlisted; pytest exit=1

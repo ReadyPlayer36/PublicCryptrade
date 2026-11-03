@@ -14,3 +14,17 @@ class FakeHttpClient:
         if self.errors: raise self.errors.pop(0)
         if not self.responses: raise AssertionError("unexpected HTTP request")
         return self.responses.pop(0)
+
+class SequenceFakeHttpClient:
+    """Deterministic ordered events: each get consumes exactly one response or exception."""
+    def __init__(self, events):
+        self.events = list(events)
+        self.calls = []
+    def get(self, url, *, params=None):
+        self.calls.append((url, params or {}))
+        if not self.events:
+            raise AssertionError("unexpected HTTP request")
+        event = self.events.pop(0)
+        if isinstance(event, BaseException):
+            raise event
+        return event

@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   python312:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,15 +15,123 @@ jobs:
           cache: pip
       - name: Install project and development tools
         run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
-      - name: Confirm Python baseline
-        run: python --version
-      - name: Collect all tests (must succeed even while behavior tests are red)
+      - name: Confirm Python and pytest baseline
+        run: python -c "import sys, pytest; print(sys.version); print('pytest', pytest.__version__); assert sys.version_info[:2] == (3, 12); assert pytest.__version__ == '9.1.1'"
+      - name: Collect all tests
         run: python -m pytest --collect-only -q
-      - name: Run spec tooling
-        run: python -m pytest tests/tools/test_spec_tooling.py -q
-      - name: Run behavior tests (expected red until implementation is approved)
-        continue-on-error: true
-        run: python -m pytest -ra
-      - name: Dependency audit
+      - name: Check frozen specification hashes
+        run: python tools/check_freeze.py
+      - name: Validate frozen matrix
+        run: python tools/validate_matrix.py matrix.yaml --schema matrix_schema.json --m1 docs/source/milestone_1.md --m12 docs/source/milestone_1_2.md
+      - name: Run specification/source checks (blocking)
+        run: python tools/spec_check.py --project-m1 reviewer/project_source_m1.md --project-m12 reviewer/project_source_m1_2.md
+      - name: Run expected-red behavior suite and export JUnit
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set +e
+          python -m pytest -ra --junitxml=artifacts/junit-offline.xml 2>&1 | tee artifacts/pytest-output.txt
+          pytest_rc=${PIPESTATUS[0]}
+          python tools/red_reason_gate.py artifacts/junit-offline.xml --pytest-exit-code "$pytest_rc" --implementation-stage 2>&1 | tee artifacts/gate-output.txt
+          gate_rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### Expected-red gate (exit $gate_rc, pytest exit $pytest_rc)"
+            echo '```'
+            tail -n 40 artifacts/gate-output.txt
+            echo '```'
+            echo "<details><summary>pytest short summary</summary>"
+            echo
+            echo '```'
+            grep -E "^(FAILED|ERROR)|passed|failed" artifacts/pytest-output.txt | tail -n 60
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$gate_rc"
+      - name: Traceability audit (fails only on structural errors; acceptance remains BLOCKED)
+        if: always() && hashFiles('artifacts/junit-offline.xml') != ''
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set +e
+          python tools/check_traceability.py matrix.yaml --root . --junit offline=artifacts/junit-offline.xml --stage 2 > artifacts/check-traceability.txt 2>&1
+          traceability_rc=$?
+          set -e
+          cat artifacts/check-traceability.txt
+          set +e
+          python tools/summarize_traceability.py artifacts/check-traceability.txt > artifacts/traceability-classes.txt
+          structural_rc=$?
+          set -e
+          cat artifacts/traceability-classes.txt
+          if [ "$traceability_rc" -eq 0 ]; then
+            echo "### Traceability audit: PASS" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Traceability audit: BLOCKED" >> "$GITHUB_STEP_SUMMARY"
+            { echo '```'; cat artifacts/traceability-classes.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            if [ "$structural_rc" -ne 0 ]; then
+              echo "STRUCTURAL traceability errors present (markers/properties/bindings): this is a defect, not expected red." >> "$GITHUB_STEP_SUMMARY"
+              exit 2
+            fi
+            echo "The full traceability gate is not satisfied. Review the traceability-audit artifact; expected-red production stubs and outstanding CI/live evidence may contribute. This diagnostic does not authorize implementation or acceptance." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit 0
+      - name: Upload offline JUnit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-offline
+          path: artifacts/junit-offline.xml
+          if-no-files-found: error
+      - name: Upload traceability audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: traceability-audit
+          path: |
+            artifacts/check-traceability.txt
+            artifacts/traceability-classes.txt
+          if-no-files-found: warn
+      - name: Concurrency stability and evidence (3 repeated runs; logs, JUnit and summary archived)
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          python tools/concurrency_evidence.py --runs 3 2>&1 | tee artifacts/concurrency-evidence-output.txt
+          evidence_rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### Concurrency evidence (exit $evidence_rc)"
+            echo '```'
+            cat artifacts/concurrency-evidence-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$evidence_rc"
+      - name: Verify the main test run's concurrency evidence (overlap, scenarios, integrity)
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          python tools/concurrency_evidence.py --verify-only artifacts/concurrency-evidence 2>&1 | tee -a artifacts/concurrency-evidence-output.txt
+          verify_rc=${PIPESTATUS[0]}
+          set -e
+          { echo "### Concurrency evidence of the main test run (exit $verify_rc)"; echo '```'; tail -n 20 artifacts/concurrency-evidence-output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$verify_rc"
+      - name: Upload concurrency evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: concurrency-evidence
+          path: |
+            artifacts/concurrency-evidence/
+            artifacts/concurrency-evidence-output.txt
+          if-no-files-found: error
+      - name: Dependency audit (nonblocking until final gate)
         continue-on-error: true
         run: pip-audit
+      - name: Hash-pinned constraints evidence status
+        run: |
+          if [ -f requirements-hashed.txt ]; then
+            echo "Hash-pinned constraints file present; final verification remains required."
+          else
+            echo "BLOCKED: hash-pinned constraints evidence remains outstanding; Milestone 1 stays BLOCKED."
+          fi

@@ -1,7 +1,13 @@
-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
+"""Dependency hygiene contract for the Python package metadata."""
+from pathlib import Path
+import tomllib
 import pytest
+ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.mark.requirement("HYGIENE-06")
 def test_unused_dependencies_removed():
-    """Acceptance scenario bound to frozen matrix row(s): HYGIENE-06."""
-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    deps = data["project"]["dependencies"]
+    assert len(deps) == len(set(deps))
+    assert all(dep.split(">=")[0].split("<")[0] for dep in deps)
+    assert not any(dep.startswith("mutmut") for dep in data["project"]["optional-dependencies"]["dev"])

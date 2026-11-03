@@ -1,6 +1,5 @@
-"""CLI contract stub; deliberately performs no network access."""
-def main(argv=None):
-    raise NotImplementedError("Stage-2 implementation not started: download_candles CLI")
+"""Thin executable wrapper for the application CLI contract stub."""
+from trading_app.cli import main
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

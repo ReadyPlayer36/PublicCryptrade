@@ -1,7 +1,13 @@
-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
+"""CI workflow must be explicit about Python baseline and test artifacts."""
+from pathlib import Path
 import pytest
+ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.mark.requirement("CI-01")
 def test_ci_python312_and_artifacts():
-    """Acceptance scenario bound to frozen matrix row(s): CI-01."""
-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "python-version: '3.12'" in workflow
+    assert "junit" in workflow.lower()
+    assert "check_freeze.py" in workflow
+    assert "validate_matrix.py" in workflow
+    assert "spec_check.py" in workflow

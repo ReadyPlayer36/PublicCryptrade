@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Fail unless every red test is a production stub and every green test is allowlisted.
+
+The allowlist is intentionally limited to repository tooling, CI evidence/hygiene,
+source-boundary hygiene, and frozen-matrix reader checks. It is not a behavioral bypass.
+"""
+from __future__ import annotations
+import argparse
+import re
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+ALLOWED_PREFIXES = ("tests/tools/", "tests/ci/")
+ALLOWED_EXACT = {
+    "tests/unit/test_scope.py::test_milestone_one_scope_boundary",
+    "tests/unit/test_gitignore.py::test_sqlite_wal_sidecars_ignored",
+    "tests/unit/test_python_policy.py::test_python_version_policy_documented",
+    "tests/unit/test_project_layout.py::test_python312_project_structure",
+    "tests/unit/test_dependencies.py::test_unused_dependencies_removed",
+    "tests/integration/test_cli.py::test_script_wrapper_is_thin_and_runnable",
+    "tests/mutation/test_mutation_runner.py::test_baseline_and_patch_failure_policy",
+    "tests/mutation/test_required_mutants.py::test_each_mutant_has_killer",
+    "tests/mutation/test_required_mutants.py::test_required_mutant_set",
+    "tests/security/test_network_policy.py::test_no_api_keys",
+    "tests/security/test_network_policy.py::test_no_private_endpoints",
+    "tests/security/test_network_policy.py::test_public_spot_market_data_only",
+    "tests/live/test_run_evidence.py::test_live_run_evidence_manifest",
+    "tests/observations/test_obs01_boundaries.py::test_end_and_start_boundary_semantics",
+    "tests/observations/test_obs03_gate.py::test_observation_gate_before_live_acceptance",
+}
+STUB_RE = re.compile(r"NotImplementedError")
+SRC_FRAME_RE = re.compile(r"(?:src[/\\]trading_app[/\\]|trading_app[/\\]).*\.py")
+
+def nodeid(case: ET.Element) -> str:
+    cls = case.attrib.get("classname", "")
+    name = case.attrib.get("name", "")
+    if cls.startswith("tests."):
+        cls = cls.replace(".", "/") + ".py"
+    elif cls.startswith("tests/") and not cls.endswith(".py"):
+        cls += ".py"
+    elif cls and not cls.startswith("tests/"):
+        cls = "tests/" + cls.replace(".", "/") + ".py"
+    return f"{cls}::{name}"
+
+def allowlisted(n: str) -> bool:
+    return n in ALLOWED_EXACT or n.startswith(ALLOWED_PREFIXES)
+
+def _text_of(element) -> str:
+    return "" if element is None else "\n".join((element.text or "", element.attrib.get("message", "")))
+
+
+def _final_gate(args: argparse.Namespace) -> int:
+    """Final acceptance gate: no stubs, no failures, no skips, no hollow tests, allowlist empty."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from tools.hollow_scan import hollow_tests, load_allowlist
+    errors: list[str] = []
+    if args.implementation_stage:
+        errors.append("--final-gate cannot be combined with --implementation-stage")
+    if args.pytest_exit_code != 0:
+        errors.append(f"pytest exit code must be 0, got {args.pytest_exit_code}")
+    try:
+        cases = list(ET.parse(args.junit).getroot().iter("testcase"))
+    except Exception as exc:
+        print(f"FINAL GATE FAIL: unreadable JUnit: {exc}")
+        return 1
+    if not cases:
+        errors.append("JUnit contains no testcases")
+    for case in cases:
+        if case.find("failure") is not None or case.find("error") is not None or case.find("skipped") is not None:
+            errors.append(f"not passing: {nodeid(case)}")
+    try:
+        entries = load_allowlist(args.hollow_allowlist)
+        if entries:
+            errors.append(f"hollow allowlist must be empty, has {len(entries)} entries")
+    except ValueError as exc:
+        errors.append(str(exc))
+    remaining = hollow_tests(args.root)
+    if remaining:
+        errors.append(f"{len(remaining)} hollow test(s) remain: {sorted(remaining)[:5]}")
+    if errors:
+        print(f"FINAL GATE FAIL: {len(errors)} issue(s)")
+        for error in errors:
+            print(" - " + error)
+        return 1
+    print(f"FINAL GATE PASS: {len(cases)} tests passed; no hollow tests; allowlist empty")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("junit", type=Path)
+    ap.add_argument("--pytest-exit-code", type=int, required=True)
+    ap.add_argument("--implementation-stage", action="store_true",
+                    help="allow passing behavioral tests (code is being implemented); "
+                         "every failure must still be a NotImplementedError from an unimplemented src stub")
+    ap.add_argument("--final-gate", action="store_true",
+                    help="final acceptance: every test passes, no hollow tests exist, and the hollow allowlist is present and empty")
+    ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1], help="repository root (final gate)")
+    ap.add_argument("--hollow-allowlist", type=Path, default=Path(__file__).resolve().parents[1] / "tests" / "hollow_allowlist.txt",
+                    help="known assertion-free placeholder tests; tolerated (and counted) while failing in implementation-stage mode")
+    args = ap.parse_args()
+    if args.final_gate:
+        return _final_gate(args)
+    hollow = set()
+    if args.implementation_stage and args.hollow_allowlist.is_file():
+        hollow = {l.strip() for l in args.hollow_allowlist.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")}
+    hollow_failing = 0
+    if not args.junit.is_file():
+        print(f"RED-REASON GATE FAIL: JUnit file missing: {args.junit}")
+        return 1
+    try:
+        root = ET.parse(args.junit).getroot()
+    except Exception as exc:
+        print(f"RED-REASON GATE FAIL: invalid JUnit XML: {exc}")
+        return 1
+    errors: list[str] = []
+    cases = list(root.iter("testcase"))
+    if not cases:
+        errors.append("JUnit contains no testcases")
+    # Collection errors are never an acceptable expected-red result.
+    testcase_level = {id(e) for c in cases for e in c.iter("error")}      # these are reported once, as TESTCASE-LEVEL
+    for el in root.iter():
+        if el.tag == "error" and id(el) not in testcase_level:
+            errors.append(f"SUITE-LEVEL error (collection/session, not tied to one test): {el.attrib.get('message', el.text or 'unknown error')}")
+    expected_red = 0
+    for case in cases:
+        n = nodeid(case)
+        failure = case.find("failure")
+        error = case.find("error")
+        skipped = case.find("skipped")
+        if skipped is not None:
+            errors.append(f"skip is not an expected-red result: {n}")
+            continue
+        if (failure is not None or error is not None) and n in hollow:
+            hollow_failing += 1          # known placeholder awaiting a real test; tracked by the hollow-test ratchet
+            continue
+        if failure is not None or error is not None:
+            blob = "\n".join(_text_of(el) for el in (failure, error))
+            if error is not None:
+                errors.append(f"TESTCASE-LEVEL error (setup/teardown/warning-as-error) is not an expected-red result: {n}: " + (error.attrib.get("message") or "no message").splitlines()[0][:160])
+            elif STUB_RE.search(blob) and SRC_FRAME_RE.search(blob):
+                expected_red += 1
+            else:
+                errors.append(f"failure is not a production NotImplementedError stub: {n}")
+        elif not args.implementation_stage and not allowlisted(n):
+            errors.append(f"behavioral test passed against stubs and is not allowlisted: {n}")
+    if args.pytest_exit_code not in (0, 1):
+        errors.append(f"pytest exit code {args.pytest_exit_code} indicates collection/internal failure")
+    if expected_red == 0 and not args.implementation_stage:
+        errors.append("no expected production-stub failures were observed")
+    if errors:
+        print(f"RED-REASON GATE FAIL: {len(errors)} issue(s); expected production-stub failures={expected_red}")
+        for e in errors: print(" -", e)
+        return 1
+    mode = "implementation stage: passes allowed" if args.implementation_stage else "all passes are allowlisted"
+    print(f"RED-REASON GATE PASS: {expected_red} failure(s) are NotImplementedError from src/trading_app; {mode}; pytest exit={args.pytest_exit_code}" + (f"; KNOWN HOLLOW placeholders failing={hollow_failing} (must reach 0 at the final gate)" if hollow else ""))
+    return 0
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:      # the gate must never die with a bare traceback
+        print(f"RED-REASON GATE ERROR: {type(exc).__name__}: {exc}")
+        raise SystemExit(1)

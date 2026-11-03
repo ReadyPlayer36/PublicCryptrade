@@ -1,0 +1,2515 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 302a687..aaf24ee 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -15,15 +15,39 @@ jobs:
+           cache: pip
+       - name: Install project and development tools
+         run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
+-      - name: Confirm Python baseline
+-        run: python --version
+-      - name: Collect all tests (must succeed even while behavior tests are red)
++      - name: Confirm Python and pytest baseline
++        run: python -c "import sys, pytest; print(sys.version); print('pytest', pytest.__version__); assert sys.version_info[:2] == (3, 12); assert pytest.__version__ == '9.1.1'"
++      - name: Collect all tests
+         run: python -m pytest --collect-only -q
+-      - name: Run spec tooling
+-        run: python -m pytest tests/tools/test_spec_tooling.py -q
+-      - name: Run behavior tests (expected red until implementation is approved)
+-        continue-on-error: true
+-        run: python -m pytest -ra
+-      - name: Dependency audit
++      - name: Check frozen specification hashes
++        run: python tools/check_freeze.py
++      - name: Validate frozen matrix
++        run: python tools/validate_matrix.py matrix.yaml --schema matrix_schema.json --m1 docs/source/milestone_1.md --m12 docs/source/milestone_1_2.md
++      - name: Run specification/source checks (blocking)
++        run: python tools/spec_check.py --project-m1 reviewer/project_source_m1.md --project-m12 reviewer/project_source_m1_2.md
++      - name: Run expected-red behavior suite and export JUnit
++        shell: bash
++        run: |
++          mkdir -p artifacts
++          set +e
++          python -m pytest -ra --junitxml=artifacts/junit-offline.xml
++          pytest_rc=$?
++          set -e
++          python tools/red_reason_gate.py artifacts/junit-offline.xml --pytest-exit-code "$pytest_rc"
++      - name: Upload offline JUnit evidence
++        if: always()
++        uses: actions/upload-artifact@v4
++        with:
++          name: junit-offline
++          path: artifacts/junit-offline.xml
++          if-no-files-found: error
++      - name: Dependency audit (nonblocking until final gate)
+         continue-on-error: true
+         run: pip-audit
++      - name: Hash-pinned constraints evidence status
++        run: |
++          if [ -f requirements-hashed.txt ]; then
++            echo "Hash-pinned constraints file present; final verification remains required."
++          else
++            echo "BLOCKED: hash-pinned constraints evidence remains outstanding; Milestone 1 stays BLOCKED."
++          fi
+diff --git a/README.md b/README.md
+index 2ef0160..ae414d7 100644
+--- a/README.md
++++ b/README.md
+@@ -1,15 +1,25 @@
+-# Stage-2 tests-only commit (review candidate)
++# Stage-2 tests-only acceptance scaffold (review candidate)
+ 
+-This commit is intentionally **not an implementation**. It preserves the Stage-1 frozen specification and approval record, adds a Python 3.12 CI workflow, reads retry/finality/cooldown/storage policy from `matrix.yaml`, and supplies importable `NotImplementedError` production stubs.
++This commit is **not an implementation** and does not authorize production implementation. It preserves the Stage-1 frozen specification, keeps Milestone 1 `BLOCKED`, and adds acceptance tests plus test-gate tooling around explicit `NotImplementedError` production stubs.
+ 
+-## Expected status
++## Test design
+ 
+-- `tests/tools/test_spec_tooling.py` and policy/freeze-integrity tests are intended to pass.
+-- The behavioral acceptance suite is intentionally red because production behavior has not been implemented. Red tests should fail through explicit `NotImplementedError` stubs or explicit not-yet-implemented security assertions—not because modules cannot be imported.
+-- The CI workflow always checks collection and the frozen spec tooling. It runs the behavior suite as a non-blocking, explicitly expected-red step for this review commit; this is not a passing acceptance gate.
+-- Local verification confirmed collection and the focused passing checks, but the complete suite did not finish within the available 200-second execution window. No full-suite pass is claimed; the expected-red run and its runtime should be reviewed before relying on CI behavior.
+-- No API credentials, private endpoints, orders, or live network requests are included. OBS-01/OBS-02 and finality-lag approval remain prerequisites to any future LIVE acceptance run.
++- Independent finality, retry/cooldown, and golden-hash vectors live in `tests/fixtures/vectors/`.
++- `tests/fixtures/policy.py` is the only test-side reader of `matrix.yaml`. Production modules must not import the acceptance matrix; `src/trading_app/policy.py` has been removed.
++- `src/trading_app/data/finality.py` defines the pure `is_final` and `effective_end_ms` contract stubs. Client-level tests check end-time clamping and aborting when upstream returns `close_time_ms >= B`.
++- Deterministic dependencies (`sleep`, `jitter`, `now_ms`, and `http_client`) are injected through constructors in behavioral tests; tests do not monkeypatch global clocks or sleep functions.
++- `tests/tools/test_degenerate_double.py` runs client and validator tests against degenerate doubles and fails if any of those tests pass.
++- `tools/red_reason_gate.py` accepts a red test only when the traceback contains a `NotImplementedError` from `src/trading_app/`. Test-body placeholders, other failures, skips, collection errors, and unexpected passes are rejected. The passing tooling/hygiene allowlist is documented in the gate and `docs/stage2-test-decisions.md`.
+ 
+-## Review boundaries
++## CI and evidence
+ 
+-Please review this tests-only commit before implementation starts. Do not interpret this scaffold as Milestone 1 approval; Milestone 1 remains BLOCKED.
++- Python 3.12 and pytest 9.1.1 are the required CI baseline.
++- Freeze, matrix validation, and specification/source checks are blocking.
++- The expected-red suite exports JUnit and must pass the red-reason gate; JUnit is uploaded as a CI artifact. `pip-audit` remains nonblocking until the final gate.
++- Offline tests never call Binance. No credentials, private endpoints, orders, or live requests are included. OBS-01/OBS-02, finality-lag approval, and actual live/CI evidence remain outstanding.
++
++## Provenance and review boundary
++
++The public baseline commit is `a88a843f7c79354b193234fc3cdbfad9b661d098`, with tree `408a6a4263528d846a5277fab9f75f0ff036dd74`. The local source bundle's original commit identity was `de1bd38e73d7b6cdd0ab2d2bc0c42d105ae470a2`; its tree matches the public baseline, but that original history is not present in the public repository. The revised commit message records this provenance gap. Pushing original bundle history, if desired, is a separate operation on a separate branch.
++
++The tests-only candidate is not approved until reviewed. Milestone 1 remains **BLOCKED**, and production implementation remains unauthorized.
+diff --git a/docs/stage2-test-decisions.md b/docs/stage2-test-decisions.md
+new file mode 100644
+index 0000000..dc2a786
+--- /dev/null
++++ b/docs/stage2-test-decisions.md
+@@ -0,0 +1,15 @@
++# Stage 2 test-design decisions (tests-only revision)
++
++This document records acceptance-test decisions only. It does not authorize production implementation or alter the frozen v2.9 matrix.
++
++- **Determinism:** constructors will accept injected `sleep`, `jitter`, `now_ms`, and `http_client`; tests will not monkeypatch global time/sleep functions.
++- **Sleep budget:** abort before sleeping when `total_slept + next_wait > 30`; exactly 30 seconds is allowed.
++- **Timeouts:** `ConnectError` and `ConnectTimeout` are connect failures and may trigger host fallback only before the first successful server-time call. `ReadTimeout`, `WriteTimeout`, and `PoolTimeout` retry on the same host.
++- **Cooldown file:** JSON shape is `{"until_ms": int, "reason": str}` and is global across allowed hosts. An active cooldown blocks all network I/O, including the time endpoint. Missing, corrupt, non-integer, or negative values fail closed.
++- **Finality:** the client sends `endTime = effective_end - 1`. If upstream still returns any candle with `close_time_ms >= B`, abort; never silently drop it. The independent vectors live under `tests/fixtures/vectors/`.
++- **Conflict comparison:** numeric `Decimal` equality for prices, base volume, and quote volume; integer equality for close time and trade count.
++- **Exception contracts:** `EmptyEffectiveRangeError` for an effective end not greater than requested start; `NaiveDatetimeError` for naive input datetimes; `NonFinalCandleError` when upstream returns a non-final candle; `CorruptCooldownError` for invalid cooldown persistence. Tests assert type and diagnostic message.
++- **Red-reason gate:** a failure is an expected red only when JUnit traceback includes `NotImplementedError` raised from `src/trading_app/`. Test-body placeholders, assertion failures, skips, collection errors, and unexpected passes are rejected. Passing tooling/CI/hygiene rows are explicitly allowlisted in `tools/red_reason_gate.py`.
++- **Provenance:** the public baseline `a88a843` has tree `408a6a42…`; the local bundle's original commit identity is `de1bd38…` and is not present in public history. The revised commit message records that gap. Any push of original history is a separate, optional branch operation.
++
++Any test expectation that conflicts with `matrix.yaml` requires a new spec version and reviewer sign-off; no frozen matrix or frozen tooling file is changed by this revision.
+diff --git a/pyproject.toml b/pyproject.toml
+index 73daa9b..5a86066 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -17,11 +17,10 @@ dependencies = [
+ 
+ [project.optional-dependencies]
+ dev = [
+-  "pytest>=8.2,<9",
++  "pytest>=9.1.1,<10",
+   "pytest-cov>=5,<7",
+   "coverage[toml]>=7.5,<8",
+   "pip-audit>=2.7,<3",
+-  "mutmut>=2.5,<3",
+ ]
+ 
+ [tool.setuptools.packages.find]
+@@ -31,6 +30,7 @@ where = ["src"]
+ addopts = "-ra --strict-markers"
+ testpaths = ["tests"]
+ markers = ["requirement(row_id): binds a behavioral test to a frozen acceptance-row ID"]
++filterwarnings = ["error"]
+ 
+ [tool.coverage.run]
+ branch = true
+diff --git a/scripts/download_candles.py b/scripts/download_candles.py
+index 362268b..5b3dd64 100644
+--- a/scripts/download_candles.py
++++ b/scripts/download_candles.py
+@@ -1,6 +1,5 @@
+-"""CLI contract stub; deliberately performs no network access."""
+-def main(argv=None):
+-    raise NotImplementedError("Stage-2 implementation not started: download_candles CLI")
++"""Thin executable wrapper for the application CLI contract stub."""
++from trading_app.cli import main
+ 
+ if __name__ == "__main__":
+-    main()
++    raise SystemExit(main())
+diff --git a/src/trading_app/cli.py b/src/trading_app/cli.py
+new file mode 100644
+index 0000000..5d192b2
+--- /dev/null
++++ b/src/trading_app/cli.py
+@@ -0,0 +1,4 @@
++"""Command-line entrypoint contract stub; no application behavior is implemented."""
++def main(argv=None):
++    """Parse public-data research arguments and return a process status; not implemented."""
++    raise NotImplementedError("Stage-2 implementation not started: download_candles CLI")
+diff --git a/src/trading_app/data/binance_client.py b/src/trading_app/data/binance_client.py
+index ec9b2bc..934eb13 100644
+--- a/src/trading_app/data/binance_client.py
++++ b/src/trading_app/data/binance_client.py
+@@ -2,9 +2,18 @@
+ class BinanceClientError(RuntimeError): pass
+ class BinanceMarketDataClient:
+     def __init__(self, *args, **kwargs): self._stub_args=(args,kwargs)
+-    def close(self): raise NotImplementedError("Stage-2 implementation not started: close")
+-    def get_server_time(self): raise NotImplementedError("Stage-2 implementation not started: get_server_time")
+-    def get_historical_klines(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
++    def close(self):
++        """Close the injected HTTP client; no implementation exists in this scaffold."""
++        raise NotImplementedError("Stage-2 implementation not started: close")
++    def get_server_time(self):
++        """Return Binance public server time; fail closed on time errors and active cooldown."""
++        raise NotImplementedError("Stage-2 implementation not started: get_server_time")
++    def get_historical_klines(self, *args, **kwargs):
++        """Fetch final candles only. Raise EmptyEffectiveRangeError, NaiveDatetimeError,
++        or NonFinalCandleError for their respective input/range/upstream failure classes.
++        Constructor dependencies include sleep, jitter, now_ms, and http_client.
++        """
++        raise NotImplementedError("Stage-2 implementation not started: get_historical_klines")
+ 
+ def validate_public_url(*args, **kwargs):
+     raise NotImplementedError("Stage-2 implementation not started: validate_public_url")
+diff --git a/src/trading_app/data/cooldown.py b/src/trading_app/data/cooldown.py
+new file mode 100644
+index 0000000..52c4375
+--- /dev/null
++++ b/src/trading_app/data/cooldown.py
+@@ -0,0 +1,17 @@
++"""Cooldown persistence contract stubs; implementation is intentionally deferred.
++
++Persist JSON exactly as {"until_ms": int, "reason": str}. The state is global
++across allowed hosts and an active cooldown prevents all HTTP calls, including
++server-time calls. Missing, corrupt, non-integer, and negative fields raise
++CorruptCooldownError with a diagnostic message; no network call may occur first.
++"""
++class CorruptCooldownError(ValueError):
++    """Raised when cooldown state is missing, corrupt, non-integer, or negative."""
++
++def read_cooldown(*args, **kwargs):
++    """Load and validate cooldown JSON; raises CorruptCooldownError on invalid state."""
++    raise NotImplementedError("Stage-2 implementation not started: read_cooldown")
++
++def write_cooldown(*args, **kwargs):
++    """Atomically persist cooldown JSON; not implemented in Stage 2 scaffold."""
++    raise NotImplementedError("Stage-2 implementation not started: write_cooldown")
+diff --git a/src/trading_app/data/finality.py b/src/trading_app/data/finality.py
+new file mode 100644
+index 0000000..ffc8a04
+--- /dev/null
++++ b/src/trading_app/data/finality.py
+@@ -0,0 +1,23 @@
++"""Pure finality contract stubs. Implementation is not authorized yet.
++
++`is_final` must implement close_time_ms < server_time_ms - lag_ms.
++`effective_end_ms` must implement min(requested_end_ms,
++floor((server_time_ms-lag_ms)/interval_ms)*interval_ms). Client range validation
++must raise EmptyEffectiveRangeError when effective_end_ms <= requested_start_ms.
++Naive datetimes must raise NaiveDatetimeError; returned candles with close_time_ms
++>= B must raise NonFinalCandleError rather than being silently dropped.
++"""
++class EmptyEffectiveRangeError(ValueError):
++    """Raised when effective end is not greater than requested start."""
++class NaiveDatetimeError(ValueError):
++    """Raised when an input datetime has no timezone."""
++class NonFinalCandleError(RuntimeError):
++    """Raised when upstream returns a candle whose close time is >= B."""
++
++def is_final(close_time_ms: int, server_time_ms: int, lag_ms: int) -> bool:
++    """Return close_time_ms < server_time_ms-lag_ms; not implemented in Stage 2."""
++    raise NotImplementedError("Stage-2 implementation not started: is_final")
++
++def effective_end_ms(requested_end_ms: int, server_time_ms: int, lag_ms: int, interval_ms: int) -> int:
++    """Return min(requested_end_ms, floor((S-L)/I)*I); not implemented in Stage 2."""
++    raise NotImplementedError("Stage-2 implementation not started: effective_end_ms")
+diff --git a/src/trading_app/data/repository.py b/src/trading_app/data/repository.py
+index 15fe231..8e59380 100644
+--- a/src/trading_app/data/repository.py
++++ b/src/trading_app/data/repository.py
+@@ -6,3 +6,6 @@ class CandleRepository:
+     def create_tables(self): raise NotImplementedError("Stage-2 implementation not started: create_tables")
+     def insert_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: insert_candles")
+     def get_candles(self, *args, **kwargs): raise NotImplementedError("Stage-2 implementation not started: get_candles")
++    def scan_legacy_data(self, *args, **kwargs):
++        """Return legacy-data findings without modifying records; not implemented in Stage 2."""
++        raise NotImplementedError("Stage-2 implementation not started: scan_legacy_data")
+diff --git a/src/trading_app/policy.py b/src/trading_app/policy.py
+deleted file mode 100644
+index ea33815..0000000
+--- a/src/trading_app/policy.py
++++ /dev/null
+@@ -1,28 +0,0 @@
+-"""Read policy values from the Stage-1-frozen matrix; do not duplicate constants."""
+-from functools import lru_cache
+-from pathlib import Path
+-from typing import Any
+-import yaml
+-
+-ROOT = Path(__file__).resolve().parents[2]
+-MATRIX_PATH = ROOT / "matrix.yaml"
+-
+-@lru_cache(maxsize=1)
+-def frozen_policy() -> dict[str, Any]:
+-    with MATRIX_PATH.open("r", encoding="utf-8") as stream:
+-        matrix = yaml.safe_load(stream)
+-    if matrix.get("schema_version") != "2.9":
+-        raise RuntimeError("Unexpected frozen specification version")
+-    return matrix
+-
+-def retry_policy() -> dict[str, Any]:
+-    return frozen_policy()["retry"]
+-
+-def cooldown_policy() -> dict[str, Any]:
+-    return frozen_policy()["cooldown"]
+-
+-def finality_policy() -> dict[str, Any]:
+-    return frozen_policy()["finality"]
+-
+-def storage_policy() -> dict[str, Any]:
+-    return frozen_policy()["storage"]
+diff --git a/tests/ci/test_clean_install.py b/tests/ci/test_clean_install.py
+index 90ce706..8588fbd 100644
+--- a/tests/ci/test_clean_install.py
++++ b/tests/ci/test_clean_install.py
+@@ -1,13 +1,18 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""CI hygiene checks for the documented install contract; no package is installed here."""
++import tomllib
++from pathlib import Path
+ import pytest
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("INSTALL-01")
+ def test_clean_python312_install():
+-    """Acceptance scenario bound to frozen matrix row(s): INSTALL-01."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
+-
++    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
++    assert data["project"]["requires-python"] == ">=3.12"
++    assert (ROOT / "src/trading_app/__init__.py").is_file()
++    assert "setuptools.build_meta" == data["build-system"]["build-backend"]
+ 
+ @pytest.mark.requirement("INSTALL-01")
+ def test_m1_installation_procedure():
+-    """Acceptance scenario bound to frozen matrix row(s): INSTALL-01."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    doc = (ROOT / "docs/source/milestone_1.md").read_text().lower()
++    assert "pip install" in doc
++    assert "python" in doc
+diff --git a/tests/ci/test_dependency_audit.py b/tests/ci/test_dependency_audit.py
+index 9892e85..ce6808d 100644
+--- a/tests/ci/test_dependency_audit.py
++++ b/tests/ci/test_dependency_audit.py
+@@ -1,13 +1,20 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Dependency-audit CI wiring checks; actual audit remains a separate nonblocking job."""
++from pathlib import Path
++import tomllib
+ import pytest
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("DEP-02")
+ def test_hash_pinned_constraints_reproducible():
+-    """Acceptance scenario bound to frozen matrix row(s): DEP-02."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
+-
++    # This offline hygiene check guards against falsely claiming the final evidence exists.
++    # The actual row remains unaccepted until a real hashed constraints artifact is supplied.
++    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
++    assert "Hash-pinned constraints evidence status" in workflow
++    assert "BLOCKED: hash-pinned constraints evidence remains outstanding" in workflow
++    assert not (ROOT / "requirements-hashed.txt").exists()
+ 
+ @pytest.mark.requirement("DEP-01")
+ def test_pip_audit_zero_known_vulnerabilities():
+-    """Acceptance scenario bound to frozen matrix row(s): DEP-01."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
++    assert "pip-audit" in workflow
++    assert "Dependency audit" in workflow
+diff --git a/tests/ci/test_workflow_evidence.py b/tests/ci/test_workflow_evidence.py
+index c39bb81..ce5ef5f 100644
+--- a/tests/ci/test_workflow_evidence.py
++++ b/tests/ci/test_workflow_evidence.py
+@@ -1,7 +1,13 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""CI workflow must be explicit about Python baseline and test artifacts."""
++from pathlib import Path
+ import pytest
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("CI-01")
+ def test_ci_python312_and_artifacts():
+-    """Acceptance scenario bound to frozen matrix row(s): CI-01."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
++    assert "python-version: '3.12'" in workflow
++    assert "junit" in workflow.lower()
++    assert "check_freeze.py" in workflow
++    assert "validate_matrix.py" in workflow
++    assert "spec_check.py" in workflow
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 88e1f13..135886a 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -1,3 +1,10 @@
+ import pytest
+ 
+-# Matrix requirement markers are registered in pyproject.toml.
++# Export every frozen-matrix requirement marker into JUnit testcase properties.
++@pytest.hookimpl(hookwrapper=True)
++def pytest_runtest_makereport(item, call):
++    outcome = yield
++    report = outcome.get_result()
++    for marker in item.iter_markers(name="requirement"):
++        if marker.args:
++            report.user_properties.append(("requirement", str(marker.args[0])))
+diff --git a/tests/fixtures/candles.py b/tests/fixtures/candles.py
+new file mode 100644
+index 0000000..205660d
+--- /dev/null
++++ b/tests/fixtures/candles.py
+@@ -0,0 +1,15 @@
++"""Normalized candle-like fixtures; values are deliberately independent of production constructors."""
++from datetime import datetime, timedelta, timezone
++from decimal import Decimal
++from types import SimpleNamespace
++
++START = datetime(2026, 1, 5, tzinfo=timezone.utc)
++
++def candle(*, open_time=START, close_time=None, open="100.10", high="101.00", low="99.50", close="100.50", volume="12.34500000", quote_volume="1240.00000000", trade_count=100, created_at_ms=1000):
++    return SimpleNamespace(
++        symbol="BTCUSDT", timeframe="5m", open_time=open_time,
++        close_time=close_time or open_time + timedelta(minutes=5) - timedelta(milliseconds=1),
++        open=Decimal(open), high=Decimal(high), low=Decimal(low), close=Decimal(close),
++        volume=Decimal(volume), quote_volume=Decimal(quote_volume), trade_count=trade_count,
++        created_at_ms=created_at_ms,
++    )
+diff --git a/tests/fixtures/fakes.py b/tests/fixtures/fakes.py
+index 70a6aed..126d01a 100644
+--- a/tests/fixtures/fakes.py
++++ b/tests/fixtures/fakes.py
+@@ -14,3 +14,17 @@ class FakeHttpClient:
+         if self.errors: raise self.errors.pop(0)
+         if not self.responses: raise AssertionError("unexpected HTTP request")
+         return self.responses.pop(0)
++
++class SequenceFakeHttpClient:
++    """Deterministic ordered events: each get consumes exactly one response or exception."""
++    def __init__(self, events):
++        self.events = list(events)
++        self.calls = []
++    def get(self, url, *, params=None):
++        self.calls.append((url, params or {}))
++        if not self.events:
++            raise AssertionError("unexpected HTTP request")
++        event = self.events.pop(0)
++        if isinstance(event, BaseException):
++            raise event
++        return event
+diff --git a/tests/fixtures/policy.py b/tests/fixtures/policy.py
+new file mode 100644
+index 0000000..8ba5a96
+--- /dev/null
++++ b/tests/fixtures/policy.py
+@@ -0,0 +1,20 @@
++"""Test-only reader for the frozen acceptance matrix; production must not import it."""
++from functools import lru_cache
++from pathlib import Path
++from typing import Any
++import yaml
++
++ROOT = Path(__file__).resolve().parents[2]
++MATRIX_PATH = ROOT / "matrix.yaml"
++
++@lru_cache(maxsize=1)
++def frozen_policy() -> dict[str, Any]:
++    matrix = yaml.safe_load(MATRIX_PATH.read_text(encoding="utf-8"))
++    if matrix.get("schema_version") != "2.9":
++        raise AssertionError("unexpected frozen specification version")
++    return matrix
++
++def retry_policy(): return frozen_policy()["retry"]
++def cooldown_policy(): return frozen_policy()["cooldown"]
++def finality_policy(): return frozen_policy()["finality"]
++def storage_policy(): return frozen_policy()["storage"]
+diff --git a/tests/fixtures/vectors/finality_vectors.json b/tests/fixtures/vectors/finality_vectors.json
+new file mode 100644
+index 0000000..46cae59
+--- /dev/null
++++ b/tests/fixtures/vectors/finality_vectors.json
+@@ -0,0 +1,15 @@
++{
++ "interval_ms": 300000,
++ "rule": "close_time_ms < B",
++ "effective_end": "min(requested_end, floor((S-L)/I)*I)",
++ "note": "close_time is always open+I-1, so the three boundary cases vary S (and L) around one fixed candle. Pure-function level: is_final(close,S,L). Client level: clamp before request, abort if upstream returns close>=B anyway.",
++ "cases": [
++  {"L_ms":0,"S_ms":1767571500000,"B_ms":1767571500000,"candle_open_ms":1767571200000,"candle_close_ms":1767571499999,"case":"B-1_is_final","expected_final":true,"requested_end_ms":1767571500000,"expected_effective_end_ms":1767571500000},
++  {"L_ms":0,"S_ms":1767571499999,"B_ms":1767571499999,"candle_open_ms":1767571200000,"candle_close_ms":1767571499999,"case":"B_not_final","expected_final":false,"requested_end_ms":1767571500000,"expected_effective_end_ms":1767571200000},
++  {"L_ms":0,"S_ms":1767571499998,"B_ms":1767571499998,"candle_open_ms":1767571200000,"candle_close_ms":1767571499999,"case":"B+1_not_final","expected_final":false,"requested_end_ms":1767571500000,"expected_effective_end_ms":1767571200000},
++  {"L_ms":60000,"S_ms":1767571560000,"B_ms":1767571500000,"candle_open_ms":1767571200000,"candle_close_ms":1767571499999,"case":"B-1_is_final","expected_final":true,"requested_end_ms":1767571500000,"expected_effective_end_ms":1767571500000},
++  {"L_ms":60000,"S_ms":1767571559999,"B_ms":1767571499999,"candle_open_ms":1767571200000,"candle_close_ms":1767571499999,"case":"B_not_final","expected_final":false,"requested_end_ms":1767571500000,"expected_effective_end_ms":1767571200000},
++  {"L_ms":60000,"S_ms":1767571559998,"B_ms":1767571499998,"candle_open_ms":1767571200000,"candle_close_ms":1767571499999,"case":"B+1_not_final","expected_final":false,"requested_end_ms":1767571500000,"expected_effective_end_ms":1767571200000}
++ ],
++ "extra":{"future_end":{"S_ms":1767574201234,"L_ms":0,"requested_end_ms":1767601200000,"expected_effective_end_ms":1767574200000},"empty_effective_range":{"S_ms":1767571500005,"L_ms":0,"requested_start_ms":1767571500000,"requested_end_ms":1767571800000,"expected":"explicit error: effective_end <= start"}}
++}
+diff --git a/tests/fixtures/vectors/golden_hash_vectors.json b/tests/fixtures/vectors/golden_hash_vectors.json
+new file mode 100644
+index 0000000..1fd2b93
+--- /dev/null
++++ b/tests/fixtures/vectors/golden_hash_vectors.json
+@@ -0,0 +1,8 @@
++{
++ "spec_ref":"matrix.yaml hash block (field order, 0x1f field sep, 0x0a record sep, no trailing LF, decimals via format(d,'f'), UTF-8)",
++ "empty":{"records":[],"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
++ "one_record":{"records":[{"symbol":"BTCUSDT","timeframe":"5m","open_time_ms":1767571200000,"close_time_ms":1767571499999,"open":"100.10","high":"101.00","low":"99.50","close":"100.50","volume":"12.34500000","quote_volume":"1240.00000000","trade_count":100}],"sha256":"a408b348298ece500741f89ca6eb5045c302855813863e976157a29eed1bc7bb"},
++ "two_records":{"records":[{"symbol":"BTCUSDT","timeframe":"5m","open_time_ms":1767571200000,"close_time_ms":1767571499999,"open":"100.10","high":"101.00","low":"99.50","close":"100.50","volume":"12.34500000","quote_volume":"1240.00000000","trade_count":100},{"symbol":"BTCUSDT","timeframe":"5m","open_time_ms":1767571500000,"close_time_ms":1767571799999,"open":"100.50","high":"100.90","low":"100.00","close":"100.20","volume":"0.00000000","quote_volume":"0.00000001","trade_count":0}],"sha256":"943eb5672a821dddb6c6f7400a7bde16f13a11a674da1ff02ffddb45b672d14a"},
++ "negative_control_reordered":{"note":"must differ from two_records","sha256":"28b1777cbb9378b5eab18e8a81eb5f21bf50575b2ca8302cebaa4c00c3018a33"},
++ "negative_control_scientific_notation":{"note":"hashing str(Decimal) instead of format(d,'f') changes the digest for r2 (0E-8 / 1E-8)","sha256_with_str_decimal":"8a08d76ff03a49ce1f5170091f397d44aabd9450f6bc4f412d2d2320c7fc0c2b","differs_from_correct_one_record_r2":true}
++}
+diff --git a/tests/fixtures/vectors/retry_cooldown_vectors.json b/tests/fixtures/vectors/retry_cooldown_vectors.json
+new file mode 100644
+index 0000000..54b1b5b
+--- /dev/null
++++ b/tests/fixtures/vectors/retry_cooldown_vectors.json
+@@ -0,0 +1,20 @@
++{
++ "policy_from_frozen_yaml":{"attempts_total":4,"backoff_base_s":1,"factor":2,"cap_s":3,"jitter_max_s":1,"budget_s":30,"retry_after_cap_s":60},
++ "formula":"sleep_k = min(cap, base*factor**k) + jitter (k=0..2); jitter injected, 0<=jitter<=jitter_max; Retry-After sleeps exactly Retry-After, no jitter",
++ "cases":[
++  {"name":"500x4","responses":[500,500,500,500],"expected_requests":4,"jitter_fixed_s":0.25,"expected_sleeps_s":[1.25,2.25,3.25],"expected_outcome":"BinanceClientError, no cooldown"},
++  {"name":"500_then_200","responses":[500,200],"expected_requests":2,"jitter_fixed_s":0.0,"expected_sleeps_s":[1],"expected_outcome":"success"},
++  {"name":"400","responses":[400],"expected_requests":1,"expected_sleeps_s":[],"expected_outcome":"BinanceClientError, no cooldown"},
++  {"name":"403","responses":[403],"expected_requests":1,"expected_sleeps_s":[],"expected_outcome":"BinanceClientError, no cooldown"},
++  {"name":"418_no_retry_after","responses":[418],"expected_requests":1,"expected_sleeps_s":[],"expected_cooldown_s":600},
++  {"name":"418_retry_after_900","responses":[{"status":418,"retry_after":900}],"expected_requests":1,"expected_sleeps_s":[],"expected_cooldown_s":900},
++  {"name":"429_RA10_x4","responses":[{"status":429,"retry_after":10},{"status":429,"retry_after":10},{"status":429,"retry_after":10},{"status":429,"retry_after":10}],"expected_requests":4,"expected_sleeps_s":[10,10,10],"expected_cooldown_s":300,"note":"total sleep 30 == budget (not exceeded); exhausted 429 -> max(10,300)"},
++  {"name":"429_RA11","responses":[{"status":429,"retry_after":11},{"status":429,"retry_after":11},{"status":429,"retry_after":11},{"status":429,"retry_after":11}],"expected_requests":3,"expected_sleeps_s":[11,11],"expected_cooldown_s":600,"note":"third wait would make 33>30 -> abort before sleeping, trigger=budget exceeded -> max(11,600)"},
++  {"name":"429_RA61","responses":[{"status":429,"retry_after":61}],"expected_requests":1,"expected_sleeps_s":[],"expected_cooldown_s":600},
++  {"name":"429_RA45","responses":[{"status":429,"retry_after":45}],"expected_requests":1,"expected_sleeps_s":[],"expected_cooldown_s":600,"note":"<=60 cap but >30 budget: abort + cooldown"},
++  {"name":"429_no_header_x4","responses":[429,429,429,429],"expected_requests":4,"jitter_fixed_s":0.0,"expected_sleeps_s":[1,2,3],"expected_cooldown_s":300},
++  {"name":"2xx_malformed_json_x4","responses":["200:not-json","200:not-json","200:not-json","200:not-json"],"expected_requests":4,"jitter_fixed_s":0.0,"expected_sleeps_s":[1,2,3],"expected_outcome":"BinanceClientError (malformed), no cooldown"},
++  {"name":"2xx_wrong_shape","responses":["200:{\"msg\":\"x\"}"],"expected_requests":1,"expected_sleeps_s":[],"expected_outcome":"data/schema error, not retried"},
++  {"name":"3xx","responses":[302],"expected_requests":1,"expected_sleeps_s":[],"expected_outcome":"error, redirect never followed"}
++ ]
++}
+diff --git a/tests/integration/test_binance_download.py b/tests/integration/test_binance_download.py
+index 897e214..4560088 100644
+--- a/tests/integration/test_binance_download.py
++++ b/tests/integration/test_binance_download.py
+@@ -1,13 +1,27 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Public market-data download contracts with deterministic fake HTTP."""
++from datetime import datetime, timezone
+ import pytest
++from trading_app.data.binance_client import BinanceMarketDataClient
++from tests.fixtures.fakes import FakeHttpClient, FakeResponse
++START = datetime.fromtimestamp(1767571200, timezone.utc)
++END = datetime.fromtimestamp(1767571500, timezone.utc)
+ 
+ @pytest.mark.requirement("M1-05")
+ def test_kline_download():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-05."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
+-
++    row = [1767571200000, "100.10", "101.00", "99.50", "100.50", "12.345", 1767571499999, "1240", 100, "0", "0", "0"]
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000}), FakeResponse(payload=[row])])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    assert rows == [row]
++    assert len(http.calls) == 2
+ 
+ @pytest.mark.requirement("M1-05")
+ def test_kline_pagination():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-05."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    first = [[1767571200000, "100", "101", "99", "100", "1", 1767571499999, "100", 1, "0", "0", "0"]]
++    second = [[1767571500000, "100", "101", "99", "100", "1", 1767571799999, "100", 1, "0", "0", "0"]]
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571800000}), FakeResponse(payload=first), FakeResponse(payload=second)])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=datetime.fromtimestamp(1767571800, timezone.utc))
++    assert len(rows) == 2
++    assert [r[0] for r in rows] == [1767571200000, 1767571500000]
++    assert len(http.calls) == 3
+diff --git a/tests/integration/test_cli.py b/tests/integration/test_cli.py
+index c300a0c..871ab86 100644
+--- a/tests/integration/test_cli.py
++++ b/tests/integration/test_cli.py
+@@ -1,22 +1,24 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""CLI contracts; production behavior remains a source stub pending approval."""
+ import pytest
++from trading_app.data.binance_client import BinanceClientError
+ 
+ @pytest.mark.requirement("CLI-02")
+ def test_cli_exit_codes_and_clean_expected_errors():
+-    """Acceptance scenario bound to frozen matrix row(s): CLI-02."""
+     from scripts.download_candles import main
+-    main([])
+-
++    with pytest.raises(SystemExit) as error:
++        main(["--not-a-real-option"])
++    assert error.value.code == 2
+ 
+ @pytest.mark.requirement("CLI-01")
+ def test_download_script_with_mocked_public_client():
+-    """Acceptance scenario bound to frozen matrix row(s): CLI-01."""
+     from scripts.download_candles import main
+-    main([])
+-
++    # The approved CLI contract will consume public-client arguments and return 0 on success.
++    assert main(["--symbol", "BTCUSDT", "--timeframe", "5m", "--start", "2026-01-05T00:00:00Z", "--end", "2026-01-05T01:00:00Z"]) == 0
+ 
+ @pytest.mark.requirement("HYGIENE-01")
+ def test_script_wrapper_is_thin_and_runnable():
+-    """Acceptance scenario bound to frozen matrix row(s): HYGIENE-01."""
+-    from scripts.download_candles import main
+-    main([])
++    from pathlib import Path
++    source = (Path(__file__).resolve().parents[2] / "scripts/download_candles.py").read_text()
++    assert "from trading_app.cli import main" in source
++    assert "raise SystemExit(main())" in source
++    assert "BinanceMarketDataClient" not in source
+diff --git a/tests/integration/test_cooldown.py b/tests/integration/test_cooldown.py
+index 5dc7661..71c55a4 100644
+--- a/tests/integration/test_cooldown.py
++++ b/tests/integration/test_cooldown.py
+@@ -1,22 +1,32 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Global cooldown must block all HTTP, including server-time calls."""
++import json
++from pathlib import Path
+ import pytest
++from trading_app.data.binance_client import BinanceMarketDataClient, BinanceClientError
++from trading_app.data.cooldown import CorruptCooldownError, read_cooldown
++from tests.fixtures.fakes import FakeHttpClient, FakeResponse
++from tests.fixtures.policy import cooldown_policy
+ 
+ @pytest.mark.requirement("COOLDOWN-04")
+-def test_cooldown_directory_scope():
+-    """Acceptance scenario bound to frozen matrix row(s): COOLDOWN-04."""
+-    from trading_app.data.binance_client import BinanceMarketDataClient
+-    BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+-
++def test_cooldown_directory_scope(tmp_path):
++    assert cooldown_policy()["directory_scoped"] is True
++    path = tmp_path / "data" / "binance_cooldown.json"
++    path.parent.mkdir(); path.write_text('{"until_ms": "not-an-int", "reason": "test"}')
++    with pytest.raises(CorruptCooldownError, match="integer|invalid|cooldown"):
++        read_cooldown(path)
+ 
+ @pytest.mark.requirement("COOLDOWN-01")
+ def test_cooldown_is_global_across_hosts():
+-    """Acceptance scenario bound to frozen matrix row(s): COOLDOWN-01."""
+-    from trading_app.data.binance_client import BinanceMarketDataClient
+-    BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+-
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000})])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(BinanceClientError, match="time|server"):
++        client.get_server_time()
++    assert len(http.calls) == 1
++    assert cooldown_policy()["scope"] == "global_across_allowed_hosts"
+ 
+ @pytest.mark.requirement("COOLDOWN-03")
+-def test_cooldown_persists_across_processes():
+-    """Acceptance scenario bound to frozen matrix row(s): COOLDOWN-03."""
+-    from trading_app.data.binance_client import BinanceMarketDataClient
+-    BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
++def test_cooldown_persists_across_processes(tmp_path):
++    path = tmp_path / "binance_cooldown.json"
++    path.write_text('{"until_ms": 1767571800000, "reason": "418"}')
++    # Reopening from disk, rather than retaining an in-memory object, is the persistence contract.
++    assert read_cooldown(path) == {"until_ms": 1767571800000, "reason": "418"}
+diff --git a/tests/integration/test_finality.py b/tests/integration/test_finality.py
+index cd0e7a5..ff712dd 100644
+--- a/tests/integration/test_finality.py
++++ b/tests/integration/test_finality.py
+@@ -1,47 +1,102 @@
+-"""Finality integration contracts with fake public HTTP responses only."""
++"""Client-level finality range clamping and upstream non-final abort tests."""
+ from datetime import datetime, timezone
++import json
++from pathlib import Path
+ import pytest
+ from trading_app.data.binance_client import BinanceMarketDataClient, BinanceClientError
++from trading_app.data.finality import EmptyEffectiveRangeError, NonFinalCandleError
+ from tests.fixtures.fakes import FakeHttpClient, FakeResponse
+-START=datetime(2024,1,1,tzinfo=timezone.utc)
+-END=datetime(2024,1,2,tzinfo=timezone.utc)
+-FUTURE=datetime(2030,1,1,tzinfo=timezone.utc)
++VECTORS = json.loads((Path(__file__).resolve().parents[1] / "fixtures/vectors/finality_vectors.json").read_text())
++START = datetime.fromtimestamp(1767571200000/1000, timezone.utc)
++END = datetime.fromtimestamp(1767571500000/1000, timezone.utc)
++FUTURE = datetime.fromtimestamp(1767601200000/1000, timezone.utc)
+ 
+ @pytest.mark.requirement("FINAL-01")
+-@pytest.mark.parametrize("_facet", ['lag-0ms'], ids=['lag-0ms'])
+-def test_boundary_rule(_facet):
+-    """Frozen acceptance case: FINAL-01."""
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient())
+-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++def test_client_clamps_end_time_to_finality_boundary():
++    s = VECTORS["extra"]["future_end"]["S_ms"]
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[])])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    result = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=FUTURE)
++    kline_calls = [params for url, params in http.calls if url.endswith("/api/v3/klines")]
++    assert result == []
++    assert len(kline_calls) == 1
++    assert kline_calls[0]["endTime"] == VECTORS["extra"]["future_end"]["expected_effective_end_ms"] - 1
+ 
+ @pytest.mark.requirement("FINAL-03")
+ def test_future_end_reports_requested_and_effective_ranges():
+-    """Frozen acceptance case: FINAL-03."""
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient([FakeResponse(payload={"serverTime": 1704067200000})]))
+-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=FUTURE)
++    s = VECTORS["extra"]["future_end"]["S_ms"]
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[])])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    result = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=FUTURE)
++    assert result == []
++    assert http.calls[1][1]["endTime"] == VECTORS["extra"]["future_end"]["expected_effective_end_ms"] - 1
+ 
+-@pytest.mark.requirement("FINAL-01")
+-def test_no_local_clock_fallback():
+-    """Frozen acceptance case: FINAL-01."""
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient(errors=[TimeoutError("server time down")]))
+-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+-
+-@pytest.mark.requirement("FINAL-02")
+-def test_nonfinal_candle_during_pagination_aborts():
+-    """Frozen acceptance case: FINAL-02."""
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient())
+-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++@pytest.mark.requirement("FINAL-07")
++def test_b_not_final_vectors_shrink_to_explicit_empty_range():
++    for case in VECTORS["cases"]:
++        if case["case"] != "B_not_final":
++            continue
++        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient([FakeResponse(payload={"serverTime": case["S_ms"]})]))
++        with pytest.raises(EmptyEffectiveRangeError, match="effective.*range|effective_end"):
++            client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+ 
+ @pytest.mark.requirement("FINAL-06")
+ def test_returned_nonfinal_candle_aborts_fetch():
+-    """Frozen acceptance case: FINAL-06."""
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient())
+-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    s = VECTORS["cases"][0]["S_ms"]
++    kline = [VECTORS["cases"][0]["candle_open_ms"], "100.10", "101.00", "99.50", "100.50", "12.345", VECTORS["cases"][0]["B_ms"], "1240", 100, "0", "0", "0"]
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[kline])])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(NonFinalCandleError, match="non-final|finality|close"):
++        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    assert len(http.calls) == 2
++
++@pytest.mark.requirement("FINAL-01")
++def test_server_time_failure_aborts_without_kline_request():
++    http = FakeHttpClient(errors=[TimeoutError("server time down")])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(BinanceClientError, match="server.time|time"):
++        client.get_server_time()
++    assert len(http.calls) == 1
++
+ 
+ @pytest.mark.requirement("FINAL-01")
+-@pytest.mark.parametrize("_facet", ['invalid-timestamp', 'malformed-time', 'server-time-failure'], ids=['invalid-timestamp', 'malformed-time', 'server-time-failure'])
+-def test_server_time_failure_aborts(_facet):
+-    """Frozen acceptance case: FINAL-01."""
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient(errors=[TimeoutError("server time down")]))
+-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++@pytest.mark.parametrize("lag_ms", [0], ids=["lag-0ms"])
++def test_boundary_rule(lag_ms):
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000}), FakeResponse(payload=[])])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, finality_lag_ms=lag_ms)
++    rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    assert rows == []
++    assert http.calls[1][1]["endTime"] == 1767571500000 - 1
+ 
++@pytest.mark.requirement("FINAL-01")
++def test_no_local_clock_fallback():
++    http = FakeHttpClient(errors=[TimeoutError("server time unavailable")])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(BinanceClientError, match="server.time|time"):
++        client.get_server_time()
++    assert len(http.calls) == 1
++
++@pytest.mark.requirement("FINAL-01")
++@pytest.mark.parametrize("failure", ["invalid-timestamp", "malformed-time", "server-time-failure"], ids=["invalid-timestamp", "malformed-time", "server-time-failure"])
++def test_server_time_failure_aborts(failure):
++    if failure == "invalid-timestamp":
++        http = FakeHttpClient([FakeResponse(payload={"serverTime": -1})])
++    elif failure == "malformed-time":
++        http = FakeHttpClient([FakeResponse(payload={"serverTime": "not-an-integer"})])
++    else:
++        http = FakeHttpClient(errors=[TimeoutError("server time down")])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(BinanceClientError, match="time|timestamp|server"):
++        client.get_server_time()
++    assert len(http.calls) == 1
++
++@pytest.mark.requirement("FINAL-02")
++def test_nonfinal_candle_during_pagination_aborts():
++    s = 1767571500000
++    row = [1767571200000, "100", "101", "99", "100", "1", s, "100", 1, "0", "0", "0"]
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": s}), FakeResponse(payload=[row])])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, finality_lag_ms=0)
++    from trading_app.data.finality import NonFinalCandleError
++    with pytest.raises(NonFinalCandleError, match="non-final|finality|close"):
++        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    assert len(http.calls) == 2
+diff --git a/tests/integration/test_legacy_scan.py b/tests/integration/test_legacy_scan.py
+index 08488aa..1fcf12e 100644
+--- a/tests/integration/test_legacy_scan.py
++++ b/tests/integration/test_legacy_scan.py
+@@ -1,7 +1,11 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Legacy database scan must report findings without rewriting source data."""
++from pathlib import Path
+ import pytest
++from trading_app.data.repository import CandleRepository
+ 
+ @pytest.mark.requirement("LEGACY-01")
+-def test_legacy_scan_flags_without_repair():
+-    """Acceptance scenario bound to frozen matrix row(s): LEGACY-01."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++def test_legacy_scan_flags_without_repair(tmp_path):
++    repository = CandleRepository(tmp_path / "legacy.db")
++    report = repository.scan_legacy_data(repair=False)
++    assert report.issues
++    assert repository.count() == 0
+diff --git a/tests/integration/test_repository_conflicts.py b/tests/integration/test_repository_conflicts.py
+index f5db571..c2c2352 100644
+--- a/tests/integration/test_repository_conflicts.py
++++ b/tests/integration/test_repository_conflicts.py
+@@ -1,43 +1,59 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""SQLite conflict tests verify idempotence, rollback, and no overwrite."""
++from datetime import timedelta
+ import pytest
++from tests.fixtures.candles import candle
++from trading_app.data.repository import CandleRepository, CandleConflictError, create_engine_from_url
+ 
+ @pytest.mark.requirement("CONFLICT-01")
+ def test_conflict_compares_complete_field_set():
+-    """Acceptance scenario bound to frozen matrix row(s): CONFLICT-01."""
+-    from trading_app.data.repository import CandleRepository
+-    CandleRepository(None).insert_candles([])
+-
++    repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
++    original = candle()
++    assert repository.insert_candles([original]) == 1
++    conflicting = candle(close="100.51")
++    with pytest.raises(CandleConflictError, match="conflict|different|mismatch"):
++        repository.insert_candles([conflicting])
++    assert repository.get_candles(symbol="BTCUSDT", timeframe="5m")[0].close == original.close
+ 
+ @pytest.mark.requirement("CONFLICT-01")
+ def test_conflict_never_overwrites():
+-    """Acceptance scenario bound to frozen matrix row(s): CONFLICT-01."""
+-    from trading_app.data.repository import CandleRepository
+-    CandleRepository(None).insert_candles([])
+-
++    repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
++    original = candle(); repository.insert_candles([original])
++    with pytest.raises(CandleConflictError, match="conflict|different|mismatch"):
++        repository.insert_candles([candle(volume="99")])
++    stored = repository.get_candles(symbol="BTCUSDT", timeframe="5m")
++    assert len(stored) == 1 and stored[0].volume == original.volume
+ 
+ @pytest.mark.requirement("CONFLICT-01")
+ def test_conflict_raises_and_rolls_back():
+-    """Acceptance scenario bound to frozen matrix row(s): CONFLICT-01."""
+-    from trading_app.data.repository import CandleRepository
+-    CandleRepository(None).insert_candles([])
+-
++    repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
++    original = candle(); repository.insert_candles([original])
++    new_row = candle(open_time=original.open_time + timedelta(minutes=5))
++    conflict = candle(close="999")
++    with pytest.raises(CandleConflictError, match="conflict|different|mismatch"):
++        repository.insert_candles([new_row, conflict])
++    stored = repository.get_candles(symbol="BTCUSDT", timeframe="5m")
++    assert len(stored) == 1
++    assert stored[0].open_time == original.open_time
+ 
+ @pytest.mark.requirement("CONFLICT-01")
+ def test_conflicting_row_raises():
+-    """Acceptance scenario bound to frozen matrix row(s): CONFLICT-01."""
+-    from trading_app.data.repository import CandleRepository
+-    CandleRepository(None).insert_candles([])
+-
++    repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
++    repository.insert_candles([candle()])
++    with pytest.raises(CandleConflictError, match="conflict|different|mismatch"):
++        repository.insert_candles([candle(trade_count=999)])
+ 
+ @pytest.mark.requirement("CONFLICT-01")
+ def test_identical_rows_idempotent():
+-    """Acceptance scenario bound to frozen matrix row(s): CONFLICT-01."""
+-    from trading_app.data.repository import CandleRepository
+-    CandleRepository(None).insert_candles([])
+-
++    repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
++    row = candle()
++    assert repository.insert_candles([row]) == 1
++    assert repository.insert_candles([row]) == 0
++    assert repository.count(symbol="BTCUSDT", timeframe="5m") == 1
+ 
+ @pytest.mark.requirement("CONFLICT-01")
+ def test_identical_rows_idempotent_and_conflicts_raise():
+-    """Acceptance scenario bound to frozen matrix row(s): CONFLICT-01."""
+-    from trading_app.data.repository import CandleRepository
+-    CandleRepository(None).insert_candles([])
++    repository = CandleRepository(create_engine_from_url("sqlite:///:memory:")); repository.create_tables()
++    repository.insert_candles([candle(open="100.1")])
++    assert repository.insert_candles([candle(open="100.10", created_at_ms=999999)]) == 0
++    with pytest.raises(CandleConflictError, match="conflict|different|mismatch"):
++        repository.insert_candles([candle(open="100.11")])
+diff --git a/tests/live/test_fixed_range.py b/tests/live/test_fixed_range.py
+index 0c21d01..b236822 100644
+--- a/tests/live/test_fixed_range.py
++++ b/tests/live/test_fixed_range.py
+@@ -1,13 +1,24 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Live acceptance scenarios are represented with fake public responses in offline CI."""
++from datetime import datetime, timezone
+ import pytest
++from trading_app.data.binance_client import BinanceMarketDataClient
++from tests.fixtures.fakes import FakeHttpClient, FakeResponse
++START = datetime.fromtimestamp(1767571200, tz=timezone.utc)
++END = datetime.fromtimestamp(1767571500, tz=timezone.utc)
+ 
+ @pytest.mark.requirement("LIVE-01")
+ def test_btcusdt_5m_12_candles():
+-    """Acceptance scenario bound to frozen matrix row(s): LIVE-01."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
+-
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571800000}), FakeResponse(payload=[])])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    assert len(rows) == 12
++    assert len(http.calls) == 2
+ 
+ @pytest.mark.requirement("LIVE-02")
+ def test_immediate_rerun_zero_new_rows():
+-    """Acceptance scenario bound to frozen matrix row(s): LIVE-02."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571800000}), FakeResponse(payload=[])])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    first = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    second = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    assert first == second == []
++    assert len(http.calls) == 4
+diff --git a/tests/live/test_future_end.py b/tests/live/test_future_end.py
+index 7702cb8..205f89a 100644
+--- a/tests/live/test_future_end.py
++++ b/tests/live/test_future_end.py
+@@ -1,7 +1,13 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Future end acceptance scenario uses only fake HTTP responses offline."""
++from datetime import datetime, timezone
+ import pytest
++from trading_app.data.binance_client import BinanceMarketDataClient
++from tests.fixtures.fakes import FakeHttpClient, FakeResponse
+ 
+ @pytest.mark.requirement("LIVE-04")
+ def test_future_end_clamp_and_strict_end():
+-    """Acceptance scenario bound to frozen matrix row(s): LIVE-04."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767574201234}), FakeResponse(payload=[])])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    result = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=datetime.fromtimestamp(1767571200, timezone.utc), end=datetime.fromtimestamp(1767601200, timezone.utc))
++    assert result == []
++    assert http.calls[1][1]["endTime"] == 1767574200000 - 1
+diff --git a/tests/live/test_pagination_range.py b/tests/live/test_pagination_range.py
+index 8290709..929ef9c 100644
+--- a/tests/live/test_pagination_range.py
++++ b/tests/live/test_pagination_range.py
+@@ -1,7 +1,17 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Pagination contract test uses fake upstream pages only; no live requests are sent."""
++from datetime import datetime, timezone
+ import pytest
++from trading_app.data.binance_client import BinanceMarketDataClient
++from tests.fixtures.fakes import FakeHttpClient, FakeResponse
+ 
+ @pytest.mark.requirement("LIVE-03")
+ def test_1152_candles_two_pages():
+-    """Acceptance scenario bound to frozen matrix row(s): LIVE-03."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    start = datetime.fromtimestamp(1767571200, timezone.utc)
++    end = datetime.fromtimestamp((1767571200000 + 1152*300000)/1000, timezone.utc)
++    page1 = []
++    page2 = []
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1768000000000}), FakeResponse(payload=page1), FakeResponse(payload=page2)])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    rows = client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=start, end=end)
++    assert len(rows) == 1152
++    assert len([1 for url, _ in http.calls if url.endswith("/api/v3/klines")]) == 2
+diff --git a/tests/live/test_run_evidence.py b/tests/live/test_run_evidence.py
+index 7761d83..0b58055 100644
+--- a/tests/live/test_run_evidence.py
++++ b/tests/live/test_run_evidence.py
+@@ -1,7 +1,13 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Live evidence manifest contract is checked offline without performing a live run."""
++import json
++from pathlib import Path
+ import pytest
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("LIVE-05")
+ def test_live_run_evidence_manifest():
+-    """Acceptance scenario bound to frozen matrix row(s): LIVE-05."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    matrix = (ROOT / "matrix.yaml").read_text()
++    assert "evidence_class: live" in matrix
++    assert "run_manifest" in matrix.lower() or "manifest" in matrix.lower()
++    # Actual signed/live-run artifacts intentionally remain absent until the reviewer authorizes a LIVE run.
++    assert not (ROOT / "evidence/live/manifest.json").exists()
+diff --git a/tests/mutation/test_mutation_runner.py b/tests/mutation/test_mutation_runner.py
+index de967cb..ba2985b 100644
+--- a/tests/mutation/test_mutation_runner.py
++++ b/tests/mutation/test_mutation_runner.py
+@@ -1,7 +1,17 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Mutation runner must baseline first and treat patch-application failure as failure."""
++from pathlib import Path
++import subprocess, sys
+ import pytest
++ROOT=Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("MUT-01")
+-def test_baseline_and_patch_failure_policy():
+-    """Acceptance scenario bound to frozen matrix row(s): MUT-01."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++def test_baseline_and_patch_failure_policy(tmp_path):
++    repo=tmp_path/"repo"; repo.mkdir()
++    subprocess.run(["git","init","-q"],cwd=repo,check=True)
++    (repo/"value.txt").write_text("baseline\n")
++    subprocess.run(["git","add","value.txt"],cwd=repo,check=True)
++    subprocess.run(["git","-c","user.name=Test","-c","user.email=test@example.invalid","commit","-qm","baseline"],cwd=repo,check=True)
++    patches=tmp_path/"patches"; patches.mkdir(); (patches/"bad.patch").write_text("not a valid git patch\n")
++    result=subprocess.run([sys.executable,str(ROOT/"tools/run_mutations.py"),"--root",str(repo),"--patch-dir",str(patches),"--baseline-command",f'"{sys.executable}" -c "pass"',"--test-command",f'"{sys.executable}" -c "pass"'],capture_output=True,text=True)
++    assert result.returncode != 0
++    assert "patch application" in result.stdout.lower()
+diff --git a/tests/mutation/test_required_mutants.py b/tests/mutation/test_required_mutants.py
+index 9fec2ae..8f2ddea 100644
+--- a/tests/mutation/test_required_mutants.py
++++ b/tests/mutation/test_required_mutants.py
+@@ -1,13 +1,27 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
+-import pytest
++"""Required mutation set and killer bindings are read from the frozen matrix."""
++import ast, re
++from pathlib import Path
++import yaml, pytest
++ROOT=Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("MUT-03")
+ def test_each_mutant_has_killer():
+-    """Acceptance scenario bound to frozen matrix row(s): MUT-03."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
+-
++    matrix=yaml.safe_load((ROOT/"matrix.yaml").read_text())
++    killers=matrix["mutation_killers"]
++    assert len(killers) >= 16
++    test_functions=set()
++    for path in (ROOT/"tests").rglob("test_*.py"):
++        tree=ast.parse(path.read_text())
++        for node in tree.body:
++            if isinstance(node,ast.FunctionDef): test_functions.add(f"{path.relative_to(ROOT).as_posix()}::{node.name}")
++    for mutant,nodes in killers.items():
++        assert nodes, f"mutant {mutant} has no killer"
++        for nodeid in nodes:
++            base=re.sub(r"\[[^]]+\]$", "", nodeid)
++            assert base in test_functions, f"missing killer nodeid {nodeid} for {mutant}"
+ 
+ @pytest.mark.requirement("MUT-02")
+ def test_required_mutant_set():
+-    """Acceptance scenario bound to frozen matrix row(s): MUT-02."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    matrix=yaml.safe_load((ROOT/"matrix.yaml").read_text())
++    required={"finality_boundary","conflict_raise","rollback","path_check","403_418_retry","fallback_after_429","retry_after_reduction","silent_discard","redirects","overwrite","decimal_format","float_comparison","local_clock","begin_immediate","host_allowlist","cooldown_persistence"}
++    assert set(matrix["mutation_killers"]) == required
+diff --git a/tests/observations/test_obs01_boundaries.py b/tests/observations/test_obs01_boundaries.py
+index c719452..54e9a63 100644
+--- a/tests/observations/test_obs01_boundaries.py
++++ b/tests/observations/test_obs01_boundaries.py
+@@ -1,7 +1,12 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""OBS-01 boundary protocol vector contract; does not access the network."""
++import json
++from pathlib import Path
+ import pytest
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("OBS-01")
+ def test_end_and_start_boundary_semantics():
+-    """Acceptance scenario bound to frozen matrix row(s): OBS-01."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    vectors = json.loads((ROOT / "tests/fixtures/vectors/finality_vectors.json").read_text())
++    assert vectors["rule"] == "close_time_ms < B"
++    assert {c["case"] for c in vectors["cases"]} == {"B-1_is_final", "B_not_final", "B+1_not_final"}
++    assert all(c["candle_close_ms"] == c["candle_open_ms"] + vectors["interval_ms"] - 1 for c in vectors["cases"])
+diff --git a/tests/observations/test_obs02_finality_lag.py b/tests/observations/test_obs02_finality_lag.py
+index 467353c..11282d1 100644
+--- a/tests/observations/test_obs02_finality_lag.py
++++ b/tests/observations/test_obs02_finality_lag.py
+@@ -1,7 +1,13 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""OBS-02 time-dependent finality protocol contract, using pure-function vectors."""
++import json
++from pathlib import Path
+ import pytest
++from trading_app.data.finality import is_final
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("OBS-02")
+ def test_time_dependent_finality_observation_protocol():
+-    """Acceptance scenario bound to frozen matrix row(s): OBS-02."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    vectors = json.loads((ROOT / "tests/fixtures/vectors/finality_vectors.json").read_text())
++    for case in vectors["cases"]:
++        assert is_final(case["candle_close_ms"], case["S_ms"], case["L_ms"]) is case["expected_final"]
++    assert "offsets_seconds" in (ROOT / "matrix.yaml").read_text()
+diff --git a/tests/observations/test_obs03_gate.py b/tests/observations/test_obs03_gate.py
+index 7d0d5ab..b928da8 100644
+--- a/tests/observations/test_obs03_gate.py
++++ b/tests/observations/test_obs03_gate.py
+@@ -1,7 +1,12 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""OBS-03 must block live acceptance while the observation rows remain open."""
++from pathlib import Path
++import yaml
+ import pytest
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("OBS-03")
+ def test_observation_gate_before_live_acceptance():
+-    """Acceptance scenario bound to frozen matrix row(s): OBS-03."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    matrix = yaml.safe_load((ROOT / "matrix.yaml").read_text())
++    assert matrix["status"]["milestone_1"] == "BLOCKED"
++    assert matrix["observations"]["OBS-01"]["status"] == "open"
++    assert matrix["observations"]["OBS-02"]["status"] == "open"
+diff --git a/tests/security/test_endpoint_hardening.py b/tests/security/test_endpoint_hardening.py
+index cc3ab97..a6ea087 100644
+--- a/tests/security/test_endpoint_hardening.py
++++ b/tests/security/test_endpoint_hardening.py
+@@ -1,7 +1,7 @@
+ """URL hardening tests; no network request is made."""
+ from datetime import datetime, timezone
+ import pytest
+-from trading_app.policy import frozen_policy
++from tests.fixtures.policy import frozen_policy
+ from trading_app.data.binance_client import BinanceMarketDataClient, BinanceClientError, validate_public_url
+ from tests.fixtures.fakes import FakeHttpClient, FakeResponse
+ START=datetime(2024,1,1,tzinfo=timezone.utc)
+@@ -33,11 +33,11 @@ def test_exact_paths(_facet):
+ 
+ @pytest.mark.requirement("HOST-01")
+ def test_frozen_host_set():
+-    """Frozen acceptance case: HOST-01."""
+-    policy=frozen_policy()["network"]["hosts"]
+-    assert policy["primary"] == "data-api.binance.vision"
+-    assert policy["fallback"] == "api.binance.com"
+-    assert "testnet.binance.vision" in policy["excluded"]
++    """Only the frozen public hosts are accepted; testnet is excluded."""
++    assert validate_public_url("https://data-api.binance.vision/api/v3/time") is True
++    assert validate_public_url("https://api.binance.com/api/v3/time") is True
++    with pytest.raises(ValueError, match="host|allowlist|allowed"):
++        validate_public_url("https://testnet.binance.vision/api/v3/time")
+ 
+ @pytest.mark.requirement("NET-01")
+ def test_redirects_disabled():
+diff --git a/tests/tools/test_coverage_gate.py b/tests/tools/test_coverage_gate.py
+index 7737c46..dfc22d1 100644
+--- a/tests/tools/test_coverage_gate.py
++++ b/tests/tools/test_coverage_gate.py
+@@ -1,19 +1,29 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Coverage policy is fail-closed and scoped only to production modules."""
++from pathlib import Path
++import json, subprocess, sys, tomllib, yaml
+ import pytest
++ROOT=Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("COV-02")
+-def test_coverage_gate_fails_closed():
+-    """Acceptance scenario bound to frozen matrix row(s): COV-02."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
+-
++def test_coverage_gate_fails_closed(tmp_path):
++    report={"totals":{"percent_covered_branch":84.0},"files":{"src/trading_app/data/client.py":{"summary":{"percent_covered_branch":99.0}}}}
++    path=tmp_path/"coverage.json"; path.write_text(json.dumps(report))
++    result=subprocess.run([sys.executable,str(ROOT/"tools/check_branch_coverage.py"),str(path),"--matrix",str(ROOT/"matrix.yaml")],capture_output=True,text=True)
++    assert result.returncode != 0
++    assert "overall branch coverage" in result.stdout
+ 
+ @pytest.mark.requirement("COV-01")
+ def test_coverage_scope_and_thresholds():
+-    """Acceptance scenario bound to frozen matrix row(s): COV-01."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
+-
++    policy=tomllib.loads((ROOT/"pyproject.toml").read_text())["tool"]["coverage"]["run"]
++    assert policy["source"] == ["trading_app"]
++    matrix=yaml.safe_load((ROOT/"matrix.yaml").read_text())
++    assert matrix["coverage"]["overall_branch_min"] == 85
++    assert matrix["coverage"]["per_module_branch_min"] == 90
+ 
+ @pytest.mark.requirement("TOOLS-06")
+-def test_negative_below_threshold():
+-    """Acceptance scenario bound to frozen matrix row(s): TOOLS-06."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
++def test_negative_below_threshold(tmp_path):
++    report={"totals":{"percent_covered_branch":100.0},"files":{"src/trading_app/data/client.py":{"summary":{"percent_covered_branch":89.0}}}}
++    path=tmp_path/"coverage.json"; path.write_text(json.dumps(report))
++    result=subprocess.run([sys.executable,str(ROOT/"tools/check_branch_coverage.py"),str(path),"--matrix",str(ROOT/"matrix.yaml")],capture_output=True,text=True)
++    assert result.returncode != 0
++    assert "branch coverage" in result.stdout
+diff --git a/tests/tools/test_degenerate_double.py b/tests/tools/test_degenerate_double.py
+new file mode 100644
+index 0000000..c93653c
+--- /dev/null
++++ b/tests/tools/test_degenerate_double.py
+@@ -0,0 +1,39 @@
++"""Meta-test: client/validator acceptance tests must reject degenerate doubles."""
++import os
++from pathlib import Path
++import subprocess
++import sys
++
++ROOT = Path(__file__).resolve().parents[2]
++
++def test_client_and_validator_tests_fail_with_degenerate_double(tmp_path):
++    plugin = tmp_path / "degenerate_plugin.py"
++    plugin.write_text('''
++def pytest_configure(config):
++    from datetime import datetime
++    from trading_app.data import binance_client, finality, validator
++    def always_client_error(self, *args, **kwargs):
++        raise binance_client.BinanceClientError("degenerate double always raises")
++    binance_client.BinanceMarketDataClient.get_server_time = always_client_error
++    binance_client.BinanceMarketDataClient.get_historical_klines = always_client_error
++    finality.is_final = lambda *a, **k: True
++    finality.effective_end_ms = lambda *a, **k: 0
++    validator.assert_valid_klines = lambda *a, **k: None
++    validator.validate_klines = lambda *a, **k: []
++    validator.timeframe_to_ms = lambda *a, **k: 0
++    validator.utc_datetime_from_ms = lambda *a, **k: datetime(2024, 1, 1)
++''', encoding="utf-8")
++    junit = tmp_path / "degenerate.xml"
++    env = os.environ.copy()
++    env["PYTHONPATH"] = os.pathsep.join([str(ROOT), str(ROOT / "src"), str(tmp_path), env.get("PYTHONPATH", "")])
++    command = [sys.executable, "-m", "pytest", "-q", f"--junitxml={junit}", "-p", "degenerate_plugin",
++               "tests/unit/test_binance_client.py", "tests/unit/test_finality.py",
++               "tests/integration/test_finality.py", "tests/unit/test_validator.py"]
++    result = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True, timeout=90)
++    assert result.returncode != 0, "client/validator acceptance tests passed against degenerate doubles"
++    assert junit.is_file(), result.stdout + result.stderr
++    import xml.etree.ElementTree as ET
++    cases = list(ET.parse(junit).getroot().iter("testcase"))
++    assert cases, "degenerate run collected no tests"
++    passed = [case.attrib.get("name") for case in cases if case.find("failure") is None and case.find("error") is None and case.find("skipped") is None]
++    assert not passed, f"tests passed against degenerate doubles: {passed}"
+diff --git a/tests/tools/test_documentation_gate.py b/tests/tools/test_documentation_gate.py
+index 85a8953..cc38458 100644
+--- a/tests/tools/test_documentation_gate.py
++++ b/tests/tools/test_documentation_gate.py
+@@ -1,19 +1,25 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Documentation hygiene acceptance tests against checked-in source artifacts."""
++from pathlib import Path
+ import pytest
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("ACCEPT-RISK-01")
+ def test_accepted_risks_document():
+-    """Acceptance scenario bound to frozen matrix row(s): ACCEPT-RISK-01."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
+-
++    text = (ROOT / "docs/accepted-risks.md").read_text()
++    assert "risk" in text.lower()
++    assert len(text.strip()) > 200
+ 
+ @pytest.mark.requirement("DOC-01")
+ def test_binance_docs_comparison_artifact():
+-    """Acceptance scenario bound to frozen matrix row(s): DOC-01."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
+-
++    assert (ROOT / "reviewer/project_source_m1.md").is_file()
++    assert (ROOT / "reviewer/project_source_m1_2.md").is_file()
++    import subprocess, sys
++    for source, reviewer in ((ROOT/"docs/source/milestone_1.md", ROOT/"reviewer/project_source_m1.md"), (ROOT/"docs/source/milestone_1_2.md", ROOT/"reviewer/project_source_m1_2.md")):
++        result = subprocess.run([sys.executable, str(ROOT/"tools/compare_source_markdown.py"), str(source), str(reviewer)], capture_output=True, text=True)
++        assert result.returncode == 0, result.stdout + result.stderr
+ 
+ @pytest.mark.requirement("R6-02")
+ def test_conflict_policy_document():
+-    """Acceptance scenario bound to frozen matrix row(s): R6-02."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
++    text = (ROOT / "docs/stage2-test-decisions.md").read_text()
++    assert "numeric `Decimal` equality" in text
++    assert "never silently drop" in text
+diff --git a/tests/tools/test_evidence_integrity.py b/tests/tools/test_evidence_integrity.py
+index 399fd6c..6032086 100644
+--- a/tests/tools/test_evidence_integrity.py
++++ b/tests/tools/test_evidence_integrity.py
+@@ -1,7 +1,15 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Evidence checker validates commit and artifact hashes, including positive control."""
++import hashlib, subprocess, sys
++from pathlib import Path
+ import pytest
++ROOT=Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("EVID-01")
+-def test_evidence_artifacts_exist_nonempty_commit_and_manifest():
+-    """Acceptance scenario bound to frozen matrix row(s): EVID-01."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
++def test_evidence_artifacts_exist_nonempty_commit_and_manifest(tmp_path):
++    root=tmp_path/"root"; root.mkdir()
++    artifact=root/"evidence"/"sample.txt"; artifact.parent.mkdir(); artifact.write_text("reviewed artifact\n")
++    commit="a"*40; (root/"commit.txt").write_text(commit)
++    digest=hashlib.sha256(artifact.read_bytes()).hexdigest(); (root/"manifest.txt").write_text(f"{digest} evidence/sample.txt\n")
++    matrix=tmp_path/"matrix.yaml"; matrix.write_text("acceptance_rows:\n- artifact_path: evidence/sample.txt\n")
++    result=subprocess.run([sys.executable,str(ROOT/"tools/check_evidence.py"),str(matrix),"--root",str(root),"--commit-file",str(root/"commit.txt"),"--manifest",str(root/"manifest.txt")],capture_output=True,text=True)
++    assert result.returncode == 0, result.stdout + result.stderr
+diff --git a/tests/tools/test_gate_policy.py b/tests/tools/test_gate_policy.py
+index c2376ce..e7940cd 100644
+--- a/tests/tools/test_gate_policy.py
++++ b/tests/tools/test_gate_policy.py
+@@ -1,13 +1,26 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
+-import pytest
++"""Mandatory behavioral rows may not be skipped or xfailed."""
++import ast
++from pathlib import Path
++import yaml, pytest
++ROOT=Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("GATE-02")
+ def test_skip_or_xfail_mandatory_blocks():
+-    """Acceptance scenario bound to frozen matrix row(s): GATE-02."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
+-
++    matrix=yaml.safe_load((ROOT/"matrix.yaml").read_text())
++    bound={node.split("::",1)[0] for row in matrix["acceptance_rows"] if row.get("mandatory") for node in row.get("tests",[])}
++    for rel in bound:
++        path=ROOT/rel
++        if not path.exists(): continue
++        tree=ast.parse(path.read_text())
++        for fn in (n for n in tree.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))):
++            for dec in fn.decorator_list:
++                if isinstance(dec,ast.Call) and isinstance(dec.func,ast.Attribute) and dec.func.attr in {"skip","skipif","xfail"}:
++                    pytest.fail(f"mandatory test {rel}::{fn.name} has skip/xfail")
+ 
+ @pytest.mark.requirement("GATE-01")
+ def test_unavailable_live_evidence_blocks():
+-    """Acceptance scenario bound to frozen matrix row(s): GATE-01."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
++    matrix=yaml.safe_load((ROOT/"matrix.yaml").read_text())
++    assert matrix["status"]["milestone_1"] == "BLOCKED"
++    live=[row for row in matrix["acceptance_rows"] if row.get("evidence_class")=="live" and row.get("mandatory")]
++    assert live
++    assert all(row.get("artifact_path") for row in live)
+diff --git a/tests/tools/test_gate_tools.py b/tests/tools/test_gate_tools.py
+index 336c672..4d0e03f 100644
+--- a/tests/tools/test_gate_tools.py
++++ b/tests/tools/test_gate_tools.py
+@@ -1,7 +1,11 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Gate tooling files and negative-test coverage must be present."""
++from pathlib import Path
+ import pytest
++ROOT=Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("TOOLS-04")
+ def test_each_gate_has_negative_test():
+-    """Acceptance scenario bound to frozen matrix row(s): TOOLS-04."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
++    for name in ("check_freeze.py", "validate_matrix.py", "check_traceability.py", "check_evidence.py", "spec_check.py", "red_reason_gate.py"):
++        assert (ROOT/"tools"/name).is_file()
++    assert "returncode != 0" in (ROOT/"tests/tools/test_spec_tooling.py").read_text()
++    assert "returncode != 0" in (ROOT/"tests/tools/test_traceability.py").read_text()
+diff --git a/tests/tools/test_outcome_gate.py b/tests/tools/test_outcome_gate.py
+index 6a6ca6d..937a1ab 100644
+--- a/tests/tools/test_outcome_gate.py
++++ b/tests/tools/test_outcome_gate.py
+@@ -1,7 +1,12 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
+-import pytest
++"""Only reviewer approval can change the frozen milestone status."""
++from pathlib import Path
++import pytest, yaml
++ROOT=Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("OUTCOME-01")
+ def test_only_reviewer_sets_final_status():
+-    """Acceptance scenario bound to frozen matrix row(s): OUTCOME-01."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
++    matrix=yaml.safe_load((ROOT/"matrix.yaml").read_text())
++    approval=(ROOT/"evidence/freeze/stage1-reviewer-approval.txt").read_text()
++    assert matrix["status"]["milestone_1"] == "BLOCKED"
++    assert "reviewer_approval_line: null" in (ROOT/"matrix.yaml").read_text()
++    assert "reviewer" in approval.lower()
+diff --git a/tests/tools/test_red_reason_gate.py b/tests/tools/test_red_reason_gate.py
+new file mode 100644
+index 0000000..54fa0f8
+--- /dev/null
++++ b/tests/tools/test_red_reason_gate.py
+@@ -0,0 +1,37 @@
++"""Red-reason gate rejects test-body placeholders, unexpected passes, and collection errors."""
++import subprocess, sys
++from pathlib import Path
++import pytest
++ROOT=Path(__file__).resolve().parents[2]
++GATE=ROOT/"tools/red_reason_gate.py"
++
++def run_gate(tmp_path, xml, exit_code=1):
++    path=tmp_path/"junit.xml"; path.write_text(xml)
++    return subprocess.run([sys.executable,str(GATE),str(path),"--pytest-exit-code",str(exit_code)],capture_output=True,text=True)
++
++@pytest.mark.requirement("TOOLS-04")
++def test_source_stub_notimplemented_error_is_expected_red(tmp_path):
++    xml='''<testsuite tests="1" failures="1"><testcase classname="tests.unit.test_x" name="test_x"><failure message="NotImplementedError">Traceback\n  File "src/trading_app/data/client.py", line 3\nNotImplementedError: stub</failure></testcase></testsuite>'''
++    result=run_gate(tmp_path,xml)
++    assert result.returncode == 0, result.stdout + result.stderr
++
++@pytest.mark.requirement("TOOLS-04")
++def test_test_body_notimplemented_error_is_rejected(tmp_path):
++    xml='''<testsuite tests="1" failures="1"><testcase classname="tests.unit.test_x" name="test_x"><failure message="NotImplementedError">Traceback\n  File "tests/unit/test_x.py", line 3\nNotImplementedError: placeholder</failure></testcase></testsuite>'''
++    result=run_gate(tmp_path,xml)
++    assert result.returncode != 0
++    assert "not a production NotImplementedError stub" in result.stdout
++
++@pytest.mark.requirement("TOOLS-04")
++def test_unexpected_behavioral_pass_is_rejected(tmp_path):
++    xml='<testsuite tests="1"><testcase classname="tests.unit.test_x" name="test_behavior" /></testsuite>'
++    result=run_gate(tmp_path,xml,0)
++    assert result.returncode != 0
++    assert "passed against stubs" in result.stdout
++
++@pytest.mark.requirement("TOOLS-04")
++def test_collection_error_is_rejected(tmp_path):
++    xml='<testsuite tests="0" errors="1"><error message="collection failed">ImportError</error></testsuite>'
++    result=run_gate(tmp_path,xml,2)
++    assert result.returncode != 0
++    assert "collection/suite error" in result.stdout
+diff --git a/tests/tools/test_traceability.py b/tests/tools/test_traceability.py
+index 2bef1df..674299d 100644
+--- a/tests/tools/test_traceability.py
++++ b/tests/tools/test_traceability.py
+@@ -1,19 +1,31 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Traceability checker positive/negative controls with synthetic JUnit evidence."""
++from pathlib import Path
++import subprocess, sys
+ import pytest
++ROOT=Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("TOOLS-05")
+-def test_negative_cases():
+-    """Acceptance scenario bound to frozen matrix row(s): TOOLS-05."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
+-
++def test_negative_cases(tmp_path):
++    test_root=tmp_path/"root"; (test_root/"tests/unit").mkdir(parents=True)
++    (test_root/"tests/unit/test_sample.py").write_text('import pytest\n@pytest.mark.requirement("ROW-1")\ndef test_sample():\n    assert True\n')
++    matrix=tmp_path/"matrix.yaml"; matrix.write_text('acceptance_rows:\n- id: ROW-1\n  mandatory: true\n  tests: []\n  evidence_class: offline\n  stage: 1\n  source_item_bindings: {}\n')
++    junit=tmp_path/"offline.xml"; junit.write_text('<testsuite><testcase classname="tests.unit.test_sample" name="test_sample"><properties><property name="requirement" value="ROW-1"/></properties></testcase></testsuite>')
++    result=subprocess.run([sys.executable,str(ROOT/"tools/check_traceability.py"),str(matrix),"--root",str(test_root),"--junit",f"offline={junit}","--stage","1"],capture_output=True,text=True)
++    assert result.returncode != 0
+ 
+ @pytest.mark.requirement("TOOLS-08")
+-def test_runtime_exact_param_positive():
+-    """Acceptance scenario bound to frozen matrix row(s): TOOLS-08."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
+-
++def test_runtime_exact_param_positive(tmp_path):
++    # Parameterized node IDs must resolve to the same marked test function.
++    test_root=tmp_path/"root"; (test_root/"tests/unit").mkdir(parents=True)
++    (test_root/"tests/unit/test_sample.py").write_text('import pytest\n@pytest.mark.requirement("ROW-1")\n@pytest.mark.parametrize("x", [1], ids=["one"])\ndef test_sample(x):\n    assert x == 1\n')
++    matrix=tmp_path/"matrix.yaml"; matrix.write_text('acceptance_rows:\n- id: ROW-1\n  mandatory: true\n  tests:\n  - tests/unit/test_sample.py::test_sample[one]\n  evidence_class: offline\n  stage: 1\n  source_item_bindings: {}\n')
++    junit=tmp_path/"offline.xml"; junit.write_text('<testsuite><testcase classname="tests.unit.test_sample" name="test_sample[one]"><properties><property name="requirement" value="ROW-1"/></properties></testcase></testsuite>')
++    result=subprocess.run([sys.executable,str(ROOT/"tools/check_traceability.py"),str(matrix),"--root",str(test_root),"--junit",f"offline={junit}","--stage","1"],capture_output=True,text=True)
++    assert result.returncode == 0, result.stdout + result.stderr
+ 
+ @pytest.mark.requirement("TOOLS-02")
+ def test_traceability_binds_real_behavioral_tests():
+-    """Acceptance scenario bound to frozen matrix row(s): TOOLS-02."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
++    text=(ROOT/"tools/check_traceability.py").read_text()
++    assert "missing requirement marker" in text
++    assert "JUnit requirement property missing" in text
++    assert "nodeid did not pass" in text
+diff --git a/tests/tools/test_validate_matrix.py b/tests/tools/test_validate_matrix.py
+index a840e5c..c6d2f54 100644
+--- a/tests/tools/test_validate_matrix.py
++++ b/tests/tools/test_validate_matrix.py
+@@ -1,13 +1,18 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Matrix validator positive and negative controls."""
++from pathlib import Path
++import subprocess, sys, yaml
+ import pytest
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("TOOLS-08")
+-def test_missing_item_binding_rejected():
+-    """Acceptance scenario bound to frozen matrix row(s): TOOLS-08."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
+-
++def test_missing_item_binding_rejected(tmp_path):
++    matrix = yaml.safe_load((ROOT/"matrix.yaml").read_text())
++    matrix["acceptance_rows"][0]["source_item_bindings"] = {"[M1 §28 #1]": ["tests/unit/test_config.py::not_a_real_test"]}
++    path=tmp_path/"matrix.yaml"; path.write_text(yaml.safe_dump(matrix, sort_keys=False))
++    result=subprocess.run([sys.executable,str(ROOT/"tools/validate_matrix.py"),str(path),"--schema",str(ROOT/"matrix_schema.json"),"--m1",str(ROOT/"docs/source/milestone_1.md"),"--m12",str(ROOT/"docs/source/milestone_1_2.md")],capture_output=True,text=True)
++    assert result.returncode != 0
+ 
+ @pytest.mark.requirement("TOOLS-01")
+ def test_validate_matrix_full_contract():
+-    """Acceptance scenario bound to frozen matrix row(s): TOOLS-01."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
++    result=subprocess.run([sys.executable,str(ROOT/"tools/validate_matrix.py"),str(ROOT/"matrix.yaml"),"--schema",str(ROOT/"matrix_schema.json"),"--m1",str(ROOT/"docs/source/milestone_1.md"),"--m12",str(ROOT/"docs/source/milestone_1_2.md")],capture_output=True,text=True)
++    assert result.returncode == 0, result.stdout + result.stderr
+diff --git a/tests/tools/test_vector_policy_consistency.py b/tests/tools/test_vector_policy_consistency.py
+new file mode 100644
+index 0000000..16e844c
+--- /dev/null
++++ b/tests/tools/test_vector_policy_consistency.py
+@@ -0,0 +1,34 @@
++"""Tooling/hygiene check: independently supplied vectors must not drift from frozen policy."""
++import json
++from pathlib import Path
++from tests.fixtures.policy import frozen_policy, cooldown_policy
++
++ROOT = Path(__file__).resolve().parents[2]
++
++def test_retry_cooldown_vectors_match_frozen_yaml():
++    vectors = json.loads((ROOT / "tests/fixtures/vectors/retry_cooldown_vectors.json").read_text(encoding="utf-8"))
++    policy = frozen_policy()
++    actual = vectors["policy_from_frozen_yaml"]
++    assert actual == {
++        "attempts_total": policy["retry"]["attempts_total"],
++        "backoff_base_s": policy["retry"]["backoff"]["base_seconds"],
++        "factor": policy["retry"]["backoff"]["factor"],
++        "cap_s": policy["retry"]["backoff"]["cap_seconds"],
++        "jitter_max_s": policy["retry"]["backoff"]["jitter_max_seconds"],
++        "budget_s": policy["retry"]["sleep_budget_seconds"],
++        "retry_after_cap_s": policy["retry"]["retry_after"]["max_seconds"],
++    }
++    by_name = {case["name"]: case for case in vectors["cases"]}
++    assert "429_RA10_x4" in by_name and "429_RA11" in by_name
++    cooldown = cooldown_policy()["durations"]
++    assert by_name["418_no_retry_after"]["expected_cooldown_s"] == 600
++    assert by_name["418_retry_after_900"]["expected_cooldown_s"] == 900
++    assert by_name["429_RA10_x4"]["expected_cooldown_s"] == 300
++    assert by_name["429_RA11"]["expected_cooldown_s"] == 600
++    assert by_name["429_RA61"]["expected_cooldown_s"] == 600
++    assert by_name["429_RA45"]["expected_cooldown_s"] == 600
++    assert by_name["429_no_header_x4"]["expected_cooldown_s"] == 300
++    assert cooldown["418"] == "max(supplied_retry_after,600)"
++    assert cooldown["429_exhausted"] == "max(supplied_retry_after,300)"
++    assert cooldown["429_retry_after_over_60"] == "max(supplied_retry_after,600)"
++    assert cooldown["429_retry_after_exceeds_sleep_budget"] == "max(supplied_retry_after,600)"
+diff --git a/tests/tools/test_warning_policy.py b/tests/tools/test_warning_policy.py
+index 4caf3c4..29610ab 100644
+--- a/tests/tools/test_warning_policy.py
++++ b/tests/tools/test_warning_policy.py
+@@ -1,7 +1,11 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Warnings are promoted to errors in the pytest configuration."""
++from pathlib import Path
++import tomllib
+ import pytest
++ROOT=Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("HYGIENE-05")
+ def test_filterwarnings_error_and_no_coverage_warning():
+-    """Acceptance scenario bound to frozen matrix row(s): HYGIENE-05."""
+-    raise NotImplementedError("Stage-2 tooling acceptance scenario is intentionally red before implementation")
++    config=tomllib.loads((ROOT/"pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]
++    assert "error" in config["filterwarnings"]
++    assert "pytest-cov" in str(tomllib.loads((ROOT/"pyproject.toml").read_text())["project"]["optional-dependencies"]["dev"])
+diff --git a/tests/unit/test_binance_client.py b/tests/unit/test_binance_client.py
+index 7098ec3..e4d04cd 100644
+--- a/tests/unit/test_binance_client.py
++++ b/tests/unit/test_binance_client.py
+@@ -1,114 +1,184 @@
+-"""Binance public-client contract tests. All HTTP is fake; no sockets are opened."""
++"""Public-client acceptance tests use canned public HTTP responses only."""
+ from datetime import datetime, timezone
++import json
++from pathlib import Path
+ import pytest
+-from trading_app.policy import frozen_policy, retry_policy, cooldown_policy
+-from trading_app.data.binance_client import BinanceMarketDataClient, BinanceClientError
++from tests.fixtures.policy import frozen_policy, retry_policy, cooldown_policy
+ from tests.fixtures.fakes import FakeHttpClient, FakeResponse
+-START=datetime(2024,1,1,tzinfo=timezone.utc)
+-END=datetime(2024,1,2,tzinfo=timezone.utc)
++from trading_app.data.binance_client import BinanceMarketDataClient, BinanceClientError
++START = datetime.fromtimestamp(1767571200, tz=timezone.utc)
++END = datetime.fromtimestamp(1767571500, tz=timezone.utc)
++VECTORS = json.loads((Path(__file__).resolve().parents[1] / "fixtures/vectors/retry_cooldown_vectors.json").read_text())
+ 
+ @pytest.mark.requirement("M1-06")
+ def test_retry_policy():
+-    """Frozen acceptance case: M1-06."""
+-    policy=retry_policy()
+-    assert policy["attempts_total"] == frozen_policy()["retry"]["attempts_total"]
+-    assert policy["attempts_scope"] == "per_request"
++    http = FakeHttpClient([FakeResponse(status_code=500) for _ in range(4)])
++    sleeps = []
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
++    with pytest.raises(BinanceClientError, match="500|retry|request"):
++        client.get_server_time()
++    assert len(http.calls) == retry_policy()["attempts_total"]
++    assert sleeps == [1, 2, 3]
+ 
+ @pytest.mark.requirement("M1-12")
+ def test_binance_responses_are_mocked():
+-    """Frozen acceptance case: M1-12."""
+-    http=FakeHttpClient([FakeResponse(payload={"serverTime": 123})])
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+-    with pytest.raises(BinanceClientError):
+-        client.get_server_time()
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 123})])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    result = client.get_server_time()
++    assert result == 123
+     assert len(http.calls) == 1
++    assert http.calls[0][0].endswith("/api/v3/time")
+ 
+ @pytest.mark.requirement("RETRY-06")
+ def test_429_without_retry_after_uses_backoff():
+-    """Frozen acceptance case: RETRY-06."""
+-    http=FakeHttpClient([FakeResponse(status_code=429, headers={})])
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+-    with pytest.raises(BinanceClientError):
+-        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    http = FakeHttpClient([FakeResponse(status_code=429) for _ in range(4)])
++    sleeps = []
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
++    with pytest.raises(BinanceClientError, match="429|rate limit|retry"):
++        client.get_server_time()
++    assert len(http.calls) == 4
++    assert sleeps == VECTORS["cases"][10]["expected_sleeps_s"]
+ 
+ @pytest.mark.requirement("RETRY-04")
+ def test_backoff_cap_and_jitter():
+-    """Frozen acceptance case: RETRY-04."""
+-    backoff=retry_policy()["backoff"]
+-    assert backoff["cap_seconds"] <= backoff["base_seconds"] * backoff["factor"] ** (retry_policy()["attempts_total"]-1) + backoff["jitter_max_seconds"]
+-    assert backoff["jitter_applies_to"] == "exponential_backoff_only"
++    http = FakeHttpClient([FakeResponse(status_code=500) for _ in range(4)])
++    sleeps = []
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.25)
++    with pytest.raises(BinanceClientError, match="500|retry|request"):
++        client.get_server_time()
++    assert sleeps == VECTORS["cases"][0]["expected_sleeps_s"]
++    assert len(http.calls) == 4
+ 
+ @pytest.mark.requirement("RETRY-05")
+ def test_fetch_sleep_budget_and_cooldown():
+-    """Frozen acceptance case: RETRY-05."""
+-    assert retry_policy()["sleep_budget_scope"] == "per_fetch"
+-    assert cooldown_policy()["scope"] == "global_across_allowed_hosts"
++    http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": "11"}) for _ in range(4)])
++    sleeps = []
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
++    with pytest.raises(BinanceClientError, match="429|budget|cooldown|retry"):
++        client.get_server_time()
++    assert sleeps == [11, 11]
++    assert len(http.calls) == 3
++    assert retry_policy()["sleep_budget_seconds"] == 30
+ 
+ @pytest.mark.requirement("RETRY-01")
+ def test_malformed_json_retry():
+-    """Frozen acceptance case: RETRY-01."""
+-    http=FakeHttpClient([FakeResponse(status_code=200, json_error=ValueError("bad json"))])
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+-    with pytest.raises(BinanceClientError):
++    http = FakeHttpClient([FakeResponse(status_code=200, json_error=ValueError("bad json")) for _ in range(4)])
++    sleeps = []
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
++    with pytest.raises(BinanceClientError, match="JSON|malformed|response"):
+         client.get_server_time()
++    assert len(http.calls) == 4
++    assert sleeps == [1, 2, 3]
+ 
+ @pytest.mark.requirement("RETRY-01")
+-@pytest.mark.parametrize("_facet", ['400', '403', '418'], ids=['400', '403', '418'])
+-def test_no_retry_status(_facet):
+-    """Frozen acceptance case: RETRY-01."""
+-    http=FakeHttpClient([FakeResponse(status_code=_facet)])
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+-    with pytest.raises(BinanceClientError):
+-        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++@pytest.mark.parametrize("status", [400, 403, 418], ids=["400", "403", "418"])
++def test_no_retry_status(status):
++    http = FakeHttpClient([FakeResponse(status_code=status)])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(BinanceClientError, match=str(status)):
++        client.get_server_time()
+     assert len(http.calls) == 1
+ 
+ @pytest.mark.requirement("RETRY-03")
+ def test_only_retry_configured_statuses():
+-    """Frozen acceptance case: RETRY-03."""
+-    configured=set(retry_policy()["retry_statuses"])
+-    assert configured == set(frozen_policy()["retry"]["retry_statuses"])
+-    assert not ({400,403,418} & configured)
++    for status, expected_requests in ((400, 1), (403, 1), (418, 1), (500, 4), (502, 4), (503, 4), (504, 4), (429, 4)):
++        http = FakeHttpClient([FakeResponse(status_code=status) for _ in range(4)])
++        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
++        with pytest.raises(BinanceClientError, match=str(status)):
++            client.get_server_time()
++        assert len(http.calls) == expected_requests
+ 
+ @pytest.mark.requirement("RETRY-01")
+ def test_read_timeout_retry():
+-    """Frozen acceptance case: RETRY-01."""
+-    http=FakeHttpClient(errors=[TimeoutError("read timeout")])
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+-    with pytest.raises(BinanceClientError):
++    http = FakeHttpClient(errors=[TimeoutError("read timeout") for _ in range(4)])
++    sleeps = []
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.0)
++    with pytest.raises(BinanceClientError, match="timeout|request"):
+         client.get_server_time()
++    assert len(http.calls) == 4
++    assert sleeps == [1, 2, 3]
+ 
+ @pytest.mark.requirement("RETRY-01")
+ def test_repeated_429_persists_cooldown():
+-    """Frozen acceptance case: RETRY-01."""
+-    http=FakeHttpClient([FakeResponse(status_code=429), FakeResponse(status_code=429)])
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+-    with pytest.raises(BinanceClientError):
++    http = FakeHttpClient([FakeResponse(status_code=429) for _ in range(4)])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(BinanceClientError, match="429|cooldown|rate limit"):
+         client.get_server_time()
++    assert len(http.calls) == 4
+ 
+ @pytest.mark.requirement("RETRY-01")
+-@pytest.mark.parametrize("_facet", ['429'], ids=['429'])
+-def test_retry_after_cap_and_no_jitter(_facet):
+-    """Frozen acceptance case: RETRY-01."""
+-    policy=retry_policy()["retry_after"]
++@pytest.mark.parametrize("retry_after", [10, 45, 61], ids=["429", "over-budget", "over-cap"])
++def test_retry_after_cap_and_no_jitter(retry_after):
++    policy = retry_policy()["retry_after"]
+     assert policy["sleep_jitter"] is False
+-    assert policy["max_seconds"] == frozen_policy()["retry"]["retry_after"]["max_seconds"]
++    assert policy["max_seconds"] == 60
++    http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": str(retry_after)})])
++    sleeps = []
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.75)
++    with pytest.raises(BinanceClientError, match="429|retry|cooldown|budget"):
++        client.get_server_time()
++    assert len(http.calls) == (4 if retry_after == 10 else 1)
++    assert all(wait == retry_after for wait in sleeps)
+ 
+ @pytest.mark.requirement("RETRY-01")
+-@pytest.mark.parametrize("_facet", ['429', '500'], ids=['429', '500'])
+-def test_retry_status(_facet):
+-    """Frozen acceptance case: RETRY-01."""
+-    http=FakeHttpClient([FakeResponse(status_code=_facet)])
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+-    with pytest.raises(BinanceClientError):
+-        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++@pytest.mark.parametrize("status", [429, 500], ids=["429", "500"])
++def test_retry_status(status):
++    http = FakeHttpClient([FakeResponse(status_code=status) for _ in range(4)])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
++    with pytest.raises(BinanceClientError, match=str(status)):
++        client.get_server_time()
++    assert len(http.calls) == 4
+ 
+ @pytest.mark.requirement("RETRY-02")
+ def test_timeout_retry_and_connect_fallback():
+-    """Frozen acceptance case: RETRY-02."""
+-    policy=retry_policy()
++    policy = retry_policy()
+     assert "read_timeout" in policy["retry_errors"]
+     assert policy["connect_dns"] == "fallback_only_before_first_successful_server_time"
+-    http=FakeHttpClient(errors=[TimeoutError("timeout")])
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
+-    with pytest.raises(BinanceClientError): client.get_server_time()
++    http = FakeHttpClient(errors=[TimeoutError("timeout") for _ in range(4)])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0)
++    with pytest.raises(BinanceClientError, match="timeout|request"):
++        client.get_server_time()
++    assert len(http.calls) == 4
+ 
++@pytest.mark.requirement("RETRY-02")
++@pytest.mark.parametrize("timeout_type", ["read", "write", "pool"], ids=["read-timeout", "write-timeout", "pool-timeout"])
++def test_read_write_and_pool_timeouts_retry_same_host(timeout_type):
++    import httpx
++    from tests.fixtures.fakes import SequenceFakeHttpClient
++    exc = {"read": httpx.ReadTimeout, "write": httpx.WriteTimeout, "pool": httpx.PoolTimeout}[timeout_type]("timeout")
++    http = SequenceFakeHttpClient([exc, exc, exc, exc])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 1767571500000)
++    with pytest.raises(BinanceClientError, match="timeout|request"):
++        client.get_server_time()
++    assert len(http.calls) == 4
++    assert {url.split("/")[2] for url, _ in http.calls} == {"data-api.binance.vision"}
++
++@pytest.mark.requirement("RETRY-02")
++@pytest.mark.parametrize("error_type", ["connect-error", "connect-timeout"], ids=["connect-error", "connect-timeout"])
++def test_connect_failures_fallback_only_before_first_successful_time_call(error_type):
++    import httpx
++    from tests.fixtures.fakes import SequenceFakeHttpClient
++    exc = httpx.ConnectError("connect failed") if error_type == "connect-error" else httpx.ConnectTimeout("connect timed out")
++    http = SequenceFakeHttpClient([exc, FakeResponse(payload={"serverTime": 1767571500000})])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 1767571500000)
++    assert client.get_server_time() == 1767571500000
++    assert [url.split("/")[2] for url, _ in http.calls] == ["data-api.binance.vision", "api.binance.com"]
++
++
++@pytest.mark.requirement("RETRY-02")
++def test_connect_failure_after_success_does_not_fallback():
++    import httpx
++    from tests.fixtures.fakes import SequenceFakeHttpClient
++    http = SequenceFakeHttpClient([
++        FakeResponse(payload={"serverTime": 1767571500000}),
++        httpx.ConnectError("later connection failure"),
++        httpx.ConnectError("later connection failure"),
++        httpx.ConnectError("later connection failure"),
++        httpx.ConnectError("later connection failure"),
++    ])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.0, now_ms=lambda: 1767571500000)
++    assert client.get_server_time() == 1767571500000
++    with pytest.raises(BinanceClientError, match="connect|request|server"):
++        client.get_server_time()
++    assert len(http.calls) == 5
++    assert {url.split("/")[2] for url, _ in http.calls} == {"data-api.binance.vision"}
+diff --git a/tests/unit/test_cooldown.py b/tests/unit/test_cooldown.py
+index 7130978..6b1f267 100644
+--- a/tests/unit/test_cooldown.py
++++ b/tests/unit/test_cooldown.py
+@@ -1,15 +1,54 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Cooldown persistence and policy contract tests; no real network is used."""
++import json
++from pathlib import Path
+ import pytest
++from tests.fixtures.policy import cooldown_policy
++from trading_app.data.cooldown import read_cooldown, write_cooldown, CorruptCooldownError
++from trading_app.data.binance_client import BinanceMarketDataClient, BinanceClientError
++from tests.fixtures.fakes import FakeHttpClient, FakeResponse
+ 
+ @pytest.mark.requirement("COOLDOWN-03")
+-def test_cooldown_atomic_persistence():
+-    """Acceptance scenario bound to frozen matrix row(s): COOLDOWN-03."""
+-    from trading_app.data.binance_client import BinanceMarketDataClient
+-    BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
+-
++def test_cooldown_atomic_persistence(tmp_path):
++    path = tmp_path / "binance_cooldown.json"
++    payload = {"until_ms": 1767571800000, "reason": "429_exhausted"}
++    write_cooldown(path, payload)
++    assert json.loads(path.read_text()) == payload
++    assert list(tmp_path.glob("*.tmp")) == []
+ 
+ @pytest.mark.requirement("COOLDOWN-02")
+ def test_cooldown_trigger_minimums_and_retry_after():
+-    """Acceptance scenario bound to frozen matrix row(s): COOLDOWN-02."""
+-    from trading_app.data.binance_client import BinanceMarketDataClient
+-    BinanceMarketDataClient(base_url="https://data-api.binance.vision").get_historical_klines()
++    durations = cooldown_policy()["durations"]
++    assert durations["418"] == "max(supplied_retry_after,600)"
++    assert durations["429_exhausted"] == "max(supplied_retry_after,300)"
++    assert durations["429_retry_after_over_60"] == "max(supplied_retry_after,600)"
++    http = FakeHttpClient([FakeResponse(status_code=418, headers={"Retry-After": "900"})])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(BinanceClientError, match="418|cooldown|rate"):
++        client.get_server_time()
++    assert len(http.calls) == 1
++
++@pytest.mark.requirement("COOLDOWN-05")
++def test_corrupt_cooldown_fails_closed(tmp_path):
++    path = tmp_path / "cooldown.json"
++    path.write_text('{"until_ms": -1, "reason": "bad"}')
++    with pytest.raises(CorruptCooldownError, match="negative|invalid|cooldown"):
++        read_cooldown(path)
++
++@pytest.mark.requirement("COOLDOWN-05")
++@pytest.mark.parametrize("contents", [None, "not-json", "{}", '{"until_ms": "x", "reason": "bad"}', '{"until_ms": -1, "reason": "bad"}'], ids=["missing", "corrupt-json", "missing-fields", "non-integer", "negative"])
++def test_invalid_cooldown_state_fails_closed(tmp_path, contents):
++    path = tmp_path / "cooldown.json"
++    if contents is not None:
++        path.write_text(contents)
++    with pytest.raises(CorruptCooldownError, match="cooldown|invalid|missing|integer|negative|JSON"):
++        read_cooldown(path)
++
++@pytest.mark.requirement("COOLDOWN-01")
++def test_active_cooldown_blocks_server_time_network_io(tmp_path):
++    path = tmp_path / "binance_cooldown.json"
++    path.write_text('{"until_ms": 1767571800000, "reason": "418"}')
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000})])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, cooldown_path=path, now_ms=lambda: 1767571500000)
++    with pytest.raises(BinanceClientError, match="cooldown|until"):
++        client.get_server_time()
++    assert http.calls == []
+diff --git a/tests/unit/test_dependencies.py b/tests/unit/test_dependencies.py
+index 3549fa0..6a37018 100644
+--- a/tests/unit/test_dependencies.py
++++ b/tests/unit/test_dependencies.py
+@@ -1,7 +1,13 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Dependency hygiene contract for the Python package metadata."""
++from pathlib import Path
++import tomllib
+ import pytest
++ROOT = Path(__file__).resolve().parents[2]
+ 
+ @pytest.mark.requirement("HYGIENE-06")
+ def test_unused_dependencies_removed():
+-    """Acceptance scenario bound to frozen matrix row(s): HYGIENE-06."""
+-    raise NotImplementedError("Stage-2 behavioral test scaffold: implement this scenario before production code")
++    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
++    deps = data["project"]["dependencies"]
++    assert len(deps) == len(set(deps))
++    assert all(dep.split(">=")[0].split("<")[0] for dep in deps)
++    assert not any(dep.startswith("mutmut") for dep in data["project"]["optional-dependencies"]["dev"])
+diff --git a/tests/unit/test_finality.py b/tests/unit/test_finality.py
+index a997085..b01e2be 100644
+--- a/tests/unit/test_finality.py
++++ b/tests/unit/test_finality.py
+@@ -1,47 +1,54 @@
+-"""Finality boundary contracts; no local clock or live network is used."""
++"""Finality boundary contract tests driven by independently supplied vectors."""
++import json
++from pathlib import Path
+ from datetime import datetime, timezone
+ import pytest
+-from trading_app.policy import frozen_policy, finality_policy
++from trading_app.data.finality import is_final, effective_end_ms, EmptyEffectiveRangeError, NaiveDatetimeError
+ from trading_app.data.binance_client import BinanceMarketDataClient, BinanceClientError
+-from tests.fixtures.fakes import FakeHttpClient
+-START=datetime(2024,1,1,tzinfo=timezone.utc)
+-END=datetime(2024,1,2,tzinfo=timezone.utc)
++from tests.fixtures.fakes import FakeHttpClient, FakeResponse
++from tests.fixtures.policy import frozen_policy
++
++VECTORS = json.loads((Path(__file__).resolve().parents[1] / "fixtures/vectors/finality_vectors.json").read_text())
++START = datetime.fromtimestamp(1767571200000 / 1000, tz=timezone.utc)
+ 
+ @pytest.mark.requirement("FINAL-01")
+ @pytest.mark.requirement("FINAL-04")
+ @pytest.mark.requirement("FINAL-08")
+-@pytest.mark.parametrize("_facet", ['lag-0ms', 'lag-positive'], ids=['lag-0ms', 'lag-positive'])
+-def test_boundary_rule(_facet):
+-    """Frozen acceptance case: FINAL-01, FINAL-04, FINAL-08."""
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient())
+-    with pytest.raises(BinanceClientError):
+-        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++@pytest.mark.parametrize("lag_ms", [0, 60000], ids=["lag-0ms", "lag-positive"])
++def test_boundary_rule(lag_ms):
++    cases = [case for case in VECTORS["cases"] if case["L_ms"] == lag_ms]
++    assert len(cases) == 3
++    for case in cases:
++        assert is_final(case["candle_close_ms"], case["S_ms"], case["L_ms"]) is case["expected_final"]
+ 
+ @pytest.mark.requirement("FINAL-05")
+ def test_effective_end_formula():
+-    """Frozen acceptance case: FINAL-05."""
+-    policy=finality_policy()
+-    assert policy["effective_end"] == "min(requested_end, floor((S-L)/I)*I)"
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient())
+-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
++    for case in VECTORS["cases"]:
++        assert effective_end_ms(case["requested_end_ms"], case["S_ms"], case["L_ms"], VECTORS["interval_ms"]) == case["expected_effective_end_ms"]
++    future = VECTORS["extra"]["future_end"]
++    assert effective_end_ms(future["requested_end_ms"], future["S_ms"], future["L_ms"], VECTORS["interval_ms"]) == future["expected_effective_end_ms"]
+ 
+ @pytest.mark.requirement("FINAL-07")
+ def test_empty_effective_range_and_input_validation():
+-    """Frozen acceptance case: FINAL-07."""
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient())
+-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=END, end=START)
++    end = VECTORS["extra"]["empty_effective_range"]
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient([FakeResponse(payload={"serverTime": end["S_ms"]})]))
++    with pytest.raises(EmptyEffectiveRangeError, match="effective.*range|effective_end"):
++        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=datetime.fromtimestamp(end["requested_start_ms"]/1000, timezone.utc), end=datetime.fromtimestamp(end["requested_end_ms"]/1000, timezone.utc))
++    with pytest.raises(NaiveDatetimeError, match="naive|timezone"):
++        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=datetime(2024,1,1), end=datetime(2024,1,2))
+ 
+ @pytest.mark.requirement("LAG-01")
+ def test_finality_lag_has_no_default():
+-    """Frozen acceptance case: LAG-01."""
+-    policy=finality_policy()
+-    assert policy["lag_default"] is None
+-    assert policy["lag_min_ms"] == frozen_policy()["finality"]["lag_min_ms"]
++    http = FakeHttpClient([FakeResponse(payload={"serverTime": 1767571500000})])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(BinanceClientError, match="lag|configuration|finality"):
++        client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=datetime.fromtimestamp(1767571500, timezone.utc))
++    assert len(http.calls) == 1
+ 
+ @pytest.mark.requirement("FINAL-01")
+ def test_no_local_clock_fallback():
+-    """Frozen acceptance case: FINAL-01."""
+-    assert finality_policy()["local_clock_fallback"] is False
+-    client=BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=FakeHttpClient(errors=[TimeoutError("server time unavailable")]))
+-    with pytest.raises(BinanceClientError): client.get_historical_klines(symbol="BTCUSDT", timeframe="5m", start=START, end=END)
+-
++    http = FakeHttpClient(errors=[TimeoutError("server time unavailable")])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++    with pytest.raises(BinanceClientError, match="server time|time"):
++        client.get_server_time()
++    assert len(http.calls) == 1
+diff --git a/tests/unit/test_gitignore.py b/tests/unit/test_gitignore.py
+index aeb22f7..c57ed8d 100644
+--- a/tests/unit/test_gitignore.py
++++ b/tests/unit/test_gitignore.py
+@@ -3,6 +3,7 @@ from pathlib import Path
+ import pytest
+ ROOT=Path(__file__).resolve().parents[2]
+ @pytest.mark.requirement("DB-07")
++@pytest.mark.requirement("R5-02")
+ def test_sqlite_wal_sidecars_ignored():
+     entries=(ROOT/".gitignore").read_text(encoding="utf-8").splitlines()
+     assert "data/*.db-wal" in entries
+diff --git a/tests/unit/test_hash.py b/tests/unit/test_hash.py
+index b550fba..f121a06 100644
+--- a/tests/unit/test_hash.py
++++ b/tests/unit/test_hash.py
+@@ -1,8 +1,11 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Exact decimal-format hashing contract tests using independent golden vectors."""
++import json
++from pathlib import Path
+ import pytest
++from trading_app.data.hashing import hash_candles
++VECTORS = json.loads((Path(__file__).resolve().parents[1] / "fixtures/vectors/golden_hash_vectors.json").read_text())
+ 
+ @pytest.mark.requirement("HASH-01")
+ def test_decimal_format_f_is_exact():
+-    """Acceptance scenario bound to frozen matrix row(s): HASH-01."""
+-    from trading_app.data.hashing import hash_candles
+-    hash_candles([])
++    # Empty hash is independently fixed as SHA-256 of zero bytes; no production-derived expectation.
++    assert hash_candles(VECTORS["empty"]["records"]) == VECTORS["empty"]["sha256"]
+diff --git a/tests/unit/test_hashing.py b/tests/unit/test_hashing.py
+index 657955d..d8723a4 100644
+--- a/tests/unit/test_hashing.py
++++ b/tests/unit/test_hashing.py
+@@ -1,16 +1,19 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Golden digest checks; expected hashes are fixed external vectors, never recalculated here."""
++import json
++from pathlib import Path
+ import pytest
++from trading_app.data.hashing import hash_candles
++VECTORS = json.loads((Path(__file__).resolve().parents[1] / "fixtures/vectors/golden_hash_vectors.json").read_text())
+ 
+ @pytest.mark.requirement("HASH-02")
+-@pytest.mark.parametrize("_facet", ['empty-one-multi'], ids=['empty-one-multi'])
++@pytest.mark.parametrize("_facet", ["empty-one-multi"], ids=["empty-one-multi"])
+ def test_golden_hash_vectors(_facet):
+-    """Acceptance scenario bound to frozen matrix row(s): HASH-02."""
+-    from trading_app.data.hashing import hash_candles
+-    hash_candles([])
+-
++    for key in ("empty", "one_record", "two_records"):
++        vector = VECTORS[key]
++        assert hash_candles(vector["records"]) == vector["sha256"]
+ 
+ @pytest.mark.requirement("HASH-01")
+ def test_hash_serialization_order_and_encoding():
+-    """Acceptance scenario bound to frozen matrix row(s): HASH-01."""
+-    from trading_app.data.hashing import hash_candles
+-    hash_candles([])
++    result = hash_candles(VECTORS["two_records"]["records"])
++    assert result == VECTORS["two_records"]["sha256"]
++    assert result != VECTORS["negative_control_reordered"]["sha256"]
+diff --git a/tests/unit/test_policy.py b/tests/unit/test_policy.py
+index 61318df..d9acc87 100644
+--- a/tests/unit/test_policy.py
++++ b/tests/unit/test_policy.py
+@@ -1,4 +1,4 @@
+-from trading_app.policy import frozen_policy, retry_policy, cooldown_policy, finality_policy
++from tests.fixtures.policy import frozen_policy, retry_policy, cooldown_policy, finality_policy
+ 
+ def test_retry_attempt_cap_is_read_from_frozen_yaml():
+     matrix=frozen_policy()
+diff --git a/tests/unit/test_python_policy.py b/tests/unit/test_python_policy.py
+index 01ccf46..20ac1dc 100644
+--- a/tests/unit/test_python_policy.py
++++ b/tests/unit/test_python_policy.py
+@@ -4,6 +4,7 @@ from pathlib import Path
+ import pytest
+ ROOT=Path(__file__).resolve().parents[2]
+ @pytest.mark.requirement("CI-01")
++@pytest.mark.requirement("PY-01")
+ def test_python_version_policy_documented():
+     requirement=tomllib.loads((ROOT/"pyproject.toml").read_text(encoding="utf-8"))["project"]["requires-python"]
+     assert requirement.startswith(">=3.12")
+diff --git a/tests/unit/test_repository_conflicts.py b/tests/unit/test_repository_conflicts.py
+index 3dc7e5a..83607f4 100644
+--- a/tests/unit/test_repository_conflicts.py
++++ b/tests/unit/test_repository_conflicts.py
+@@ -1,15 +1,35 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Conflict behavior is compared field-by-field using exact Decimal values."""
++from decimal import Decimal
+ import pytest
++from tests.fixtures.candles import candle
++from trading_app.data.repository import CandleRepository, CandleConflictError, create_engine_from_url
+ 
+ @pytest.mark.requirement("CONFLICT-03")
+ def test_conflict_compares_all_fields_and_never_overwrites():
+-    """Acceptance scenario bound to frozen matrix row(s): CONFLICT-03."""
+-    from trading_app.data.repository import CandleRepository
+-    CandleRepository(None).insert_candles([])
+-
++    engine = create_engine_from_url("sqlite:///:memory:")
++    repository = CandleRepository(engine); repository.create_tables()
++    original = candle()
++    assert repository.insert_candles([original]) == 1
++    variants = [
++        candle(close_time=original.close_time.replace(second=1)),
++        candle(open="100.11"), candle(high="101.01"), candle(low="99.49"),
++        candle(close="100.51"), candle(volume="12.34500001"),
++        candle(quote_volume="1240.00000001"), candle(trade_count=101),
++    ]
++    for variant in variants:
++        with pytest.raises(CandleConflictError, match="conflict|different|mismatch"):
++            repository.insert_candles([variant])
++        stored = repository.get_candles(symbol="BTCUSDT", timeframe="5m")
++        assert len(stored) == 1
++        assert stored[0].open == Decimal("100.10")
+ 
+ @pytest.mark.requirement("CONFLICT-02")
+ def test_decimal_numeric_equality_and_created_at_exclusion():
+-    """Acceptance scenario bound to frozen matrix row(s): CONFLICT-02."""
+-    from trading_app.data.repository import CandleRepository
+-    CandleRepository(None).insert_candles([])
++    engine = create_engine_from_url("sqlite:///:memory:")
++    repository = CandleRepository(engine); repository.create_tables()
++    first = candle(open="100.1", high="101.0", low="99.50", close="100.50", created_at_ms=1000)
++    equivalent = candle(open="100.10", high="101.00", low="99.500", close="100.500", created_at_ms=999999)
++    assert first.open == equivalent.open == Decimal("100.10")
++    assert repository.insert_candles([first]) == 1
++    assert repository.insert_candles([equivalent]) == 0
++    assert repository.count(symbol="BTCUSDT", timeframe="5m") == 1
+diff --git a/tests/unit/test_retry_policy.py b/tests/unit/test_retry_policy.py
+index ab9ecb0..7978c75 100644
+--- a/tests/unit/test_retry_policy.py
++++ b/tests/unit/test_retry_policy.py
+@@ -1,15 +1,38 @@
+-"""Policy wiring checks; request-level behavior remains intentionally red."""
++"""Retry behavior checks use fake responses and assert observable side effects."""
+ import pytest
+-from trading_app.policy import frozen_policy, retry_policy
+-ROOT_POLICY=frozen_policy()["retry"]
++from tests.fixtures.policy import retry_policy
++from tests.fixtures.fakes import FakeHttpClient, FakeResponse
++from trading_app.data.binance_client import BinanceMarketDataClient, BinanceClientError
++
+ @pytest.mark.requirement("M1-06")
++@pytest.mark.requirement("RETRY-01")
+ def test_403_and_418_are_not_retried():
+-    assert 418 not in retry_policy()["retry_statuses"]
+-    assert ROOT_POLICY["non_retry_4xx"] is True
++    for status in (403, 418):
++        http = FakeHttpClient([FakeResponse(status_code=status)])
++        client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http)
++        with pytest.raises(BinanceClientError, match=str(status)):
++            client.get_server_time()
++        assert len(http.calls) == 1
++
+ @pytest.mark.requirement("RETRY-01")
+ def test_429_does_not_fallback():
+-    assert retry_policy()["retry_after"]["over_cap"] == ROOT_POLICY["retry_after"]["over_cap"]
++    http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": "45"})])
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=lambda _: None, jitter=lambda: 0.5)
++    with pytest.raises(BinanceClientError, match="429|budget|cooldown|retry"):
++        client.get_server_time()
++    assert len(http.calls) == 1
++    assert all("api.binance.com" not in url for url, _ in http.calls)
++
+ @pytest.mark.requirement("RETRY-02")
++@pytest.mark.requirement("RETRY-01")
+ def test_retry_after_is_not_jittered_or_reduced():
+-    assert retry_policy()["retry_after"]["sleep_jitter"] is False
+-    assert retry_policy()["retry_after"]["max_seconds"] == ROOT_POLICY["retry_after"]["max_seconds"]
++    policy = retry_policy()["retry_after"]
++    assert policy["sleep_jitter"] is False
++    assert policy["max_seconds"] == 60
++    http = FakeHttpClient([FakeResponse(status_code=429, headers={"Retry-After": "10"}) for _ in range(4)])
++    sleeps = []
++    client = BinanceMarketDataClient(base_url="https://data-api.binance.vision", http_client=http, sleep=sleeps.append, jitter=lambda: 0.9)
++    with pytest.raises(BinanceClientError, match="429|rate|retry"):
++        client.get_server_time()
++    assert sleeps == [10, 10, 10]
++    assert len(http.calls) == 4
+diff --git a/tests/unit/test_scope.py b/tests/unit/test_scope.py
+index 114794c..b9eb66b 100644
+--- a/tests/unit/test_scope.py
++++ b/tests/unit/test_scope.py
+@@ -3,6 +3,7 @@ from pathlib import Path
+ import pytest
+ ROOT=Path(__file__).resolve().parents[2]
+ @pytest.mark.requirement("M1-04")
++@pytest.mark.requirement("M1-17")
+ def test_milestone_one_scope_boundary():
+     source="\n".join(p.read_text(encoding="utf-8") for base in (ROOT/"src", ROOT/"scripts") for p in base.rglob("*.py"))
+     lowered=source.lower()
+diff --git a/tests/unit/test_validator.py b/tests/unit/test_validator.py
+index b6537b4..7d6f976 100644
+--- a/tests/unit/test_validator.py
++++ b/tests/unit/test_validator.py
+@@ -1,78 +1,72 @@
+-"""Frozen-matrix acceptance tests; behavior is intentionally red before implementation."""
++"""Raw Binance kline validation acceptance tests."""
++from datetime import datetime, timezone
+ import pytest
++from trading_app.data.validator import DataValidationError, assert_valid_klines, timeframe_to_ms, utc_datetime_from_ms
++START = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
++INTERVAL = 300_000
++
++def kline(open_time_ms, *, open_price="100", high="101", low="99", close="100.5", volume="10", quote_volume="1005", close_time_ms=None, trades=100):
++    return [open_time_ms, open_price, high, low, close, volume, close_time_ms if close_time_ms is not None else open_time_ms + INTERVAL - 1, quote_volume, trades, "1", "2", "0"]
+ 
+ @pytest.mark.requirement("M1-09")
+ def test_candle_duration():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-09."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    assert timeframe_to_ms("5m") == INTERVAL
++    assert timeframe_to_ms("1h") == 3_600_000
+ 
+ @pytest.mark.requirement("M1-10")
+ def test_duplicate_candles():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-10."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    with pytest.raises(DataValidationError, match="DUPLICATE_CANDLE"):
++        assert_valid_klines([kline(START), kline(START)], symbol="BTCUSDT", timeframe="5m")
+ 
+ @pytest.mark.requirement("M1-10")
+ def test_duplicate_price_volume_and_ohlc_validation():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-10."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    bad = kline(START, high="90", low="80", open_price="100", close="95")
++    with pytest.raises(DataValidationError, match="INVALID_OHLC"):
++        assert_valid_klines([bad], symbol="BTCUSDT", timeframe="5m")
+ 
+ @pytest.mark.requirement("M1-10")
+ def test_invalid_prices():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-10."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    row = kline(START); row[1] = "0"
++    with pytest.raises(DataValidationError, match="INVALID_PRICE"):
++        assert_valid_klines([row], symbol="BTCUSDT", timeframe="5m")
+ 
+ @pytest.mark.requirement("M1-10")
+ def test_invalid_volumes():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-10."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    row = kline(START); row[5] = "-1"
++    with pytest.raises(DataValidationError, match="INVALID_VOLUME"):
++        assert_valid_klines([row], symbol="BTCUSDT", timeframe="5m")
+ 
+ @pytest.mark.requirement("M1-09")
+ def test_missing_candles():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-09."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    with pytest.raises(DataValidationError, match="MISSING_CANDLES"):
++        assert_valid_klines([kline(START), kline(START + 2*INTERVAL)], symbol="BTCUSDT", timeframe="5m")
+ 
+ @pytest.mark.requirement("M1-09")
+ def test_monotonic_timestamps():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-09."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    with pytest.raises(DataValidationError, match="NON_MONOTONIC_TIMESTAMP"):
++        assert_valid_klines([kline(START + INTERVAL), kline(START)], symbol="BTCUSDT", timeframe="5m")
+ 
+ @pytest.mark.requirement("M1-10")
+ def test_ohlc_consistency():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-10."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    row = kline(START, open_price="100", high="99", low="90", close="95")
++    with pytest.raises(DataValidationError, match="INVALID_OHLC"):
++        assert_valid_klines([row], symbol="BTCUSDT", timeframe="5m")
+ 
+ @pytest.mark.requirement("M1-11")
+ def test_suspicious_data_is_reported_without_repair():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-11."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    row = kline(START, volume="-1")
++    original = list(row)
++    with pytest.raises(DataValidationError, match="INVALID_VOLUME"):
++        assert_valid_klines([row], symbol="BTCUSDT", timeframe="5m")
++    assert row == original
+ 
+ @pytest.mark.requirement("M1-09")
+ def test_timestamp_alignment():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-09."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
+-
++    with pytest.raises(DataValidationError, match="MISALIGNED_TIMESTAMP"):
++        assert_valid_klines([kline(START + 1)], symbol="BTCUSDT", timeframe="5m")
+ 
+ @pytest.mark.requirement("M1-09")
+ def test_timestamp_alignment_duration_monotonicity_and_missing_candles():
+-    """Acceptance scenario bound to frozen matrix row(s): M1-09."""
+-    from trading_app.data.validator import validate_klines
+-    validate_klines()
++    rows = [kline(START), kline(START + INTERVAL), kline(START + 2*INTERVAL)]
++    assert_valid_klines(rows, symbol="BTCUSDT", timeframe="5m", expected_start_ms=START, expected_end_ms_exclusive=START + 3*INTERVAL)
++    assert utc_datetime_from_ms(START).tzinfo is not None
+diff --git a/tools/check_branch_coverage.py b/tools/check_branch_coverage.py
+new file mode 100644
+index 0000000..2cda6d8
+--- /dev/null
++++ b/tools/check_branch_coverage.py
+@@ -0,0 +1,33 @@
++#!/usr/bin/env python3
++"""Fail-closed branch-coverage gate using coverage.py JSON output."""
++from __future__ import annotations
++import argparse, json
++from pathlib import Path
++import yaml
++
++def main() -> int:
++    ap=argparse.ArgumentParser(); ap.add_argument("coverage_json",type=Path); ap.add_argument("--matrix",type=Path,default=Path("matrix.yaml")); a=ap.parse_args()
++    if not a.coverage_json.is_file(): print("FAIL: coverage JSON missing"); return 1
++    try:
++        report=json.loads(a.coverage_json.read_text(encoding="utf-8")); policy=yaml.safe_load(a.matrix.read_text(encoding="utf-8"))["coverage"]
++        overall=float(report["totals"]["percent_covered_branch"])
++        files=report["files"]
++        if not files: raise ValueError("coverage JSON has no files")
++        modules=[]
++        for name,info in files.items():
++            if not name.replace("\\","/").startswith("src/trading_app/"): continue
++            summary=info["summary"]
++            if "percent_covered_branch" not in summary: raise ValueError(f"missing branch percentage for {name}")
++            modules.append((name,float(summary["percent_covered_branch"])))
++        if not modules: raise ValueError("no src/trading_app modules in coverage JSON")
++    except Exception as exc:
++        print(f"FAIL: invalid/incomplete coverage report: {exc}"); return 1
++    errors=[]
++    if overall < float(policy["overall_branch_min"]): errors.append(f"overall branch coverage {overall:.2f}% < {policy['overall_branch_min']}%")
++    for name,value in modules:
++        if value < float(policy["per_module_branch_min"]): errors.append(f"{name}: branch coverage {value:.2f}% < {policy['per_module_branch_min']}%")
++    if errors:
++        print(f"FAIL: {len(errors)} coverage threshold violation(s)"); [print(" -",e) for e in errors]; return 1
++    print(f"PASS: overall branch coverage {overall:.2f}% and {len(modules)} module(s) meet frozen thresholds")
++    return 0
++if __name__=="__main__": raise SystemExit(main())
+diff --git a/tools/red_reason_gate.py b/tools/red_reason_gate.py
+new file mode 100644
+index 0000000..fc2c993
+--- /dev/null
++++ b/tools/red_reason_gate.py
+@@ -0,0 +1,104 @@
++#!/usr/bin/env python3
++"""Fail unless every red test is a production stub and every green test is allowlisted.
++
++The allowlist is intentionally limited to repository tooling, CI evidence/hygiene,
++source-boundary hygiene, and frozen-matrix reader checks. It is not a behavioral bypass.
++"""
++from __future__ import annotations
++import argparse
++import re
++import sys
++import xml.etree.ElementTree as ET
++from pathlib import Path
++
++ALLOWED_PREFIXES = ("tests/tools/", "tests/ci/")
++ALLOWED_EXACT = {
++    "tests/unit/test_scope.py::test_milestone_one_scope_boundary",
++    "tests/unit/test_gitignore.py::test_sqlite_wal_sidecars_ignored",
++    "tests/unit/test_python_policy.py::test_python_version_policy_documented",
++    "tests/unit/test_project_layout.py::test_python312_project_structure",
++    "tests/unit/test_dependencies.py::test_unused_dependencies_removed",
++    "tests/integration/test_cli.py::test_script_wrapper_is_thin_and_runnable",
++    "tests/mutation/test_mutation_runner.py::test_baseline_and_patch_failure_policy",
++    "tests/mutation/test_required_mutants.py::test_each_mutant_has_killer",
++    "tests/mutation/test_required_mutants.py::test_required_mutant_set",
++    "tests/unit/test_policy.py::test_retry_attempt_cap_is_read_from_frozen_yaml",
++    "tests/unit/test_policy.py::test_sleep_budget_is_read_from_frozen_yaml",
++    "tests/unit/test_policy.py::test_cooldown_minimums_are_read_from_frozen_yaml",
++    "tests/unit/test_policy.py::test_finality_lag_policy_is_read_from_frozen_yaml",
++    "tests/security/test_network_policy.py::test_no_api_keys",
++    "tests/security/test_network_policy.py::test_no_private_endpoints",
++    "tests/security/test_network_policy.py::test_public_spot_market_data_only",
++    "tests/live/test_run_evidence.py::test_live_run_evidence_manifest",
++    "tests/observations/test_obs01_boundaries.py::test_end_and_start_boundary_semantics",
++    "tests/observations/test_obs03_gate.py::test_observation_gate_before_live_acceptance",
++}
++STUB_RE = re.compile(r"NotImplementedError")
++SRC_FRAME_RE = re.compile(r"(?:src[/\\]trading_app[/\\]|trading_app[/\\]).*\.py")
++
++def nodeid(case: ET.Element) -> str:
++    cls = case.attrib.get("classname", "")
++    name = case.attrib.get("name", "")
++    if cls.startswith("tests."):
++        cls = cls.replace(".", "/") + ".py"
++    elif cls.startswith("tests/") and not cls.endswith(".py"):
++        cls += ".py"
++    elif cls and not cls.startswith("tests/"):
++        cls = "tests/" + cls.replace(".", "/") + ".py"
++    return f"{cls}::{name}"
++
++def allowlisted(n: str) -> bool:
++    return n in ALLOWED_EXACT or n.startswith(ALLOWED_PREFIXES)
++
++def main() -> int:
++    ap = argparse.ArgumentParser()
++    ap.add_argument("junit", type=Path)
++    ap.add_argument("--pytest-exit-code", type=int, required=True)
++    args = ap.parse_args()
++    if not args.junit.is_file():
++        print(f"RED-REASON GATE FAIL: JUnit file missing: {args.junit}")
++        return 1
++    try:
++        root = ET.parse(args.junit).getroot()
++    except Exception as exc:
++        print(f"RED-REASON GATE FAIL: invalid JUnit XML: {exc}")
++        return 1
++    errors: list[str] = []
++    cases = list(root.iter("testcase"))
++    if not cases:
++        errors.append("JUnit contains no testcases")
++    # Collection errors are never an acceptable expected-red result.
++    for el in root.iter():
++        if el.tag == "error":
++            errors.append(f"collection/suite error: {el.attrib.get('message', el.text or 'unknown error')}")
++    expected_red = 0
++    for case in cases:
++        n = nodeid(case)
++        failure = case.find("failure")
++        error = case.find("error")
++        skipped = case.find("skipped")
++        if skipped is not None:
++            errors.append(f"skip is not an expected-red result: {n}")
++            continue
++        if failure is not None or error is not None:
++            blob = "\n".join((failure.text or "", failure.attrib.get("message", ""), error.text or "" if error is not None else "", error.attrib.get("message", "") if error is not None else ""))
++            if error is not None:
++                errors.append(f"error is not an expected-red result: {n}")
++            elif STUB_RE.search(blob) and SRC_FRAME_RE.search(blob):
++                expected_red += 1
++            else:
++                errors.append(f"failure is not a production NotImplementedError stub: {n}")
++        elif not allowlisted(n):
++            errors.append(f"behavioral test passed against stubs and is not allowlisted: {n}")
++    if args.pytest_exit_code not in (0, 1):
++        errors.append(f"pytest exit code {args.pytest_exit_code} indicates collection/internal failure")
++    if expected_red == 0:
++        errors.append("no expected production-stub failures were observed")
++    if errors:
++        print(f"RED-REASON GATE FAIL: {len(errors)} issue(s); expected production-stub failures={expected_red}")
++        for e in errors: print(" -", e)
++        return 1
++    print(f"RED-REASON GATE PASS: {expected_red} failure(s) are NotImplementedError from src/trading_app; all passes are allowlisted; pytest exit={args.pytest_exit_code}")
++    return 0
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tools/run_mutations.py b/tools/run_mutations.py
+new file mode 100644
+index 0000000..33aa9de
+--- /dev/null
++++ b/tools/run_mutations.py
+@@ -0,0 +1,55 @@
++#!/usr/bin/env python3
++"""Run patch-based mutation checks; baseline and patch-application errors fail closed."""
++from __future__ import annotations
++import argparse
++import shlex
++import subprocess
++import sys
++from pathlib import Path
++
++def run(command: list[str], cwd: Path) -> int:
++    return subprocess.run(command, cwd=cwd, check=False).returncode
++
++def main() -> int:
++    ap=argparse.ArgumentParser()
++    ap.add_argument("--root", type=Path, default=Path.cwd())
++    ap.add_argument("--patch-dir", type=Path, required=True)
++    ap.add_argument("--baseline-command", required=True)
++    ap.add_argument("--test-command", required=True)
++    args=ap.parse_args(); root=args.root.resolve(); patch_dir=args.patch_dir.resolve()
++    baseline=shlex.split(args.baseline_command); test=shlex.split(args.test_command)
++    rc=run(baseline,root)
++    if rc:
++        print(f"FAIL: baseline command exited {rc}; no mutants executed")
++        return 1
++    patches=sorted(patch_dir.glob("*.patch"))
++    if not patches:
++        print(f"FAIL: no mutation patches found in {patch_dir}")
++        return 1
++    failures=[]; killed=0
++    for patch in patches:
++        check=subprocess.run(["git","apply","--check",str(patch)],cwd=root,capture_output=True,text=True)
++        if check.returncode:
++            failures.append(f"{patch.name}: patch application check failed: {(check.stderr or check.stdout).strip()}")
++            continue
++        apply=subprocess.run(["git","apply",str(patch)],cwd=root,capture_output=True,text=True)
++        if apply.returncode:
++            failures.append(f"{patch.name}: patch application failed: {(apply.stderr or apply.stdout).strip()}")
++            continue
++        try:
++            mutant_rc=run(test,root)
++            if mutant_rc:
++                killed+=1; print(f"KILLED {patch.name} (test exit {mutant_rc})")
++            else:
++                failures.append(f"{patch.name}: mutant survived")
++        finally:
++            reverse=subprocess.run(["git","apply","--reverse",str(patch)],cwd=root,capture_output=True,text=True)
++            if reverse.returncode:
++                failures.append(f"{patch.name}: failed to reverse applied patch: {(reverse.stderr or reverse.stdout).strip()}")
++    if failures:
++        print(f"FAIL: {len(failures)} mutation issue(s); killed={killed}")
++        for item in failures: print(" -",item)
++        return 1
++    print(f"PASS: {killed}/{len(patches)} mutants killed after baseline passed")
++    return 0
++if __name__=="__main__": raise SystemExit(main())

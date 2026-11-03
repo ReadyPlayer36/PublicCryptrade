@@ -9,3 +9,6 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/binance_cooldown.json
+data/binance_cooldown.json.lock
+artifacts/
+*.egg-info/
