@@ -176,7 +176,8 @@ Python 3.12.3, in a fresh virtual environment installed from `pyproject.toml`
 
 `reports/`, `commit-object.txt` and `stage2_tests_only_revision.patch` are
 historical evidence of earlier review rounds. They are not inputs to any test or
-gate and may be removed in a later cleanup.
+gate and have been archived, unmodified, under
+`evidence/archive/pre-cleanup/` (see `manifest.md` there).
 
 ## Provenance and review boundary
 
