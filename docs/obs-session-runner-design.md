@@ -1,26 +1,31 @@
-# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v1.7 (NORMATIVE)
+# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v1.8 (NORMATIVE)
 
 Status: design only. No live request is authorized by this document. Milestone 1 remains **BLOCKED** until the reviewer accepts
-the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.6**: it resolves all seven
-findings of the v1.6 review (V16-01…V16-07, §1.0) and re-states every affected section at implementation granularity; where
-v1.6 and this document disagree, this document governs, and sections not restated here remain normative as written in v1.6.
+the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.7**: it resolves all four
+blocking findings of the v1.7 review (V17-01…V17-04, §1.0) and re-states every affected section at implementation granularity;
+where v1.7 and this document disagree, this document governs, and sections not restated here remain normative as written in
+v1.7. The v1.6/v1.5/v1.4/v1.3 maps are retained unchanged as §1.1–§1.4.
 
-Anchor: repository `ReadyPlayer36/PublicCryptrade`, commit `11ff12535e42639e3bab53304651e3ea2b5cd6b3`
-(branch `impl-obs-harness-provenance`; lineage `impl-obs-step1` → `f337862e52dada43f425cee05154e18f212987aa` →
-`dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f` → `673f9a2ace30a449267adace9af0f9d94865bda1` → this commit), reviewed
-against the actual Step-1 code in `tools/obs/` at that commit. V15/V16 branch-sync result: `tools/obs/` is byte-identical
-between `dbfe53c…` and `11ff125…` (only this document changed between them; `673f9a2` and `11ff125` are
-documentation-only revisions of this file — `git diff dbfe53c 11ff125 -- tools/obs/` is empty), so every v1.7 correction
-below is a design-text-versus-code discrepancy, not code drift. Hard citations re-verified at this commit: `audit.py` lines 70–86
-(`abort_condition_seq`), 289–296 (check (g): `wrapper_count` must be a caller-supplied integer — the "independent
-egress counter") and 623–626 (`audit_run` reloads the run via `load_run` at 626); `runstore.py` 45 (`ManifestError(ValueError)`),
-172/217 (`_canonical`/`_lines`), 206–209 (`record_to_json` base64-encodes the body), 246–250/279–286 (`_read`/`_jsonl`
-whole-file load), 253–258 (`load_manifest` fails closed without a 64-hex pin), 291–328 (field validators), 348–357
-(`_record_from_json` decodes `body_b64` from a str), 370–388 (`load_run`), and `eventlog.py` 50–58 (digest-line format;
-`bytes(r.body)` is `r.body` — probe-verified identity, so bodies hash in place). Phase memory numbers in §6.5 and
-Appendix A are measurements over the exact normative sequences on CPython 3.12.3 (`tracemalloc`, worst-case inputs;
-methodology, raw values and native-headroom accounting: Appendix A); the probe scripts are review artifacts, not
-repository files.
+Anchor: repository `ReadyPlayer36/PublicCryptrade`, branch `main`, commit
+`7b1493e0005f3b8d8b9f3a3dd8519008b46acca5` (lineage `impl-obs-step1` → `f337862e52dada43f425cee05154e18f212987aa` →
+`dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f` → `673f9a2ace30a449267adace9af0f9d94865bda1` →
+`11ff12535e42639e3bab53304651e3ea2b5cd6b3` → this commit), reviewed against the actual Step-1 code in `tools/obs/` at that
+commit. Branch-sync result re-established for this revision: `git diff 11ff125 7b1493e -- tools/obs/` is EMPTY and
+`git diff dbfe53c 7b1493e -- tools/obs/` is EMPTY — `tools/obs/` is byte-identical across every documented anchor (only this
+document changed after `dbfe53c`), so every correction below is a design-text-versus-code discrepancy, not code drift. Hard
+citations re-verified at `7b1493e`: `audit.py` 70–86 (`abort_condition_seq`), 289–296 (check (g): `wrapper_count` must be a
+caller-supplied integer — the "independent egress counter"), 619–631 (`audit_run` reloads the run via `load_run` at 626);
+`runstore.py` 35/39–42 (format + frozen key sets), 45 (`ManifestError(ValueError)`), 172/217 (`_canonical`/`_lines`),
+194–201 (`_parse_json` dialect: `_no_duplicate_keys`, `parse_constant` rejection), 206–209 (`record_to_json` base64-encodes
+the body), 221–244 (`write_run`: path opens, no fsync), 246–250 (`_read`), 253–258 (`load_manifest` fails closed without a
+64-hex pin), 279–286 (`_jsonl`: whole-file split, truncation first), 291–328 (field validators), 348–357
+(`_record_from_json` decodes `body_b64` from a str first), 370–388 (`load_run`); `eventlog.py` 50–58 (digest-line format;
+`bytes(r.body)` is `r.body` — probe-verified identity, so bodies hash in place). Phase memory numbers in §6.5 and Appendix A
+are measurements over the exact normative sequences on CPython 3.12.3 (`tracemalloc`, worst-case inputs); methodology, raw
+values, the native-instrumentation boundaries and the complete probe-script blueprints are Appendix A — and those probes are
+specified as REPOSITORY files under `tools/obs/probes/` (A.0/A.7, V17-04), superseding v1.7's "review artifacts, not
+repository files" — and executed for this revision: `python -m tools.obs.probes.run_all --check` exits 0 on every
+recorded value in A.2/A.3.
 Imperative key words MUST, MUST NOT, SHALL, SHOULD, SHOULD NOT are normative. "§n" refers to a section of this document;
 "protocol §n" refers to `docs/obs-protocol.md` v0.5. Code identifiers in `monospace` refer to real symbols in `tools/obs/`
 unless explicitly marked *runner* (Step-2 code that this document specifies).
@@ -39,8 +44,10 @@ parameter of `execute`, §3.1, the chunked body-read path, §6.4, the evidence w
 v1.5 for V14-01/V14-02), and — added by v1.6 for V15-02 — the evidence reader `load_run`, §5.1.2), the extension MUST
 preserve every observable outcome of the current implementation (record shapes, error strings, error precedence,
 counters, and for `write_run` the exact bytes it writes / for `load_run` the exact accept-reject set, error precedence
-and `LoadedRun` contents — the `load_run` contract is made exact by v1.7 for V16-05: Step-1's error precedence and JSON
-dialect are reproduced verbatim, with the `MAX_LINE` cap as the sole documented acceptance divergence (§5.1.2, D35)) and
+and `LoadedRun` contents — the `load_run` contract is made exact by v1.7 for V16-05 and is VERSIONED by v1.8 for V17-01 as the `obs-loader/2`
+contract: Step-1's error precedence and JSON dialect are reproduced verbatim, with the `MAX_LINE` cap as the sole
+documented acceptance divergence — now an explicit, derived, versioned bound with its own registry, size table,
+precedence position and differential corpus (§5.1.2.0–§5.1.2.4, D35/D38/D39)) and
 land with the regression tests named in §11.
 
 0.3 Persisted artifacts (all names are exact):
@@ -51,7 +58,7 @@ land with the regression tests named in §11.
 | `<run_id>.refusal.json` | `obs-refusal/1` | *runner* `RefusalWriter` | pre-flight refusal, once, exclusive create |
 | `<run_id>.receipt.json` (sibling of the run dir) | `obs-outer-index/1` | *runner* `ReceiptPublisher` | CP3, once, no-replace publication |
 | `manifest.json` SHA-256 pin | (bare hex) | emitted by `write_run` return value | before CP1, out-of-band (§10.1) |
-| `<run_id>.receipt.json` SHA-256 | (bare hex) | emitted by `ReceiptPublisher` after CP3 | out-of-band (§10.1, V14-05) |
+| `<run_id>.receipt.json` SHA-256 | (bare hex) | emitted by `ReceiptPublisher` after CP3e content re-proof (V17-02) | out-of-band (§10.1, V14-05) |
 | `<run_id>.refusal.json` SHA-256 | (bare hex) | emitted by `RefusalWriter` after step 5 | out-of-band (§10.1, V14-05) |
 | `transport.sent` decimal count | (bare decimal) | emitted by the runner beside the manifest pin, before CP1 | out-of-band (§10.1, V15-03) |
 
@@ -75,33 +82,42 @@ checks (a)–(g) of `audit_pace`, `validate_missed_window_decision` + `validate_
 (single-flight, record append, `abort_seq` convention), `watchdog.py::run_with_deadline` (absolute deadline + 1 s
 cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pin), `params.py` (all numeric constants).
 
-## 1. Revision maps — V16 findings resolved in v1.7; V15/V14/V13 findings retained
+## 1. Revision maps — V17 findings resolved in v1.8; V16/V15/V14/V13 findings retained
 
-### 1.0 V16 findings resolved in v1.7
+### 1.0 V17 findings resolved in v1.8
+
+| ID | Finding (v1.7 review) | Where resolved | Resolution in one line |
+|---|---|---|---|
+| V17-01 | `MAX_LINE` was documented only as a "sole acceptance divergence" buried inside §5.1.2: no contract identity, no version, no statement that Step-2's bounded reader *supersedes* Step-1's unconstrained `_jsonl` string split, no exact size arithmetic beyond one formula line, no defined position in the error ladder, and no differential corpus — so the loader could evolve silently and the divergence was unenforceable | §5.1.2.0 (registry), §5.1.2.1 (bounds + boundary table), §5.1.2.2 (precedence ladder P-0…P-13 + the P-9a terminator rule), §5.1.2.3 (pseudocode), §5.1.2.4 (differential corpus D-01…D-20), §0.2, §12, D38/D39, G-V17-01 | New `obs-loader/2` contract with a named registry that SUPERSEDES `obs-loader/1` (Step-1, kept only as a hash-pinned test oracle), no negotiation and no fallback; `MAX_LINE` derived (`4 × ⌈MAX_BODY_BYTES/3⌉ + 512 = 5,592,920 B`) with an import-time assertion, a four-case boundary table (cap inclusive), a schema-valid upper-bound proof and a measured framing allowance; a 14-row precedence ladder that places the cap in Step-1's pre-parse slot (after both digests, truncation first, before every parse error); and a reviewable 20-class differential corpus asserting identical messages, identical positions and identical `LoadedRun` against legacy records — which also fixed a real message-drift defect (v1.7 parsed the terminator-inclusive buffer, reporting `line 2 column 1` where Step-1 reports `line 1 column 6`) |
+| V17-02 | Receipt publication step 5 compared `st_dst` against `st_src` — the PRE-SYSCALL stat of the staging NAME — so a substitution landing inside the stat→`renameat2` window published the impostor and SATISFIED the proof (`st_dst == st_src == impostor`): the "post-rename identity proof" was vacuous in exactly the window it claimed to close | §5.2 steps 3/5 (explicit `identity_source = CREATION`), §5.2.4 (new steps 1–9 incl. CP3e), §7.5 CP3, §10.1, D40, G-V17-02 | Destination verification now compares `(st_dst.st_dev, st_dst.st_ino)` **directly against `expect`**, the creation identity captured by `fstat(tmp_fd)` before close (and, for the run directory, by `fstat` of the `O_DIRECTORY` descriptor opened immediately after `mkdir`); `st_src` is demoted to a pre-syscall gate only, and quarantine moves — whose source identity cannot be known in advance — are the sole `OBSERVED` mode; a new CP3e re-proof re-reads the published receipt through the same descriptor-relative snapshot and requires its digest to equal the digest written, and the out-of-band `receipt_pin` is printed only after it |
+| V17-03 | `observe()` handled the receipt as a sequence of independent looks: `receipt_exists()` before the read, `read_bytes(receipt_path)` by PATH, a sha256 of a buffer it then re-parsed, and a SECOND `receipt_exists()` after the audit — so a receipt swapped between the checks could flip T4↔T6/T3, a symlink/FIFO/non-regular substitution was reachable, and "presence" and "content" were never the same object | §9.2.0 (read discipline), §9.2.1 (`snapshot`), §9.2.2 (rewritten `OBSERVE`), §9.3, §10.2, D41, G-V17-03 | Every receipt (and journal) fact now comes from ONE descriptor-relative `snapshot(pfd, name, max_bytes)`: a single `O_RDONLY\|O_NOFOLLOW\|O_CLOEXEC\|O_NONBLOCK` open decides existence, one bounded read yields immutable `bytes`, and `sha256` is computed over exactly those bytes — so presence, content, authentication against the mandatory `receipt_pin` and parsing all bind the SAME object; the classifier branches on frozen facts only (`ABSENT` / `FAULT(kind)` / `Snapshot`), a second presence check is impossible by construction, and path-based reads plus any post-snapshot re-check are BANNED in `observe()` |
+| V17-04 | A.5 presented Δ`mallinfo2().uordblks` as though it bounded the native peak: a before/after difference cannot see a buffer allocated and freed inside the window, `uordblks` excludes mmapped regions and every non-main arena, and the "the ceiling does not depend on rounding the headroom term down" claim therefore over-claimed certainty; the probe scripts also stayed outside the repository, so the numbers were unverifiable by a reviewer | Appendix A.0–A.7 (rewritten), §6.5 phase 1, §6.6, §12, D42, G-V17-04 | A.5 states the sampling boundary item by item (`uordblks` vs `hblkhd`, `MMAP_THRESHOLD`, per-thread arenas, allocator reuse, arena granularity, kernel socket buffers, amortised OpenSSL state), RETRACTS the v1.7 over-claim, and replaces inference with measurement: six sample points reported as a lower bound, an `LD_PRELOAD` peak interposer (`alloc_peak.c`) that counts real peak bytes across all arenas and threads (measured 8,396,848 / 147,848 / 11,186,544 B for the three phases, and 227,128 B for the request region against `HTTP_HEADROOM = 262,144`), plus the analytic four-term table (≤ 131,072 B, ×2) that explains the constant; A.0/A.7 specify the complete suite (9 Python modules + 1 C shim + `expected.json` + `README.md`) as repository files, and the whole suite was executed here: `run_all --check` exits 0 |
+
+### 1.1 V16 findings resolved in v1.7 (retained)
 
 | ID | Finding (v1.6 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
 | V16-01 | The resolver treated `journal_pin`/`receipt_pin` as optional (`if pin is not None and sha256(raw) != pin`): a refusal authenticated only by its recomputable self-digest classified authoritative T0, and a receipt with no `receipt_pin` could accept T1/T6 — self-digests are tamper-evidence any same-UID writer can forge, so they granted authoritative status | §9.1, §9.2 rules R2/R3, §9.3 T0/T1/T3/T6 rows, §2.4, §10.1, D31, G-V16-01 | All three pins mandatory and fail closed: T0 requires `journal_pin` supplied ∧ byte-SHA-256 match; T1/T6 require `receipt_pin` supplied ∧ byte-SHA-256 match; pin absent or mismatched → T3 (never T0/T1/T6); self-digest recheck retained as necessary but not sufficient |
 | V16-02 | `observe()`'s two quarantine calls were naked: `EEXIST` (`PublishConflict`) and `EPERM`/`EIO`/`ENOSYS`/`EXDEV`/`ENOSPC` (`PublishUnavailable`/`OSError`) escaped `observe()` as exceptions instead of resolving terminal states — the resolver could raise, breaking its exactly-one-T-row contract | §9.2 `try_quarantine` (both branches), §9.3 T5 row, D32, G-V16-02 | New `try_quarantine` helper that NEVER raises (`PublishConflict` → CONFLICT; `PublishUnavailable`/`PublishIdentityMismatch`/`OSError` → QUARANTINE-FAILED): final-branch QUARANTINE-FAILED → T5 immediately (final + unmovable stale staging fails closed), staging-branch → T5 on every outcome; seal-time step 5 stays strictly fatal (D28) |
 | V16-03 | §7.5/K10–K12/T4 promised automatic T4→T6 receipt reconstitution ("`observe()` may complete CP2+CP3"), but the receipt's complete field set (admitted decisions, skip summaries, memory/diagnostics, pins, `wrapper_count`) exists only in the in-memory draft that dies with the process — no CP1-durable draft exists, so reconstitution is impossible | §5.3, §7.5, §8.5 K10–K12, §9.2, §9.3 T4 row, D14/D33, G-V16-03 | T4 made a TERMINAL incomplete state requiring operator review: no code path may write/fsync/publish a receipt after CP1, K10–K12 resolve T4 only, `observe()` is idempotent on T4; T4 still requires `pin` + full audit pass incl. check (g) with `egress_count` |
-| V16-04 | The 12 MiB ceiling rested on quoted numbers with no reproducible measurement record in the document: probe methodology, raw CPython 3.12.3 values and the derivation of the 262,144 B native `HTTP_HEADROOM` term were external to the review artifact | new Appendix A, §6.5, §12, D34, G-V16-04 | New Appendix A: environment and protocol (CPython 3.12.3, `tracemalloc` over the exact normative sequences, worst-case inputs, fixed seeds), probe inventory (probe1–probe7), raw phase and banned-pattern tables (all values re-measured for this revision), and native-headroom accounting over a real local-TLS request via glibc `mallinfo2` (native-arena peak 277,120 B; conservative phase-1 total 8,739,616 ≤ 8,781,824 B) |
+| V16-04 | The 12 MiB ceiling rested on quoted numbers with no reproducible measurement record in the document: probe methodology, raw CPython 3.12.3 values and the derivation of the 262,144 B native `HTTP_HEADROOM` term were external to the review artifact | new Appendix A, §6.5, §12, D34, G-V16-04 | New Appendix A: environment and protocol (CPython 3.12.3, `tracemalloc` over the exact normative sequences, worst-case inputs, fixed seeds), probe inventory (probe1–probe7), raw phase and banned-pattern tables (all values re-measured for this revision), and native-headroom accounting over a real local-TLS request via glibc `mallinfo2` (native-arena peak 277,120 B; conservative phase-1 total 8,739,616 ≤ 8,781,824 B) — the NATIVE half of this row is SUPERSEDED by V17-04/§1.0 and A.5: a Δ`uordblks` sample is a lower bound and is no longer offered as evidence |
 | V16-05 | §5.1.2 interleaved structure and body-decode per line (line 1's bad body masked line 5's bad keys — Step-1 validates ALL lines' structure before decoding ANY body, runstore.py:375–379) and parsed with plain `json.loads`, accepting duplicate keys and `NaN`/`Infinity` that Step-1's `_parse_json` rejects; the §0.2 exact accept-reject/error-precedence contract was therefore not met | §5.1.2 rewritten, §0.2, §6.5 phase 3, D24/D35, G-V16-05 | Five bounded stages with Step-1's exact precedence (both digests → records structure for ALL lines → records decode for ALL lines → events structure → events decode → count), Step-1's JSON dialect (`_no_duplicate_keys`, `parse_constant` rejection, verbatim messages, normalization net), structure dicts discarded and decode re-reads (O(1) memory, two reads per file); sole documented acceptance divergence: lines longer than `MAX_LINE` (impossible under the frozen schema; accepting them unbounded would violate the same review's budget) |
 | V16-06 | Resolver↔audit check (g) drift: `wrapper_count` could reach `audit_run` as `None`/non-int (failing only by incident), an UNAUTHENTICATED receipt's count could feed check (g) because `receipt_pin` was verified after the audit, and T4's precondition of an independent integer count == `len(records)` was implicit | §9.2 restructured (authenticate receipt → resolve `wc` → mirror check (g) → audit), §9.3 T4 row, D36, G-V16-06 | Receipt authenticated (R3) before ANY of its fields is used; `wc` sourced only from `egress_count` or authenticated `receipt.wrapper_count`; check (g)'s three tests (supplied, int-not-bool, `== len(records)`) mirrored explicitly and failed closed to T3/T5 BEFORE `audit_run`; T4/T1/T6 rows each state their count precondition |
 | V16-07 | §5.2.4 published the receipt with `expect = None`: between writing `.<run_id>.receipt.tmp` and `renameat2` a same-UID process could substitute the temp file; neither step 3 nor step 5 pinned its inode, so foreign bytes could be published as the receipt | §5.2.4, §5.2 step 3, D37, G-V16-07 | `st_tmp = os.fstat(tmp_fd)` captured on the creation descriptor BEFORE close and passed as `expect` into `publish_file()`: step 3 pins `(st_dev, st_ino)` pre-syscall, step 5 proves post-rename identity (type relative to `st_src`, so files publish too); substitution → step-3 require aborts before the syscall, or step-5 `PublishIdentityMismatch` after it → CP3 fails → T4 (or T3 when foreign bytes stand under the final name — `receipt_pin` never matches) — terminal, never T6 |
 
-### 1.1 V15 findings resolved in v1.6
+### 1.2 V15 findings resolved in v1.6 (retained)
 
 | ID | Finding (v1.5 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
 | V15-01 | `stream_records` called `record_to_json(r)` twice per record (head and tail), each call base64-encoding the whole body (≤ 5,592,408 B string ×2 per record) — the seal's own framing destroyed even v1.4's declared 131,072 B phase-2 bound; it also mis-stated `body_b64`'s canonical position (it sorts FIRST, before `boundary_ms`, not between `boundary_ms` and `end_ns`), its head/tail byte joins produced invalid JSON, and the JSONL line terminator was never written | §5.1.1, §6.5 phase 2, D25, G-V15-01 | New metadata-only `record_meta_json(r)` (11 keys, never touches `r.body`; `record_to_json` banned from the writer), corrected `{`-head / `",`-tail framing proven byte-equal to `_lines([record_to_json…])` incl. a 4 MiB body (probe-verified), seal peak ≤ 151,552 B (measured 148,113 B) |
-| V15-02 | `load_run` (runstore.py:370–388) reads whole files (`_read` → `read_bytes`) and splits them in memory (`raw.split(b"\n")`) holding every parsed record — verification of a 50 MiB session peaks at ≥ 139.8 MB, not 12 MiB; §6.5 phase 3 assumed an incremental reader that no code specified | new §5.1.2, §6.5 phase 3, §0.2, D24, G-V15-02 | New §5.1.2 incremental `load_run`: 64 KiB chunk reads, digest pass first (Step-1 error precedence preserved), `MAX_LINE`-capped line reader, decode → release → parse → release → encode → release → `b64decode(bytes)` record decoding (measured 11,188,261 B ≤ 11,202,224 B); declared the fourth Step-2 extension point with a byte-exact contract (v1.6's implementation of this row did NOT in fact preserve Step-1's precedence — found by V16-05, see §1.0) |
+| V15-02 | `load_run` (runstore.py:370–388) reads whole files (`_read` → `read_bytes`) and splits them in memory (`raw.split(b"\n")`) holding every parsed record — verification of a 50 MiB session peaks at ≥ 139.8 MB, not 12 MiB; §6.5 phase 3 assumed an incremental reader that no code specified | new §5.1.2, §6.5 phase 3, §0.2, D24, G-V15-02 | New §5.1.2 incremental `load_run`: 64 KiB chunk reads, digest pass first (Step-1 error precedence preserved), `MAX_LINE`-capped line reader, decode → release → parse → release → encode → release → `b64decode(bytes)` record decoding (measured 11,188,261 B ≤ 11,202,224 B); declared the fourth Step-2 extension point with a byte-exact contract (v1.6's implementation of this row did NOT in fact preserve Step-1's precedence — found by V16-05, see §1.1) |
 | V15-03 | §9.2 passed `wrapper_count = receipt.outer_count or structurally-derived`: `outer_count` is not a receipt key (`wrapper_count` is), `receipt` was referenced before it was parsed, and any value derived from the record stream makes audit check (g) tautological (audit.py:289–296 requires an INDEPENDENT counter, 623–624) | §9.2, §2.4, §10.1, §10.2, D26, G-V15-03 | `wrapper_count` sourced only from (1) the out-of-band `egress_count` print (`transport.sent`, flushed beside the manifest pin) or (2) `receipt.wrapper_count` (minted from `transport.sent` at CP3); disagreement → T3; absent both → check (g) fails → T5/T3; structural derivation explicitly banned |
 | V15-04 | `load_run(final, pinned = pin if pin else receipt_pin(final))` called `receipt_pin` (a hex string, not a function) as if it produced a manifest pin; without `pin`, Step-1's `load_manifest` fails closed anyway (runstore.py:255–258), so v1.5's "structural verification still runs" was unimplementable for finals | §9.2, §9.3 T3/T4 rows, §7.5, §10.1, D27, G-V15-04 | `pin` mandatory to verify or recover a final: `pin` absent + final present → T5/T3 (fail closed, never T4/T6, no CP2/CP3 recovery); recovery (CP2+CP3) only with the independently supplied manifest pin; `receipt_pin` never used as a manifest pin |
 | V15-05 | §5.2 step 5 swallowed a failed impostor quarantine (`except PublishUnavailable: pass`), leaving the impostor standing under `<run_id>` while the comment claimed T3; `PublishConflict` (EEXIST) escaped unhandled; `observe()`'s own quarantine calls could raise out of the resolver | §5.2 step 5, §5.2.5, §9.2, D28, G-V15-05 | Quarantine failure strictly fatal: no `pass`, every branch raises `PublishIdentityMismatch` with the cause chained, the runner dies before CP1b/CP2/CP3 so no receipt can exist; `observe()` catches quarantine failures and still returns exactly one T-row; classification-level guarantee with the residual stated |
 | V15-06 | §5.2.5 bounded the mode (`& 0o022 == 0`) but never stated the UID trust boundary: no owner check (`st_uid`), no explicit statement about same-UID processes (which can rename inside `RUN_ROOT` without taking the flock) | §5.2 step 1, §5.2.5, D29, G-V15-06 | Owner validation `st_pfd.st_uid == os.geteuid()` at lock time; explicit two-tier boundary: different-UID writers kernel-prevented (owner-only mode + `O_NOFOLLOW` + identity re-proof), same-UID writers detected-not-prevented (step-5 inode proof, CP1b, pins → quarantine/T3/T5), §10.1 residual restated |
 | V15-07 | The 12 MiB budget was asserted with formula-only phase peaks that did not match the code those paths would run (v1.5 phase 2 assumed 124,928 B while its own `record_to_json` calls cost ~11 MB; phase 3's `+1,024` term was 757 B short of measurement; no measured evidence) | §6.1, §6.5, §12, G-V13-04, G-V14-03, G-V15-07, D30 | Official `TRANSIENT_BUDGET_BYTES = 12,582,912` (D30) with per-instant measured proofs: peak₁ ≤ 8,781,824 (measured 8,724,640), peak₂ ≤ 151,552 (measured 148,113), peak₃ ≤ 11,202,224 (measured 11,188,261); budget = max ≤ 12,582,912, margin 1,380,688 B (12.3 %); banned patterns measured: `b64decode(str)` 15,381,335, `json.loads(bytes)` held 16,781,149, retained chunks 5,656,645 |
 
-### 1.2 V14 findings resolved in v1.5 (retained)
+### 1.3 V14 findings resolved in v1.5 (retained)
 
 | ID | Finding (v1.4 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
@@ -114,7 +130,7 @@ cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pi
 | V14-07 | TOCTOU: the step-3 `stat(staging)` → `renameat2` window was closed only by a post-hoc assert that aborted *after* publishing an impostor; no `RUN_ROOT` permission/symlink boundary; no content re-proof after rename | §5.2 steps 1/3/5, new §5.2.5, §7.5 CP1b, G-V14-07 | Absolute `RUN_ROOT`, `O_NOFOLLOW` open, owner-only mode check; pre-syscall re-stat; identity mismatch → quarantine the published name (never left standing); CP1b content re-verification against the pin before CP3; residual limits stated |
 | V14-08 | The 250 ms second-signal deferral had no enforcement mechanism: a main-thread handler cannot run while the main thread is inside a blocking synchronous syscall | §2.1, §7.4, §8.4 E3, D22, G-V14-08 | Named daemon watchdog thread `obs-watchdog` arms once from the handler and exits the process via `os._exit` at the bound; deferred exit point after syscall + bookkeeping; EINTR/PEP-475 and D-state limits stated |
 
-### 1.3 V13 findings resolved in v1.4 (retained)
+### 1.4 V13 findings resolved in v1.4 (retained)
 
 | ID | Finding (re-audit) | Where resolved | Resolution in one line |
 |---|---|---|---|
@@ -448,7 +464,14 @@ aborts the seal → quarantine (§5.5) → T5.
 function WRITE_RUN(pfd, staging_name, records, events) -> str:   # normative; the runner's seal entry (replaces Step-1 write_run)
     head = events[-1].entry_hash if events else GENESIS
     verify_event_log(list(events), head, records)                # unchanged pre-check (runstore.py:226)
-    sfd = os.open(staging_name, O_RDONLY | O_DIRECTORY | O_CLOEXEC, dir_fd = pfd)   # staging mkdir'ed by the runner (K1)
+    sfd = os.open(staging_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, dir_fd = pfd)  # mkdir'ed by the
+                                                  # runner (K1); its CREATION identity (V17-02) is captured by the
+                                                  # runner immediately after mkdir through this same descriptor:
+                                                  #   st_stage = os.fstat(sfd)   → passed to CP1's publish_dir as
+                                                  #   expect = st_stage, identity_source = CREATION (never re-derived
+                                                  #   from the path). WRITE_RUN's signature and return value are
+                                                  #   unchanged (§5.1.1 contract), so the identity travels beside the
+                                                  #   pin in runner state, never inside the frozen manifest.
     try:
         r_fd = open_excl(RECORDS_FILE, sfd)                      # O_WRONLY|O_CREAT|O_EXCL, 0o644, dir_fd = sfd
         f_sha, d_sha = stream_records(r_fd, records)             # per-record bytes; BOTH hashers fed from the same chunks
@@ -515,56 +538,158 @@ Failure mapping: a write `OSError` → K2/K3/K4; manifest write → K5; any `fsy
 old behavior (mkdir-if-absent + these same bytes) so Step-1's regression tests stay green; live sealing calls the
 fd-based entry with the locked `pfd`.
 
-5.1.2 **Normative reader — exact Step-1 compatibility, bounded passes (V15-02, V16-05; the fourth Step-2 extension
-point, §0.2; D24/D35).** The Step-1 `load_run` (runstore.py:370–388) reads each file whole (`_read` →
+5.1.2 **Normative reader — the versioned `obs-loader/2` contract (V15-02, V16-05, V17-01; the fourth Step-2 extension
+point, §0.2; D24/D35/D38/D39).** The Step-1 `load_run` (runstore.py:370–388) reads each file whole (`_read` →
 `path.read_bytes()`, 246–250), splits it in memory (`raw.split(b"\n")`, `_jsonl` 279–286), parses every line and holds
 all records: for a 50 MiB session that peaks at ≥ 139.8 MB of transient (≥ 2 × 4/3 × `SESSION_BODY_BUDGET_BYTES` of
 jsonl bytes plus every parsed `body_b64` string) — an order of magnitude above the Domain B budget — and it cannot
 support §6.5 phase 3's 12 MiB verification bound. Step 2 REPLACES `load_run` (decision **D24**): same name, same
-keyword-only signature, same `LoadedRun`, same `ManifestError` messages, same accept-reject set — the differential
-tests of §11 (G-V16-05) pin the contract. `audit_run` (audit.py:626) calls `load_run` and inherits it unchanged;
-`load_manifest` (runstore.py:253) is unchanged — its manifest is ≤ 1 KiB by the 8-key schema (bounded full read) and
-it already fails closed without a well-formed 64-hex pin (255–258, V15-04).
+keyword-only signature, same `LoadedRun`, same `ManifestError` messages, and the same accept-reject set for every input
+whose lines all fit `MAX_LINE` — the differential corpus of §5.1.2.4 (G-V17-01) pins the contract against a frozen,
+hash-pinned copy of the Step-1 implementation. `audit_run` (audit.py:619–631) calls `load_run` (626) and inherits it
+unchanged; `load_manifest` (runstore.py:253) is unchanged — its manifest is ≤ 1 KiB by the 8-key schema (bounded full
+read) and it already fails closed without a well-formed 64-hex pin (255–258, V15-04).
 
-**Exact Step-1 precedence (V16-05), reproduced branch-for-branch.** In Step-1's `load_run` the records statement
-evaluates `_jsonl(records_raw, …)` — truncation check, then per-line `_parse_json`, then per-line key-set check — to
-COMPLETION before mapping `_record_from_json` (body decode + field validation) over it, and the records statement
-completes before the events statement runs (runstore.py:375–379). The observable precedence is therefore exactly:
-
-```
-1. manifest errors (load_manifest; pin required, runstore.py:253–258)
-2. records read OSError ("records.jsonl is missing or unreadable: …", 246–250)
-3. events read OSError  (same message for events.jsonl)
-4. records digest mismatch   5. events digest mismatch   (249–250 equivalents)
-6. records truncation → records line-JSON/key errors for ALL lines → records body-decode/field errors for ALL lines
-7. events truncation  → events line-JSON/key errors for ALL lines  → events body-decode/field errors for ALL lines
-8. count mismatch (386–387)
-```
-
-v1.6 violated (6)/(7): its single interleaved pass decoded line 1's body before checking line 5's keys, so a bad body
-masked a bad key set that Step-1 reports first; and its plain `json.loads` accepted duplicate keys and `NaN`/`Infinity`,
-which Step-1's `_parse_json` (runstore.py:194–201: `object_pairs_hook = _no_duplicate_keys`, `parse_constant` →
-`ManifestError`) rejects — different accept sets. Both defects are corrected below, together with Step-1's
-normalization net (381–385). The reader is now five bounded stages over two reads per file:
+5.1.2.0 **Loader contract registry (V17-01).** The reader is a NAMED, VERSIONED contract, never a bundle of local
+choices, so that "which loader produced this verdict" is answerable from the document alone:
 
 ```
-function LOAD_RUN(run_dir, *, pinned_manifest_sha256) -> LoadedRun:   # normative; REPLACES Step-1 load_run (D24/D35)
-    manifest = load_manifest(run_dir/manifest.json, pinned_sha256 = pinned_manifest_sha256)   # 1: unchanged; V15-04
-    rec = scan_structure(records.jsonl, _RECORD_KEYS)   # 2: read OSError (verbatim 246–250) + sha256 over ALL bytes
-    ev  = scan_structure(events.jsonl,  _EVENT_KEYS)    # 3: read OSError second, matching Step-1's read order
-    if rec.hex != manifest.records_file_sha256:         # 4: digests BEFORE any parse — outside the net, as Step-1
+LOADER_CONTRACT_ID         = "obs-loader/2"     # normative for Step 2 and for every later revision of this document
+LOADER_CONTRACT_SUPERSEDES = "obs-loader/1"     # Step-1 `runstore.load_run` at 7b1493e: descriptive + TEST ORACLE only
+```
+
+| Contract | Implementation | Line model | Memory | Status |
+|---|---|---|---|---|
+| `obs-loader/1` | Step-1 `load_run`/`_jsonl`/`_read` (runstore.py:246–286, 370–388) | `raw.split(b"\n")` — a line is any byte run with NO upper bound; the whole file is materialised first | O(file size); ≥ 139.8 MB for a 50 MiB session | DESCRIPTIVE. Frozen at `7b1493e`; used ONLY as the differential oracle (§5.1.2.4); MUST NOT verify live evidence |
+| `obs-loader/2` | §5.1.2.3 (`scan_structure`, `check_lines`, `parse_line`, `decode_pass`) | `f.readline(MAX_LINE + 2)` — bounded line content `≤ MAX_LINE = 5,592,920 B` | O(1) per line; ≤ 11,202,224 B per pass (§6.5 phase 3) | NORMATIVE. Supersedes /1 for all verification, sealing self-checks and `observe()` |
+
+Rules (all normative):
+
+* **R-1 — supersession.** `/2` is the ONLY loader any Step-2 code path may call: `write_run`'s pre-publication
+  self-check (§5.4), CP1b (§7.5) and `observe()` (§9.2). It supersedes `/1`'s unconstrained string loader: a line whose
+  CONTENT exceeds `MAX_LINE` is REJECTED where `/1` would have parsed it. That is the single intended acceptance change;
+  §5.1.2.1 proves no schema-valid artifact can trigger it.
+* **R-2 — no negotiation, no fallback.** There is no runtime switch, environment variable, keyword argument, platform
+  probe or `try/except ImportError` that selects `/1`. A fallback would restore the whole-file load that D30 forbids, so
+  a `/2` that cannot run FAILS CLOSED: the run resolves T3/T5 exactly like any other audit failure. Verifying live
+  evidence with `/1` requires a reviewed revision of this document, not a flag.
+* **R-3 — version discipline.** Any future change to `/2`'s accept set, JSON dialect, message strings, precedence or
+  `LoadedRun` contents MUST mint `obs-loader/3` and update this registry, §11 (G-V17-01) and §12 in the SAME reviewed
+  revision, keeping the `/1` oracle pinned. Silent evolution of `/2` is forbidden (D38).
+* **R-4 — the artifact binding is DERIVED, not stored.** The contract ID is not persisted: `records.jsonl`,
+  `events.jsonl`, `manifest.json` and `obs-outer-index/1` all have frozen key sets (§10.3) and adding a key would break
+  §10.2/G-V14-05/§9.2's strict parser. The binding is instead proved twice: (a) at import, `MAX_LINE` MUST equal the
+  §5.1.2.1 derivation (assertion; a loader whose cap drifted from `MAX_BODY_BYTES` refuses to start), and (b) every
+  record line written by §5.1.1 satisfies `line content ≤ MAX_LINE` by construction, so a `/2`-conforming artifact is
+  always `/1`-conforming. The converse does not hold — and that single direction IS the documented divergence.
+* **R-5 — code/doc identity.** G-V17-01a asserts that the `LOADER_CONTRACT_ID` constant, the literal string in this
+  section and the §1.0 map agree; a mismatch fails CI, so the version cannot drift out of the review artifact.
+
+5.1.2.1 **Exact size bounds and the derived `MAX_LINE` (V17-01).**
+
+```
+MAX_BODY_BYTES          = 4,194,304 B                     # transport.py:26 — one response body, hard cap
+B64_BYTES               = 4 × ⌈MAX_BODY_BYTES / 3⌉        # 4 × 1,398,102 = 5,592,408 B — the `body_b64` VALUE of a
+                                                          #   maximal body (standard alphabet, no line breaks)
+FRAMING_ALLOWANCE_BYTES = 512 B                           # every non-body byte of ONE record line: keys,
+                                                          #   punctuation, numbers, path, headers, error, escaping
+MAX_LINE                = B64_BYTES + FRAMING_ALLOWANCE_BYTES = 5,592,920 B    # line CONTENT, terminator EXCLUDED
+READLINE_SLACK_BYTES    = 2 B                             # f.readline(MAX_LINE + 2)
+assert MAX_LINE == 4 * ((MAX_BODY_BYTES + 2) // 3) + FRAMING_ALLOWANCE_BYTES    # import time, fail closed (R-4a)
+assert READLINE_SLACK_BYTES == 2 and MAX_LINE > B64_BYTES                       # the cap can never clip a legal line
+```
+
+`FRAMING_ALLOWANCE_BYTES` is measured, not guessed: for a record with an EMPTY body, `_canonical(record_to_json(r))`
+measures 348 B with the maximum legal field widths (probe framing, A.7.1) and ≤ 384 B under the widest LEGAL values (`seq` ≤ 4 digits; `role`/`path` bounded by the reviewed plan
+allow-list; `group_name` ≤ 16 B; `group_kind` ≤ 8 B; `boundary_ms` ≤ 6 digits; `status` ≤ 3 digits; `error` ≤ 64 B —
+the longest incident token is 16 B, `CANCEL_FAILED` is 13 B — and ≤ 2 whitelisted header pairs ≤ 144 B; the fixed
+`"body_b64":""` adds 13 B and base64 needs no escaping). 512 B therefore leaves 164 B of slack (348 B measured) for header-whitelist growth without minting a new contract:
+the widest legal record line is 5,592,756 B, exactly 164 B below the cap, and G-V17-01b fails if the measured framing
+ever exceeds 512 B. **Schema-valid upper bound:** every record the §5.1.1 writer can emit has `len(body) ≤ MAX_BODY_BYTES`
+⇒ `len(body_b64) ≤ B64_BYTES` ⇒ `line content ≤ MAX_LINE`. Step-1 wrote the same 12-key schema through the same
+`record_to_json`, so archived legacy records satisfy the same inequality — fixture D-18 re-proves it on the archive
+rather than assuming it.
+
+**The cap is INCLUSIVE and the read is EXACT.** `f.readline(MAX_LINE + 2)` returns at most `MAX_LINE + 2` bytes, so a
+conforming line (content ≤ `MAX_LINE` plus its `\n`) is never split, and any read that fills the buffer without a
+terminator is over-cap by construction. The four boundary cases are normative and executable (G-V17-01c):
+
+| Case | Line content | Bytes in file | What `readline` returns | Fact the reader records | Verdict |
+|---|---|---|---|---|---|
+| A | 5,592,756 (the WIDEST legal record: a 4 MiB body plus 348 B of measured framing) | 5,592,757 | the whole line, ends `\n` | `len(raw) − 1 = 5,592,756 ≤ MAX_LINE` | ACCEPT |
+| B | 5,592,920 (`MAX_LINE` exactly) | 5,592,921 | the whole line, ends `\n` | `len(raw) − 1 = MAX_LINE`, which is not `> MAX_LINE` | ACCEPT (cap inclusive) |
+| C | 5,592,921 (`MAX_LINE + 1`) | 5,592,922 | the whole line, ends `\n` | `len(raw) − 1 > MAX_LINE` → `over_cap` | REJECT (P-6) |
+| D | ≥ 5,592,922 | ≥ 5,592,923 | `MAX_LINE + 2` bytes, NO `\n` | `len(raw) > MAX_LINE`, no terminator → `over_cap` | REJECT (P-6) |
+
+Case D also sets the FILE-level truncation fact when the over-cap line is the file's LAST line, and truncation then
+wins (P-5) — the same message Step-1 gives for any unterminated file, so the two loaders still agree there.
+
+5.1.2.2 **Error precedence (normative; V16-05's precedent, formalised by V17-01).** Step-1's `load_run` evaluates the
+records statement — `_jsonl`'s truncation check, then per-line parse, then per-line key check — to COMPLETION before
+mapping `_record_from_json` over it, and completes the records statement before the events statement begins
+(runstore.py:375–379). The observable order is therefore the ladder below. `/2` reproduces it branch for branch; the
+three `/2`-only rows (P-6, P-11 and the P-9a terminator rule) are marked, and they are the ONLY rows `/1` cannot
+produce.
+
+| # | Stage (evaluation order) | Trigger | Message (verbatim) | In `/1`? |
+|---|---|---|---|---|
+| P-0 | manifest | any `load_manifest` failure (pin missing/malformed, digest, key set, format, field types, self-digest) | unchanged from Step-1 (runstore.py:253–258) | yes |
+| P-1 | records read | `OSError` opening/reading `records.jsonl` | `records.jsonl is missing or unreadable: records.jsonl` | yes |
+| P-2 | events read | same for `events.jsonl`, evaluated AFTER the records read (`records_raw, events_raw = _read(...), _read(...)`, 375) | same shape with `events.jsonl` | yes |
+| P-3 | records digest | `sha256(all bytes)` ≠ `manifest.records_file_sha256` | `records.jsonl does not match the manifest digest (altered or substituted)` | yes |
+| P-4 | events digest | same for events | `events.jsonl does not match the manifest digest (altered or substituted log)` | yes |
+| P-5 | records truncation | file non-empty ∧ its FINAL byte ≠ `\n` | `records.jsonl is truncated (no final newline)` | yes |
+| P-6 | records cap | the FIRST line whose content exceeds `MAX_LINE`; its line number is reported | `records.jsonl line {n} exceeds the maximum line length` | **/2 only** |
+| P-7 | records line structure | per line ascending; within one line the JSON parse precedes the key-set check; the FIRST offending line wins | `records.jsonl line {n} is not valid JSON: {exc}` ∨ `duplicate JSON key {k!r}` ∨ `records.jsonl line {n}: {c} is not allowed` ∨ `records.jsonl line {n}: unexpected or missing keys` | yes |
+| P-8 | records decode + fields | ALL records, line order, `body_b64` decoded FIRST within each record | `records.jsonl line {n}: invalid body: …`, then every `_req_*` message (291–328, 348–357) | yes |
+| P-9 | events truncation | as P-5 for `events.jsonl` | `events.jsonl is truncated (no final newline)` | yes |
+| P-10 | events cap | as P-6 | `events.jsonl line {n} exceeds the maximum line length` | **/2 only** |
+| P-11 | events line structure | as P-7 | as P-7 with `events.jsonl` | yes |
+| P-12 | events decode + fields | as P-8 (`_event_from_json`) | as P-8 with `events.jsonl` | yes |
+| P-13 | count | `len(records) ≠ manifest.record_count ∨ len(events) ≠ manifest.event_count` (386–387) | `record or event count does not match the manifest` | yes |
+
+Read the ladder exactly as Step-1 does, in three ways that a naive reading gets wrong:
+
+* **Line order dominates; JSON-before-keys is only INTRA-line.** A bad key set on line 3 is reported before a JSON
+  error on line 5 (and before a bad body on line 5 — v1.6's interleaving defect), while a JSON error on line 1 is
+  reported before a key-set error on line 3. `/2` reproduces this by keeping the FIRST structure error in one pass.
+* **File-level facts precede every parse error** — exactly as Step-1 puts the truncation test before its parse loop.
+  The cap (P-6/P-10) joins truncation in that pre-parse slot, so in a file that is both over-cap at line 9 and
+  malformed at line 3, `/2` reports the CAP error (line 9) and `/1` reports the line-3 error. That is a precedence
+  divergence co-extensive with the acceptance divergence, it is stated here rather than hidden, and the corpus asserts
+  it explicitly (D-20).
+* **Digests precede file-level facts, which precede parsing.** A digest mismatch with a malformed line 1 is P-3, not
+  P-7; an events digest mismatch with a malformed records line is P-7, not P-4 (the records statement completes first).
+
+**P-9a — the terminator rule (V17-01 correctness fix).** `/2` parses the line CONTENT, i.e. `raw[:-1]` when `raw` ends
+with `\n`, and NEVER `raw`. Step-1 splits on `b"\n"`, so its `_parse_json` has never seen a terminator, and passing one
+through changes JSON error POSITIONS: `{"a":` reports `Expecting value: line 1 column 6 (char 5)` while `{"a":\n`
+reports `Expecting value: line 2 column 1 (char 6)` — the same bytes would therefore produce a different message under
+`/2` than under `/1`, breaking the exact-message contract. v1.7's pseudocode parsed `raw` and had precisely this drift;
+`parse_line(line_content(raw), what)` with `line_content(raw) = raw[:-1] if raw.endswith(b"\n") else raw` is now
+normative, and fixture D-07 pins it (D39).
+
+5.1.2.3 **Normative implementation (a v1.8 restatement of v1.7's five stages with the cap and terminator rules made
+explicit).**
+
+```
+function LOAD_RUN(run_dir, *, pinned_manifest_sha256) -> LoadedRun:      # obs-loader/2; REPLACES Step-1 load_run
+    manifest = load_manifest(run_dir/manifest.json, pinned_sha256 = pinned_manifest_sha256)   # P-0: unchanged; V15-04
+    rec = scan_structure(records.jsonl, _RECORD_KEYS)   # P-1: read OSError (verbatim) + sha256 over ALL bytes + line facts
+    ev  = scan_structure(events.jsonl,  _EVENT_KEYS)    # P-2: read OSError second, matching Step-1's read order
+    if rec.hex != manifest.records_file_sha256:         # P-3: digests BEFORE any parse — outside the net, as Step-1
         raise ManifestError("records.jsonl does not match the manifest digest (altered or substituted)")
-    if ev.hex != manifest.events_file_sha256:           # 5:
+    if ev.hex != manifest.events_file_sha256:           # P-4:
         raise ManifestError("events.jsonl does not match the manifest digest (altered or substituted log)")
     try:                                                # Step-1's normalization net span (381–385), verbatim types:
-        check_lines(rec, "records.jsonl")               #   (ValueError, TypeError, KeyError, AttributeError,
-        if rec.struct_err is not None: raise rec.struct_err        # 6b: ALL record line-JSON/key errors (first wins)
-        records = decode_pass(records.jsonl, _RECORD_KEYS, rec.hex)  # 6c: body decode + fields for ALL records
-        check_lines(ev, "events.jsonl")                 # 7a: events truncation only after records are fully decoded
-        if ev.struct_err is not None: raise ev.struct_err          # 7b: ALL events line-JSON/key errors
-        events = decode_pass(events.jsonl, _EVENT_KEYS, ev.hex)     # 7c
+        check_lines(rec, "records.jsonl")               #   P-5 truncation, THEN P-6 cap (file-level, pre-parse)
+        if rec.struct_err is not None: raise rec.struct_err        # P-7: first offending record line
+        records = decode_pass(records.jsonl, _RECORD_KEYS, rec.hex)  # P-8: body decode + fields for ALL records
+        check_lines(ev, "events.jsonl")                 # P-9/P-10: events file-level facts only AFTER records decode
+        if ev.struct_err is not None: raise ev.struct_err          # P-11
+        events = decode_pass(events.jsonl, _EVENT_KEYS, ev.hex)     # P-12
         if len(records) != manifest.record_count or len(events) != manifest.event_count:
-            raise ManifestError("record or event count does not match the manifest")   # 8: verbatim (386–387)
+            raise ManifestError("record or event count does not match the manifest")   # P-13: verbatim (386–387)
     except ManifestError:
         raise
     except (ValueError, TypeError, KeyError, AttributeError, OverflowError) as exc:
@@ -573,59 +698,65 @@ function LOAD_RUN(run_dir, *, pinned_manifest_sha256) -> LoadedRun:   # normativ
 
 scan_structure(path, keys) -> Scan2:       # *runner*: ONE bounded read — hash + line facts + FIRST structure error
     h = sha256(); n = 0; over_cap = None; struct_err = None; last = b""
-    with open(path, "rb") as f:             # OSError → verbatim "{what} is missing or unreadable: …"
+    with open(path, "rb") as f:             # OSError → verbatim "{what} is missing or unreadable: …" (P-1/P-2)
         while True:
-            raw = f.readline(MAX_LINE + 2)  # CAP by API: <= MAX_LINE+2 bytes per read — bounded by construction
+            raw = f.readline(MAX_LINE + 2)  # CAP by API: ≤ MAX_LINE + 2 bytes per read — bounded by construction (§5.1.2.1)
             if raw == b"": break
-            n += 1; h.update(raw)           # incremental hashing: O(1) memory for any file size
-            last = raw[-1:]                 # truncation fact: final byte of the final line read
+            n += 1; h.update(raw)           # hash the FILE bytes, terminator INCLUDED → records_file_sha256
+            last = raw[-1:]
             if raw.endswith(b"\n"):
-                if len(raw) - 1 > MAX_LINE and over_cap is None: over_cap = n        # newline-terminated breach
-            elif len(raw) > MAX_LINE and over_cap is None: over_cap = n              # capped read, no newline
+                content = raw[:-1]                                       # P-9a: the CONTENT, never `raw`
+                if len(content) > MAX_LINE and over_cap is None: over_cap = n          # case C
+            else:
+                content = raw
+                if len(raw) > MAX_LINE and over_cap is None: over_cap = n              # case D (capped read)
             if struct_err is None:          # parse structure ONLY until the first error; afterwards just hash
                 try:
-                    obj = parse_line(raw, f"{path.name} line {n}")   # Step-1 JSON dialect (below)
+                    obj = parse_line(content, f"{path.name} line {n}")   # Step-1 JSON dialect (below)
                 except ManifestError as exc:
-                    struct_err = exc        # DEFERRED: digest checks (4/5) must run first, exactly as Step-1 does
+                    struct_err = exc        # DEFERRED: P-3…P-6 must run first, exactly as Step-1 defers digests
                 else:
                     if not isinstance(obj, dict) or set(obj) != keys:
                         struct_err = ManifestError(f"{path.name} line {n}: unexpected or missing keys")  # verbatim 284
                     del obj                 # DISCARD — no body decoded, nothing retained: O(1) memory per line
+            del raw, content
     return Scan2(hex = h.hexdigest(), truncated = n > 0 and last != b"\n",
                  over_cap = over_cap, struct_err = struct_err)
 
-check_lines(scan, what):                    # truncation → MAX_LINE, in Step-1's truncation-first position
+check_lines(scan, what):                    # P-5/P-6 (and P-9/P-10): file-level facts, in Step-1's truncation-first slot
     if scan.truncated: raise ManifestError(f"{what} is truncated (no final newline)")                # verbatim 280–281
-    if scan.over_cap:  raise ManifestError(f"{what} line {scan.over_cap} exceeds the maximum line length")
-    # the MAX_LINE cap above is the SOLE documented acceptance divergence from Step-1 (D35): valid records fit it by
-    # construction (body <= MAX_BODY_BYTES ⇒ line <= MAX_LINE), and accepting unbounded lines would violate the
-    # Domain B budget that V15-02/D30 mandate. G-V16-05 differential-tests every other input.
+    if scan.over_cap:  raise ManifestError(f"{what} line {scan.over_cap} exceeds the maximum line length")   # /2 only
+    # Truncation outranks the cap: it is the same defect Step-1 reports first (its `_jsonl` tests the final byte before
+    # parsing anything). The cap outranks EVERY parse error: both are pre-parse file facts. Both are subordinate to
+    # P-3/P-4, which Step-1 also evaluates first.
 
-parse_line(raw, what) -> dict:              # Step-1 `_parse_json` dialect (runstore.py:194–201), memory-ordered
+parse_line(content, what) -> dict:          # Step-1 `_parse_json` dialect (runstore.py:194–201), memory-ordered
     try:
-        text = raw.decode("utf-8"); del raw # the ONLY deviation from calling `_parse_json` verbatim: release the
-        return json.loads(text,             # line bytes BEFORE parsing (holding line+text+parsed = 16,781,149 B,
+        text = content.decode("utf-8"); del content  # the ONLY deviation from calling `_parse_json` verbatim: release
+        return json.loads(text,             # the line bytes BEFORE parsing (holding line + text + parsed = 16,781,149 B,
               object_pairs_hook = _no_duplicate_keys,      # measured, banned by §6.5 phase 3). It changes NO
-              parse_constant = lambda c: (_ for _ in ()).throw(  # observable outcome: the bytes are already copied
-                  ManifestError(f"{what}: {c} is not allowed")))  # into text; G-V16-05 differential-tests both.
+              parse_constant = lambda c: (_ for _ in ()).throw(  # observable outcome: the bytes are already copied into
+                  ManifestError(f"{what}: {c} is not allowed")))  # text; G-V17-01 differential-tests both.
     except ManifestError:                   # duplicate keys / NaN / Infinity — verbatim, unwrapped (Step-1 195–196)
         raise
     except (ValueError, UnicodeDecodeError) as exc:
         raise ManifestError(f"{what} is not valid JSON: {exc}") from exc                   # verbatim (197–201)
 
-decode_pass(path, keys, expected_hex) -> list:  # *runner*: SECOND read — body decode + fields; re-hashes (TOCTOU)
+decode_pass(path, keys, expected_hex) -> list:  # *runner*: SECOND read — body decode + fields; re-hashes (P-3 TOCTOU)
     out = []; h = sha256(); n = 0
     with open(path, "rb") as f:
         while True:
             raw = f.readline(MAX_LINE + 2)
             if raw == b"": break
-            n += 1; h.update(raw)           # re-hash while decoding: closes the two-pass TOCTOU window
-            ... same truncation/MAX_LINE re-checks as scan_structure (mid-read swap only, fail closed) ...
+            n += 1; h.update(raw)           # re-hash while decoding: closes the two-pass mutation window (R-2 narrowing)
+            content = raw[:-1] if raw.endswith(b"\n") else raw                       # P-9a again
+            if (len(content) if raw.endswith(b"\n") else len(raw)) > MAX_LINE:
+                raise ManifestError(f"{path.name} line {n} exceeds the maximum line length")   # mid-read swap only
             tag = f"{path.name} line {n}"
-            obj = parse_line(raw, tag)
+            obj = parse_line(content, tag); del raw, content
             if not isinstance(obj, dict) or set(obj) != keys: raise ManifestError(f"{tag}: unexpected or missing keys")
             try:
-                value = obj.pop("body_b64")  # removes the <= 5,592,408 B str from the dict FIRST
+                value = obj.pop("body_b64")  # removes the ≤ 5,592,408 B str from the dict FIRST (P-8 body_b64 first)
                 if isinstance(value, str):
                     raw2 = value.encode("ascii"); del value  # ASCII copy, THEN release the str (encode peak 11.18 MB)
                 else:
@@ -639,28 +770,86 @@ decode_pass(path, keys, expected_hex) -> list:  # *runner*: SECOND read — body
     return out
 ```
 
-Why each stage exists and how the memory stays bounded (§6.5 phase 3): the structure stage parses one line, checks its
-key set and DISCARDS the dict — a suspended generator or a retained list would keep every `body_b64` string alive
-(Step-1's own 139.8 MB failure); the decode stage is the line's sole owner at every instant with the v1.6 release order
+Why each stage exists and how memory stays bounded (§6.5 phase 3): the structure stage parses one line, checks its key
+set and DISCARDS the dict — a suspended generator or a retained list would keep every `body_b64` string alive (Step-1's
+own 139.8 MB failure); the decode stage is the line's sole owner at every instant, with the normative release order
 (decode → release → parse → release → encode → release → `b64decode(bytes)`), peaking at the same ≤ 11,202,224 B bound
-(measured 11,188,261 B decode / ≤ structure-pass value, Appendix A). Two reads per file (hash+structure, then decode)
-≈ 3 × `records.jsonl` + 3 × `events.jsonl` ≈ 205 MB of sequential I/O for a full session — offline verification,
-O(1) memory either way. Valid records fit `MAX_LINE` by construction (body ≤ `MAX_BODY_BYTES`, plan-constrained
-path/headers, bounded incident `error` strings); any longer line — only producible by foreign or corrupt content —
-fails closed before parsing (the one documented acceptance divergence, D35). Files mutated between the two reads are
-caught by the decode stage's end-of-pass re-hash (digest error) or fail parsing — strictly fail-closed, a superset of
-Step-1's rejections for stable inputs; for every stable input the accept-reject set and the first-raised
-`ManifestError` message are identical to Step-1's, modulo the `MAX_LINE` cap (G-V16-05).
+(measured 11,188,520 B decode / 11,188,600 B fresh-buffer / 11,188,520 B structure, Appendix A.3). Two reads per
+file (hash+structure, then decode)
+≈ 3 × `records.jsonl` + 3 × `events.jsonl` ≈ 205 MB of sequential I/O for a full session — offline verification, O(1)
+memory either way.
+
+5.1.2.4 **Differential contract against `obs-loader/1` and the legacy corpus (V17-01; gate G-V17-01).** The divergence
+claim in §5.1.2.0 R-1 is only meaningful if it is measured, so the acceptance change is pinned by a corpus, an oracle
+and a monotonicity property.
+
+**Oracle.** `tests/tools/obs/legacy_loader.py` is a VERBATIM copy of Step-1's `load_run`, `_jsonl`, `_read`,
+`_parse_json`, `_record_from_json`, `_event_from_json`, `_req_*` and `_HEX64` at `7b1493e`, frozen and never edited; the
+test asserts `sha256(legacy_loader.py) == LEGACY_ORACLE_SHA256` (a constant recorded in the test), so the oracle cannot
+follow the implementation. `tests/tools/obs/test_loader_differential.py` runs BOTH loaders over every fixture and
+asserts, per fixture: (1) the outcome class (ACCEPT vs `ManifestError`), (2) the EXACT message string, (3) on ACCEPT,
+`tuple(records)`, `tuple(events)` and every `AuthenticatedManifest` field are equal and `records_digest` recomputes
+equal, and (4) which loader rejected when both do.
+
+**Corpus.** Fixtures are files under `tests/fixtures/loader/<id>/` together with a `manifest.json` listing each file's
+sha256, the expected outcome and the expected message for each loader, produced by the deterministic (network-free)
+`tests/fixtures/loader/generate.py` — so the corpus is reviewable and regenerable. D-18 runs against COPIES of archived
+runs, never the evidence originals.
+
+| ID | Fixture (constructed bytes) | `/1` | `/2` | Assertion |
+|---|---|---|---|---|
+| D-01 | clean run: 1,000 records, mixed bodies incl. one `MAX_BODY_BYTES` response | ACCEPT | ACCEPT | identical `LoadedRun`, manifest and digests |
+| D-02 | clean minimal run: 0 records, 0 events (both files empty, manifest counts 0) | ACCEPT | ACCEPT | identical empty tuples; proves the empty-file branch (no truncation) |
+| D-03 | one valid line whose content is EXACTLY `MAX_LINE` | ACCEPT | ACCEPT | case B: the cap is inclusive |
+| D-04 | one valid line whose content is `MAX_LINE + 1` | ACCEPT | REJECT | `/1` accepted (asserted), `/2` raises `records.jsonl line {n} exceeds the maximum line length` — the DOCUMENTED divergence |
+| D-05 | one valid line whose content is ≥ `MAX_LINE + 2` | ACCEPT | REJECT | same message, same line number (case D path) |
+| D-06 | final line unterminated | REJECT | REJECT | identical `is truncated (no final newline)` |
+| D-07 | `{"a":` at line 1 (valid line 2) AND at line 5 (valid lines 1–4) | REJECT | REJECT | identical message INCLUDING the `line 1 column 6 (char 5)` position — proves P-9a; mutation: parse `raw` → `line 2 column 1` → killer fails |
+| D-08 | duplicate key `{"seq":1,"seq":2,…}` | REJECT | REJECT | identical `duplicate JSON key 'seq'` |
+| D-09 | `NaN` in a numeric field | REJECT | REJECT | identical `…: NaN is not allowed` |
+| D-10 | invalid UTF-8 (`0xFF`) inside a string | REJECT | REJECT | identical `is not valid JSON: 'utf-8' codec can't decode byte …` |
+| D-11 | bad key set at line 3 + bad body at line 5 | REJECT | REJECT | identical line-3 key message (all-lines structure before ANY decode) |
+| D-12 | bad body at line 1 + bad key set at line 5 | REJECT | REJECT | identical line-5 key message (v1.6's interleaving defect, still pinned) |
+| D-13 | records digest mismatch + a malformed line | REJECT | REJECT | identical digest message (P-3 outranks P-7) |
+| D-14 | events digest mismatch + malformed records line | REJECT | REJECT | identical records message (P-7 outranks P-4: the records statement completes first) |
+| D-15 | count mismatch only | REJECT | REJECT | identical `record or event count does not match the manifest` |
+| D-16 | record field invalid (`"status":"200"`) | REJECT | REJECT | identical `status must be an integer, got str` |
+| D-17 | events truncated + records count mismatch | REJECT | REJECT | identical events truncation message (P-9 outranks P-13) |
+| D-18 | LEGACY CORPUS: every archived run under `evidence/` (copies) plus fixtures written by Step-1's `write_run` reference serializer | ACCEPT | ACCEPT | `LoadedRun`, manifest, `records_file_sha256` and `records_digest` all equal; proves legacy records load byte-identically under `/2` |
+| D-19 | DETERMINISTIC FUZZ: 2,000 seeded mutations of D-01 (single-byte flips, truncations, line duplications, inserted `\n`, oversized padding) | mixed | mixed | monotonicity: `accept(/2) ⇒ accept(/1)`; wherever BOTH reject, identical `(message, position)`; the only permitted asymmetry is a `/2`-only rejection carrying the cap message (D-04/D-05 class) |
+| D-20 | over-cap line at line 9 + malformed line at line 3 | REJECT (line 3) | REJECT (cap, line 9) | asserts the STATED precedence divergence: `/2` reports P-6 and `/1` reports P-7 — documented, not accidental |
+
+D-19's generator is a fixed `random.Random(20261105)` seeded loop, so the corpus bytes are reproducible; no fixture
+requires network access, a live clock or a filesystem race. G-V17-01 fails if any fixture's recorded message changes
+without a `/3` revision.
+
+5.1.2.5 **What the divergence costs and why it is safe (normative summary).** `/2`'s accept set is a STRICT SUBSET of
+`/1`'s for stable inputs: it loses exactly the over-long-line class, which no schema-valid artifact can produce
+(§5.1.2.1), and it additionally rejects mid-read mutations that `/1` cannot observe at all (R-2). Every rejection is
+fail-closed and lands in the existing vocabulary — digest, truncation, cap, structure, decode, count — so `observe()`
+resolves T3/T5 and a seal aborts to quarantine (§5.5) exactly as before; no new terminal state, message family or
+receipt/journal field is introduced (D39).
 
 5.2 **Publication — exact `renameat2(RENAME_NOREPLACE)` contract (V13-02, V13-03).** This sequence publishes either a run
-directory, the quarantine directory, or the receipt file; the normative unit is `publish_dir()`/`publish_file()`. On Linux,
+directory, the quarantine directory, or the receipt file; the normative unit is `publish_dir()`/`publish_file()`,
+thin wrappers over `PUBLISH_COMPONENT` that supply `identity_source = CREATION` (runner-created names, `expect` mandatory)
+or `OBSERVED` (quarantine moves only). On Linux,
 Python 3.12 exposes **no** `os.RENAME_NOREPLACE` (verified on the target interpreter); the syscall is reached through
 `ctypes`, and a missing libc symbol is a fail-closed error, never a fallback.
 
 ```
-function PUBLISH_COMPONENT(pfd, staging_name, final_name, expect: Stat | None) -> int:    # normative
+function PUBLISH_COMPONENT(pfd, src_name, dst_name, expect: Stat | None,
+                           identity_source: CREATION | OBSERVED) -> Stat:            # normative (V17-02)
+    # `identity_source` decides WHICH identity step 5 must prove — the distinction is the whole of V17-02:
+    #   CREATION — MANDATORY for every name the RUNNER itself created and owns: the receipt temp
+    #              (expect = os.fstat(tmp_fd), §5.2.4) and the staging run directory (expect = os.fstat of the
+    #              O_DIRECTORY descriptor opened immediately after mkdir, §5.1.1). `expect` MUST be that creation
+    #              fstat and MUST NOT be None. Step 5 proves dst == expect.
+    #   OBSERVED — quarantine moves ONLY: the object being moved is a stale or foreign tree whose identity cannot be
+    #              known in advance, and the outcome is T5/T3 whichever object stands there. `expect` MUST be None and
+    #              step 5 proves dst == the pre-syscall st_src.
     # 0. Preconditions (both names are SINGLE components of the same locked parent):
-    for name in (staging_name, final_name):
+    for name in (src_name, dst_name):
         require name not in ("", ".", "..") and "/" not in name and "\0" not in name      # component validation
     # 1. Identity of the locked descriptor vs the path (parent must not have been swapped) + boundary checks:
     st_pfd  = os.fstat(pfd)                                       # the descriptor we locked (§5.2.1)
@@ -669,49 +858,59 @@ function PUBLISH_COMPONENT(pfd, staging_name, final_name, expect: Stat | None) -
     require (st_pfd.st_mode & 0o022) == 0                         # RUN_ROOT not group/other-writable (§5.2.5 boundary)
     require st_pfd.st_uid == os.geteuid()                         # RUN_ROOT owned by THIS uid (V15-06, §5.2.5)
     # 2. Destination must not exist (advisory pre-check; renameat2 is the enforcement):
-    try:      os.stat(final_name, dir_fd = pfd, follow_symlinks = False); exists = True
+    try:      os.stat(dst_name, dir_fd = pfd, follow_symlinks = False); exists = True
     except FileNotFoundError: exists = False
-    if exists: raise PublishConflict(final_name)                  # → quarantine path (§5.5), never overwrite
-    # 3. Staging identity: same parent, inode pinned against `expect` (V16-07): the os.fstat() of the descriptor
-    #    that CREATED the staging name — the receipt temp (§5.2.4) — or of the descriptor it was opened through
-    #    (directory targets), captured by the caller, never re-derived from the path:
-    st_src = os.stat(staging_name, dir_fd = pfd, follow_symlinks = False)
-    if stat.S_ISREG(st_src.st_mode):
-        require expect is not None                        # FILE staging (the receipt temp) MUST carry its creation fstat
+    if exists: raise PublishConflict(dst_name)                    # → quarantine path (§5.5), never overwrite
+    # 3. Source identity — PRE-SYSCALL GATE (V16-07; demoted to a GATE by V17-02):
+    st_src = os.stat(src_name, dir_fd = pfd, follow_symlinks = False)
+    if not (stat.S_ISDIR(st_src.st_mode) or stat.S_ISREG(st_src.st_mode)):
+        raise PublishUnavailable(f"source {src_name} is neither a directory nor a regular file")
+    if identity_source is CREATION:
+        require expect is not None                   # a runner-created name MUST carry its creation fstat (V17-02)
+        require (st_src.st_dev, st_src.st_ino) == (expect.st_dev, expect.st_ino)
+            # A substitution that landed BEFORE this stat aborts here — nothing is published. This is only the OUTER
+            # gate: a substitution that lands AFTER it makes st_src describe the IMPOSTOR, which is precisely the
+            # state v1.7 failed to detect, so step 5's anchor is `expect` and never `st_src`.
     else:
-        require stat.S_ISDIR(st_src.st_mode)              # run/quarantine targets are directories
-    require expect is None or (st_src.st_dev, st_src.st_ino) == (expect.st_dev, expect.st_ino)
-        # with §5.2.4's mandatory `expect` this is an unconditional PRE-syscall pin for the receipt: a same-UID
-        # substitution of .<run_id>.receipt.tmp between close and renameat2 is detected BEFORE the syscall; the
-        # residual stat→syscall window is closed after it by step 5's post-rename proof
+        require expect is None
     # 4. THE SYSCALL — both directory fds anchored to the locked parent, RENAME_NOREPLACE:
-    #      renameat2(int pfd, const char *staging_name, int pfd, const char *final_name, unsigned int flags)
+    #      renameat2(int pfd, const char *src_name, int pfd, const char *dst_name, unsigned int flags)
     #      flags = RENAME_NOREPLACE = 1 (Linux <linux/fs.h>); names relative to pfd, NOT to the CWD, NOT to AT_FDCWD
     libc = ctypes.CDLL(None, use_errno = True)
     renameat2 = getattr(libc, "renameat2", None)
     if renameat2 is None: raise PublishUnavailable("libc has no renameat2")               # fail closed (§5.2.3)
     renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
     renameat2.restype  = ctypes.c_int
-    rc = renameat2(int(pfd), os.fsencode(staging_name), int(pfd), os.fsencode(final_name), 1)
+    rc = renameat2(int(pfd), os.fsencode(src_name), int(pfd), os.fsencode(dst_name), 1)
     if rc != 0:
         err = ctypes.get_errno()
-        if err == errno.EEXIST: raise PublishConflict(final_name)   # raced despite §5.2 step 2 → quarantine
-        raise PublishUnavailable(f"renameat2 failed: errno {err}")  # ENOSYS/EINVAL/EOPNOTSUPP/EXDEV/EPERM: NO FALLBACK
-    # 5. Post-rename identity: rename preserves (dev, ino) — proves WE moved OUR staging, not an impostor.
-    #    V14-07/V15-05: a mismatch (source name swapped between step 3 and the syscall) means the directory now under
-    #    final_name is an IMPPOSTOR. Its quarantine is ATTEMPTED UNCONDITIONALLY and every failure is STRICTLY FATAL:
-    #    no `pass`, no swallowed branch, no fall-through — each path raises the single fatal type with its cause
-    #    chained (consequences below §5.2.4; classification limits §5.2.5):
-    st_dst = os.stat(final_name, dir_fd = pfd, follow_symlinks = False)
-    # identity + type proof (V16-07): inode equality, and type RELATIVE to st_src — which step 3 already typed:
-    # a directory stays a directory, the receipt temp stays a regular file; any inode or kind change = IMPPOSTOR
-    if (st_dst.st_dev, st_dst.st_ino) != (st_src.st_dev, st_src.st_ino) or stat.S_ISDIR(st_dst.st_mode) != stat.S_ISDIR(st_src.st_mode):
+        if err == errno.EEXIST: raise PublishConflict(dst_name)                      # raced despite step 2 → quarantine
+        raise PublishUnavailable(f"renameat2 failed: errno {err}")     # ENOSYS/EINVAL/EOPNOTSUPP/EXDEV/EPERM: NO FALLBACK
+    # 5. Post-rename identity proof — anchored on the IMMUTABLE CREATION IDENTITY (V17-02, replacing v1.7's
+    #    st_src anchor). `rename` preserves (dev, ino), so equality proves the kernel moved the object we CREATED,
+    #    not merely the object that happened to stand under the source name a moment before the syscall.
+    #    The three windows, exhaustively (this is the argument the reviewer asked to be closed):
+    #      W1 substitution before step 3        → step-3 require fails → abort, nothing published;
+    #      W2 substitution in (step 3, syscall] → the impostor is renamed into place; step 5 compares it to `expect`
+    #                                             → mismatch → quarantine + PublishIdentityMismatch (FATAL, D28);
+    #      W3 mutation AFTER the syscall        → inode identity is already proved; in-place content change is caught
+    #                                             by CP3e for the receipt (§5.2.4 step 8) and by CP1b for the run
+    #                                             directory (§7.5) — never by an inode test, which cannot see content.
+    #    A mismatch means the name now holds an IMPOSTOR. Its quarantine is ATTEMPTED UNCONDITIONALLY and every
+    #    failure is STRICTLY FATAL: no `pass`, no swallowed branch, no fall-through — each path raises the single
+    #    fatal type with its cause chained (consequences §5.2.4 / V15-05; classification limits §5.2.5):
+    st_dst = os.stat(dst_name, dir_fd = pfd, follow_symlinks = False)
+    anchor = expect if identity_source is CREATION else st_src
+    require anchor is not None
+    if (st_dst.st_dev, st_dst.st_ino) != (anchor.st_dev, anchor.st_ino) \
+       or stat.S_ISDIR(st_dst.st_mode) != stat.S_ISDIR(anchor.st_mode):     # type RELATIVE to the anchor
         try:
-            publish_quarantine_of(final_name)          # renameat2(NOREPLACE) final → <run_id>.unverified (§5.5)
+            publish_quarantine_of(dst_name)            # renameat2(NOREPLACE) dst → <run_id>.unverified (§5.5),
+                                                       # identity_source = OBSERVED (whatever stands there is moved)
         except BaseException as q_exc:                 # PublishConflict (EEXIST), PublishUnavailable, OSError, …
-            raise PublishIdentityMismatch(final_name) from q_exc # cause CHAINED; never `pass`; the runner dies HERE
-        raise PublishIdentityMismatch(final_name)      # mismatch fatal even when the quarantine succeeded
-    return st_dst
+            raise PublishIdentityMismatch(dst_name) from q_exc # cause CHAINED; never `pass`; the runner dies HERE
+        raise PublishIdentityMismatch(dst_name)        # mismatch fatal even when the quarantine succeeded
+    return st_dst                                      # the PROVED destination stat (used by CP3e / CP1b bookkeeping)
 ```
 
 5.2.1 **Locking and the parent fd.** `pfd = os.open(RUN_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)`
@@ -735,21 +934,51 @@ against by test (G-V13-03): `os.rename(src, dst)` (silently overwrites on POSIX)
 and any two-step check-then-rename without `RENAME_NOREPLACE`. The `EEXIST` errno — not a pre-check — is the authoritative
 no-clobber guarantee.
 
-5.2.4 **Receipt publication (v1.7, V16-07: temporary-inode binding).** The receipt temp is created by
-`tmp_fd = os.open(".<run_id>.receipt.tmp", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o644, dir_fd = pfd)` in
-`RUN_ROOT`, fully written and fsynced through THAT descriptor; then `st_tmp = os.fstat(tmp_fd)` is captured on the
-creation descriptor BEFORE `os.close(tmp_fd)` and passed as `expect` into
-`publish_file(pfd, ".<run_id>.receipt.tmp", "<run_id>.receipt.json", expect = st_tmp)` (`final_name =
-<run_id>.receipt.json`; the step-3 type check accepts a regular file). Publication with `expect = None` is **BANNED**
-for the receipt (G-V16-07): between `close` and `renameat2` a same-UID process may substitute the temp name, and
-`expect` makes step 3 compare the temp's `(st_dev, st_ino)` against the inode of the descriptor that created it
-BEFORE the syscall — a substitution raises before publication, and a substitution inside the residual stat→syscall
-window is caught by step 5's post-rename proof (`PublishIdentityMismatch`). Either way CP3 fails → the run stays
-**T4 (terminal, operator review; §7.5/D33)** — or **T3** in the residual where step 5 could not move the impostor
-aside and foreign bytes stand under the final name (the operator's `receipt_pin` never matches them); terminal either
-way, and T6 requires the authenticated publication of THIS temp's bytes. A crash before the syscall leaves only the temp name (ignored by the
-resolver → T4); after the syscall the receipt is complete (→ T6 path). Torn receipts under the final name are
-impossible by construction.
+5.2.4 **Receipt publication (V16-07 temporary-inode binding; strengthened by V17-02).** The receipt is published
+under `identity_source = CREATION`, and the creation identity is captured from the descriptor that CREATED the temp —
+never from a later path stat. The normative sequence, inside CP3 (§7.5), with the lock held:
+
+```
+1. tmp_fd = os.open(".<run_id>.receipt.tmp", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o644, dir_fd = pfd)
+       # EEXIST → a stale temp from a crashed attempt: CP3 fails, NO pin is printed, the run stays T4 (§9.3)
+2. write canonical receipt JSON through THAT descriptor, hashing the exact bytes as they are written:
+       receipt_sha_written = sha256(all bytes written)        # ≤ RECEIPT_MAX_BYTES = 131,072 B (§6.6, §12)
+3. os.fsync(tmp_fd)                                          # content durable BEFORE the identity is relied upon
+4. st_tmp = os.fstat(tmp_fd)                                 # THE creation identity: (st_dev, st_ino)
+       require stat.S_ISREG(st_tmp.st_mode) and st_tmp.st_nlink == 1
+       # captured on the CREATION descriptor, before close: a value the attacker cannot manufacture, because only
+       # the kernel can make the destination inode equal to the one this descriptor created
+5. os.close(tmp_fd)                                          # the name may now be substituted or the inode unlinked;
+                                                             # both are detected by steps 6–8, never assumed away
+6. publish_file(pfd, ".<run_id>.receipt.tmp", "<run_id>.receipt.json",
+                expect = st_tmp, identity_source = CREATION)
+       # §5.2 steps 3/5: step 3 gates st_src against st_tmp BEFORE the syscall; step 5 proves
+       # (st_dst.st_dev, st_dst.st_ino) == (st_tmp.st_dev, st_tmp.st_ino) AFTER it — so a substitution in the
+       # residual stat→renameat2 window is caught by comparing the PUBLISHED inode to the CREATED inode (V17-02)
+7. os.fsync(pfd)                                             # CP2' — the receipt's directory entry is durable
+8. CP3e — CONTENT RE-PROOF of the published name (V17-02, new):
+       snap = snapshot(pfd, "<run_id>.receipt.json", RECEIPT_MAX_BYTES)      # §9.2.1, the SAME helper observe() uses
+       require snap is not ABSENT and snap is not FAULT
+       require snap.sha256 == receipt_sha_written            # the bytes standing under the final name are OUR bytes
+9. ONLY NOW print receipt_pin = snap.sha256 with a flush (§10.1(2)) and set phase = COMMITTED
+```
+
+Publication with `expect = None` is **BANNED** for the receipt (G-V16-07, restated by G-V17-02): steps 1–6 exist so that
+the out-of-band `receipt_pin` always describes bytes that were (a) created by this process, (b) published by a rename
+that provably moved that same inode, and (c) re-read from the published name and found byte-identical. Failure at any
+step → CP3 fails, NO `receipt_pin` is printed, and the run stays **T4 (terminal, operator review; §7.5/D33)**; where a
+foreign receipt already stands under the final name, `observe()`'s mandatory `receipt_pin` can never match it → **T3**.
+T6 therefore requires an authenticated publication of THIS process's bytes, not merely the existence of a
+plausible-looking receipt. A crash before step 6 leaves only the temp name (ignored by the resolver → T4); a crash
+between 6 and 9 leaves a complete, correct receipt under the final name but no pin → T3 by the mandatory-pin rule
+(§9.2, D31). Torn receipts under the final name are impossible by construction.
+
+Steps 6–8 are the answer to V17-02's exact objection: v1.7's step 5 compared the destination against `st_src`, the
+pre-syscall stat of the SOURCE NAME, which a same-UID writer can also control — so a substitution inside the
+stat→`renameat2` window produced `st_dst == st_src == impostor`, and the proof passed. The anchor is now `st_tmp`, a
+value captured before the name was ever exposed, and CP3e makes the CONTENT claim explicit as well, since inode identity
+alone can never speak about bytes (see W3 in §5.2 step 5).
+
 
 5.2.5 **Filesystem threat model and TOCTOU closure (V14-07; explicit UID trust boundary, V15-06).** Boundary:
 `RUN_ROOT` SHALL be an **absolute** path on the evidence filesystem, opened with `O_NOFOLLOW`, not group/other-writable
@@ -775,13 +1004,16 @@ under *After CP1b* below.
 Cooperating publishers are serialized by the flock; a *non-cooperating* writer with access to `RUN_ROOT` is the threat
 the following items close:
 
-* **Source-identity race (stat → renameat2).** The step-3 `stat(staging_name)` window can never be fully eliminated
-  (`renameat2` takes names, not descriptors), so it is closed by detection *with consequence*: the step-5 post-rename
-  inode proof compares the published inode against the pre-syscall stat, and on mismatch the runner immediately
-  quarantines the published name (§5.2 step 5) — the impostor is moved out from under `<run_id>`, or, if the filesystem
-  refuses that rename, the failure is strictly fatal (V15-05) and the standing impostor can only ever resolve T5/T3,
-  never silent success. Step 3 re-stats immediately before the syscall to shrink the window; the re-stat narrows, the
-  proof closes.
+* **Source-identity race (stat → renameat2).** The step-3 `stat(src_name)` window can never be fully eliminated
+  (`renameat2` takes names, not descriptors), so it is closed by detection *with consequence* — and, since v1.8
+  (V17-02), against the right anchor: the step-5 proof compares the published inode against the **creation identity**
+  captured from the creating descriptor (`fstat(tmp_fd)`, or `fstat` of the staging directory fd), NOT against the
+  pre-syscall stat. Anchoring on the pre-syscall stat was vacuous in precisely this window: a substitution between
+  that stat and the syscall makes the pre-syscall stat and the post-rename stat describe the same impostor. With the
+  creation anchor, a substitution after step 3 is renamed into place and then fails the proof → quarantine of the
+  published name + strictly fatal `PublishIdentityMismatch` (V15-05), so the impostor is moved out from under the
+  final name or, if the filesystem refuses even that rename, can only ever resolve T5/T3 — never silent success. For
+  the receipt the content half is proved too, by CP3e (§5.2.4 step 8).
 * **Content race (verify → rename).** Inode identity does not prove content: staging files may be modified between §5.4
   self-verification and CP1. CP1b (§7.5) re-runs `load_run(final, pinned_manifest_sha256 = pin)` while the lock is
   still held, before any receipt exists; a swap in either window is caught by the pin and quarantined (→ T5).
@@ -894,14 +1126,18 @@ Phase 1 — request (per response, §6.4): scratch may reallocate while extendin
           and `body = bytes(scratch)` holds BOTH the bytearray and the finished copy:
     peak₁ ≤ 2 × MAX_BODY_BYTES + CHUNK_BYTES + HTTP_HEADROOM + allocator margin
           = 8,388,608 + 65,536 + 262,144 + 65,536 = 8,781,824 B
-    (HTTP_HEADROOM = 262,144 B: http.client + ssl user-space buffers, header dict, malloc overhead — design
-     constant, asserted by the G-V13-04 allocation spy. Measured core without headroom: 8,462,496 B →
-     8,724,640 B with headroom ≤ 8,781,824 B.)
+    (HTTP_HEADROOM = 262,144 B: a design constant derived ANALYTICALLY in Appendix A.5 — four enumerated native
+     consumers ≤ 131,072 B, doubled for unenumerated ones (stdlib `_ssl` C objects, resolver scratch, allocator
+     bookkeeping) — and CHECKED, not inferred, by G-V17-04: the request region's malloc-level peak (measured
+     227,128 B, an upper bound on its native share) must be ≤ 262,144 B, and the whole phase-1 path's interposed
+     peak (measured 8,396,848 B) must be ≤ the 8,781,824 B bound. v1.7's claim that a Δ`uordblks` sample bounded
+     the native peak is RETRACTED: a before/after difference is a lower bound, and on the probe fixture the six
+     sample points reached 115,664–159,360 B against an 84,640–87,088 B end delta (A.5.2–A.5.3).)
 
 Phase 2 — seal, §5.1.1 metadata-only writer (V15-01): ONE 48 KiB body slice + ONE ≤ 64 KiB base64 chunk + the
           CPython base64 encoder's 32,768 B working buffer + ≤ 4,096 B of digest line, head/tail fragments and
           framing — all live at the `b64encode` instant; `chunk` is `del`ed before the next slice:
-    peak₂ ≤ 49,152 + 65,536 + 32,768 + 4,096 = 151,552 B   (measured 148,113 B)
+    peak₂ ≤ 49,152 + 65,536 + 32,768 + 4,096 = 151,552 B   (measured 148,004 B tracemalloc / 147,848 B interposed)
     (banned patterns, measured: retaining chunks across iterations 5,656,645 B; v1.5's two `record_to_json(r)`
      calls per record allocate the full ≤ 5,592,408 B base64 string twice — G-V15-01 kills both. v1.4's model
      (full base64 string + full JSON line = 11,184,816 B) and the current Step-1 write_run (≥ 139.8 MB) remain
@@ -912,8 +1148,9 @@ Phase 3 — verify, §5.1.2 incremental `load_run` (V15-02): the reader holds at
           overhead; the per-line release order is normative (read ≤ MAX_LINE+2 → decode → `del` line bytes →
           json.loads → `del` text → `.encode("ascii")` → `del` the str → `b64decode(bytes)` → `del` raw):
     MAX_LINE = 4 × ⌈MAX_BODY_BYTES / 3⌉ + 512 (framing) = 5,592,920 B
-    peak₃ ≤ 2 × MAX_LINE + 16,384 = 11,202,224 B   (measured 11,188,261 B on a MAX_LINE line; +8,192 file
-                                                      buffer + ~2,624 json/dict overhead -> 11,196,453 B ≤ bound)
+    peak₃ ≤ 2 × MAX_LINE + 16,384 = 11,202,224 B   (measured 11,188,520 B on a MAX_LINE line, 11,186,544 B
+                                                      interposed; +8,192 file buffer + ~4,000 json/dict overhead
+                                                      -> 11,196,712 B ≤ bound)
     (banned patterns, measured: `base64.b64decode(str)` re-encodes the whole string → 15,381,335 B;
      `json.loads(raw bytes)` with the buffer referenced → bytes + decoded str + parsed = 16,781,149 B;
      Step-1's whole-file `_read` + `_jsonl` → ≥ 139.8 MB. All three exceed the budget and are BANNED.
@@ -937,7 +1174,8 @@ reader MUST re-derive all three phases under the Appendix A protocol before chan
 
 6.6 **Domain C by construction.** `RUN_RECORD_LIMIT = 2000` records (plan bound ≈ 750/day; hard stop → `INCIDENT-RECORD-LIMIT`
 abort, `derived = None`, `abort_seq = len(records)`): metadata ≤ 2000 × 400 B = 800 KiB; event log ≤ 1000 × 800 B = 800 KiB;
-plan/skips/admitted decisions ≤ 300 KiB; manifest + receipt draft ≤ 100 KiB → ≈ 2.0 MiB ≤ budget. Exceeding any term aborts
+plan/skips/admitted decisions ≤ 300 KiB; manifest + receipt draft ≤ 100 KiB; one `observe()`/CP3e snapshot
+buffer ≤ `RECEIPT_MAX_BYTES` + `CHUNK_BYTES` = 196,608 B (V17-03) → ≈ 2.2 MiB ≤ budget. Exceeding any term aborts
 before allocation growth matters (fail closed, B5-style: `abort("INCIDENT-MEMORY")`).
 
 6.7 **Offline decompression bounds (never in the hot path).** The execution path never decompresses anything: bodies are
@@ -1004,7 +1242,11 @@ synchronous syscall, so the bound is enforced by the `obs-watchdog` thread (§2.
 7.5 **Commit checkpoints (COMMITTING), in order, all under the `pfd` flock of §5.2.1:**
 
 ```
-CP1  rc == 0 from renameat2(pfd, ".<run_id>.staging", pfd, "<run_id>", RENAME_NOREPLACE)
+CP1  publish_dir(pfd, ".<run_id>.staging", "<run_id>", expect = st_stage, identity_source = CREATION)
+       # = renameat2(pfd, ".<run_id>.staging", pfd, "<run_id>", RENAME_NOREPLACE). st_stage is the staging
+       #   directory's creation identity, captured on its descriptor right after mkdir (§5.1.1, V17-02); step 5
+       #   of §5.2 proves the PUBLISHED directory's (st_dev, st_ino) against st_stage, so a staging-name swap in
+       #   the stat→renameat2 window cannot publish a foreign tree and still satisfy the proof
      → phase = COMMITTING/SEALED;  pin and abort_seq were already flushed out-of-band (§5.1)
 CP1b post-rename content re-verification (v1.5, V14-07; pin-only call restated V15-04), lock still held:
      run = load_run(final, pinned_manifest_sha256 = pin)   # the out-of-band MANIFEST pin of §10.1 — receipt_pin is
@@ -1013,15 +1255,22 @@ CP1b post-rename content re-verification (v1.5, V14-07; pin-only call restated V
      <run_id>.unverified (§5.2.5), stop → T5; a crash here equals K10 (final, no receipt) → observe() re-verifies →
      T4 or T3 — an impostor never receives a receipt
 CP2  os.fsync(pfd) returns 0                                   # namespace durable; failure → stop → T4 (K11)
-CP3  receipt published (V16-07: temporary-inode binding):
+CP3  receipt published under `identity_source = CREATION` (V16-07, V17-02):
      tmp_fd = os.open(".<run_id>.receipt.tmp", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0o644, dir_fd = pfd)
-     → write canonical receipt JSON → os.fsync(tmp_fd)
-     → st_tmp = os.fstat(tmp_fd)     # captured on the CREATION descriptor, BEFORE close (V16-07)
+     → write canonical receipt JSON, hashing the bytes written (receipt_sha_written) → os.fsync(tmp_fd)
+     → st_tmp = os.fstat(tmp_fd)     # the CREATION identity (st_dev, st_ino), captured on the CREATION descriptor
+                                     #   BEFORE close (V17-02); S_ISREG and st_nlink == 1 required
      → os.close(tmp_fd)
-     → publish_file(pfd, ".<run_id>.receipt.tmp", "<run_id>.receipt.json", expect = st_tmp)
-         # renameat2(RENAME_NOREPLACE); step 3 pins (st_dev, st_ino) pre-syscall, step 5 proves it post-rename
-     → os.fsync(pfd)
-     → phase = COMMITTED; resolve (§9.2); receipt fields carry terminal_state, outcome, reason, exit_code
+     → publish_file(pfd, ".<run_id>.receipt.tmp", "<run_id>.receipt.json",
+                    expect = st_tmp, identity_source = CREATION)
+         # renameat2(RENAME_NOREPLACE); step 3 gates st_src against st_tmp pre-syscall, step 5 proves
+         #   (st_dst.st_dev, st_dst.st_ino) == (st_tmp.st_dev, st_tmp.st_ino) post-syscall — the destination is
+         #   verified against the CREATION identity, never against the (substitutable) source stat
+     → os.fsync(pfd)                 # receipt directory entry durable
+     CP3e content re-proof: snap = snapshot(pfd, "<run_id>.receipt.json", RECEIPT_MAX_BYTES)
+         → require snap.sha256 == receipt_sha_written     # the published bytes are OUR bytes (§9.2.1 helper)
+         → ONLY THEN print receipt_pin = snap.sha256 (§10.1) and phase = COMMITTED
+         → resolve (§9.2); receipt fields carry terminal_state, outcome, reason, exit_code
 ```
 
 State after each crash point: before CP1 → staging exists → K7/K0 → T2 or T5; CP1/CP1b→CP2 → final exists, no receipt →
@@ -1150,36 +1399,114 @@ completed sync group). A crash before step 5 leaves a torn or missing journal: t
 — it resolves **T2**, never T0 (the v1.3 finding: a pre-flight crash must not masquerade as an intentional refusal). After
 step 5, `record_count = 0` refusals resolve T0; with `record_count > 0` the journal still resolves T0 (no run artifacts may
 exist for the `run_id`; if any do — including a quarantine — the contradiction resolves T3) — and in BOTH cases only
-when `journal_pin` is supplied and matches. The strict parser recomputes `journal_digest` over the other eight keys
-(naive edits fail), and `observe()` COMPARES the file's byte SHA-256 against `journal_pin` **as a mandatory check
+when `journal_pin` is supplied and matches. In `observe()` the journal is read EXACTLY as the receipt is: one descriptor-relative `snapshot()` (§9.2.1) whose
+sha256 is compared with `journal_pin`, so the bytes that are authenticated are the very bytes that are parsed and
+no presence check exists apart from the read (V17-03). The strict parser recomputes `journal_digest` over the other
+eight keys (naive edits fail), and `observe()` COMPARES the file's byte SHA-256 against `journal_pin` **as a mandatory check
 (v1.7, V16-01/D31): `journal_pin is None` → T3, mismatch → T3 — T0 is unreachable without the out-of-band pin**. The
 self-digest alone is tamper-evidence, never authentication: anyone with `RUN_ROOT` write access can recompute it, so a
 self-digest by itself must never grant authoritative status (v1.6's optional-pin reading is removed).
 
 9.2 **Resolver precedence (normative `observe()`), deterministic given disk state only** (`pin`, `egress_count`,
-`receipt_pin`, `journal_pin` supplied out of band). v1.7 fail-closed rules (V16-01/D31): **ALL THREE pins are
-MANDATORY and each is checked before its target's state may be claimed** — (i) `pin` is MANDATORY to verify or recover
-a final (V15-04 unchanged): `receipt_pin` is a hex string, never a manifest pin, Step-1's `load_manifest` fails closed
-without the pin (runstore.py:255–258), so a present final with `pin is None` resolves `T5 if conflict else T3` BEFORE
-any load, and T4/T6 are unreachable without the independently supplied manifest pin ("structural-only" verification of
-finals does not exist); (ii) `journal_pin` is MANDATORY for T0 — absent or mismatched → T3 (§9.1); (iii) `receipt_pin`
-is MANDATORY for T1/T6 — absent or mismatched → T3 (R3 below). Self-digests (`journal_digest`, `receipt_digest`) are
-re-verified as necessary but NEVER sufficient: a self-digest alone grants no authoritative state, because anyone with
-`RUN_ROOT` write access can recompute it (V16-01). Full forgery by an adversary that controls records, files AND pins
-together stays out of scope — stated limit of `runstore`, §10.1. v1.5 harmonized this pseudocode with the §9.3 table
-over ALL edge-case artifact combinations (V14-06): inputs are five artifacts (refusal, staging, final, receipt,
-quarantine) × receipt validity × the closed outcome enum × (`pin`, `egress_count`, `journal_pin`, `receipt_pin`)
-presence; every combination resolves to exactly one row of §9.3. v1.7 adds two structural rules: **R2** every
-quarantine attempt inside `observe()` goes through `try_quarantine` (V16-02 — no exception may escape the resolver),
-and **R3/R4** the receipt is authenticated BEFORE any of its fields is used, with audit check (g) mirrored explicitly
-before `audit_run` (V16-06).
+`receipt_pin`, `journal_pin` supplied out of band). v1.7 fail-closed rules (V16-01/D31) are unchanged: **ALL THREE pins
+are MANDATORY and each is checked before its target's state may be claimed** — (i) `pin` is MANDATORY to verify a final
+(V15-04): `receipt_pin` is a hex string, never a manifest pin, Step-1's `load_manifest` fails closed without the pin
+(runstore.py:255–258), so a present final with `pin is None` resolves `T5 if conflict else T3` BEFORE any load, and
+T4/T6 are unreachable without the independently supplied manifest pin ("structural-only" verification of finals does
+not exist); (ii) `journal_pin` is MANDATORY for T0 — absent or mismatched → T3 (§9.1); (iii) `receipt_pin` is MANDATORY
+for T1/T6 — absent or mismatched → T3 (R3 below). Self-digests (`journal_digest`, `receipt_digest`) are re-verified as
+necessary but NEVER sufficient: anyone with `RUN_ROOT` write access can recompute them (V16-01). Full forgery by an
+adversary that controls records, files AND pins together stays out of scope — stated limit of `runstore`, §10.1.
+Inputs are the five artifacts (refusal, staging, final, receipt, quarantine) × receipt validity × the closed outcome
+enum × (`pin`, `egress_count`, `journal_pin`, `receipt_pin`) presence; every combination resolves to exactly one row of
+§9.3. Six structural rules now bound the resolver:
+
+* **R2** (V16-02) every quarantine attempt inside `observe()` goes through `try_quarantine`, which never raises.
+* **R3** (V16-01/V16-06) the receipt is AUTHENTICATED before ANY of its fields is used.
+* **R4** (V16-06) audit check (g) is mirrored explicitly before `audit_run`.
+* **R5** (v1.8, V17-03) every artifact FACT — existence, size, bytes, digest — comes from exactly one
+  descriptor-relative `snapshot()`/`stat_component()` call per name; the resulting values are FROZEN and every later
+  branch reads the frozen fact. Presence checks and content reads are not two operations, so they cannot disagree.
+* **R6** (v1.8, V17-03) a receipt present with NO final is a contradiction (CP3 cannot precede CP1's rename) and
+  resolves T3; a receipt that cannot be read, is not a regular file, or exceeds `RECEIPT_MAX_BYTES` is a FAULT and
+  resolves T3 — never T1/T6, and never "absent".
+
+9.2.0 **Preconditions and read discipline (V17-03, normative).**
+
+1. **Single-owner precondition.** `observe()` is invoked only for a `run_id` whose runner process is no longer alive
+   (the operator's post-mortem path, §7.5/§9). It therefore does NOT take the `pfd` flock: a crashed publisher's lock is
+   already released by process death, and a live concurrent publisher is a misuse of the resolver, not a state the
+   classifier must encode. Under this precondition, every fact read in step 0 of §9.2.2 is a fact about a quiescent
+   directory.
+2. **One read per name.** `snapshot()` (content) and `stat_component()` (directory-shaped presence) are the ONLY ways
+   `observe()` may learn about an artifact. Each name is opened AT MOST ONCE per observation and the result is frozen;
+   `receipt_exists()` — v1.7 called it twice, once before the read and once after the audit — no longer exists as a
+   concept, because "exists" is `snap is not ABSENT`.
+3. **Banned in `observe()`** (asserted by G-V17-03): `Path.read_bytes`, `open(path)`, `os.path.exists`,
+   `Path.exists`, `os.lstat`/`os.stat` on a PATH (as opposed to `dir_fd`-relative forms), any second presence check
+   after a snapshot, any re-read or re-hash of bytes that were already snapshotted, and any parse of bytes other than
+   the immutable `Snapshot.bytes`.
+4. **FAULT is not ABSENT.** An `OSError` other than `ENOENT` becomes `FAULT(kind)`, which every branch maps to a single
+   fail-closed terminal state; the resolver never treats "cannot read" as "not there" (v1.7's `read_bytes` could raise
+   straight out of `observe()`, the same class of defect V16-02 closed for quarantine).
+
+9.2.1 **`snapshot()` and `stat_component()` (normative helpers; both never raise).**
+
+```
+function SNAPSHOT(pfd, name, max_bytes) -> ABSENT | FAULT(kind) | Snapshot(bytes, sha256, n, st):
+    # The ONLY way observe() (and CP3e) learns whether an artifact exists or what it contains (V17-03). NEVER raises:
+    # every failure becomes a FAULT that the classifier maps to exactly one T-row.
+    try:
+        fd = os.open(name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, dir_fd = pfd)
+    except FileNotFoundError:
+        return ABSENT                       # the ONE and ONLY definition of "does not exist" inside observe()
+    except OSError as exc:
+        return FAULT(kind(exc))             # EACCES/EIO/ELOOP/ENAMETOOLONG/… → FAULT, never ABSENT
+    try:
+        st = os.fstat(fd)                   # identity of the object the DESCRIPTOR pins — a value, never a path
+        if not stat.S_ISREG(st.st_mode): return FAULT("NOT_REGULAR")
+            # O_NOFOLLOW already refuses a symlink; O_NONBLOCK makes a substituted FIFO open instead of blocking;
+            #   a directory/socket/device is refused here. No artifact of this design is anything but a regular file.
+        if st.st_size > max_bytes: return FAULT("TOO_LARGE")            # advisory; the read cap below is authoritative
+        h = sha256(); buf = bytearray()
+        while True:
+            chunk = os.read(fd, CHUNK_BYTES)                            # ≤ 65,536 B per read (Domain C, §6.6)
+            if not chunk: break
+            h.update(chunk); buf += chunk
+            if len(buf) > max_bytes: return FAULT("TOO_LARGE")           # bounded read: memory ≤ max_bytes + CHUNK_BYTES
+        if len(buf) != st.st_size: return FAULT("SIZE_CHANGED")          # grew/shrank mid-read ⇒ concurrent writer
+        return Snapshot(bytes(buf), h.hexdigest(), len(buf), st)
+    except OSError as exc:
+        return FAULT(kind(exc))
+    finally:
+        os.close(fd)
+
+function STAT_COMPONENT(pfd, name) -> ABSENT | FAULT(kind) | PRESENT(mode, st):
+    # Presence/type fact only — for DIRECTORY-shaped names (final, staging, quarantine). Never used to claim content.
+    try:    st = os.stat(name, dir_fd = pfd, follow_symlinks = False)
+    except FileNotFoundError: return ABSENT
+    except OSError as exc:    return FAULT(kind(exc))
+    return PRESENT(st.st_mode, st)
+```
+
+Why this closes V17-03, point by point: (1) **existence and content are one operation** — the `open` decides presence
+and the descriptor read yields the bytes, so a receipt cannot be "present" for one check and "different" for the next;
+(2) **the fd pins the inode** for the whole read, so a concurrent rename or unlink cannot change what we read, and POSIX
+keeps the bytes valid even after a post-read unlink; (3) **the digest is over exactly the bytes returned**, so
+`snap.sha256 == receipt_pin` authenticates the very bytes that `parse_strict` then consumes (v1.7 hashed a buffer and
+then parsed a path-derived object — two objects, one claim); (4) **type, symlink and size attacks** resolve to
+`FAULT` → T3 rather than to a parse or a crash; (5) **the classification is frozen**: a receipt appearing or changing
+after step 0 cannot flip this observation's T-row (it changes only the NEXT observation's, which is the honest
+semantics), so T4↔T6 oscillation inside a single call is impossible; (6) **memory stays bounded** at
+`max_bytes + CHUNK_BYTES = 196,608 B` for the receipt, inside Domain C (§6.6).
 
 The classification helper (normative, V16-02/D32) — NEVER raises; used at EVERY quarantine site inside `observe()`:
 
 ```
 function TRY_QUARANTINE(name) -> CONFLICT | QUARANTINE-FAILED:   # observe()-internal; never raises (V16-02)
     try:
-        publish_quarantine_of(name)            # renameat2(NOREPLACE) name → <run_id>.unverified (§5.5)
+        publish_quarantine_of(name)            # renameat2(NOREPLACE), identity_source = OBSERVED (§5.2): name →
+                                               #   <run_id>.unverified; §5.5; whatever stands there is moved
         return CONFLICT                        # moved aside; the conflict signature now stands (K1/K8)
     except PublishConflict:
         return CONFLICT                        # EEXIST: an unverified sibling already exists — also a conflict
@@ -1188,100 +1515,116 @@ function TRY_QUARANTINE(name) -> CONFLICT | QUARANTINE-FAILED:   # observe()-int
 ```
 
 Seal-time quarantine (§5.2 step 5, D28/V15-05) is NOT routed through this helper: there a failed impostor quarantine
-is strictly fatal by design. The helper covers only `observe()`'s two staging-quarantine sites (V16-02): every outcome
-becomes a deterministic fail-closed terminal state — CONFLICT keeps the conflict flag, QUARANTINE-FAILED resolves T5 —
-so no `EEXIST`/`EPERM`/`EIO`/`ENOSPC` can escape `observe()` as an exception.
+is strictly fatal by design. The helper covers only `observe()`'s two quarantine sites (V16-02): every outcome becomes a
+deterministic fail-closed terminal state — CONFLICT keeps the conflict flag, QUARANTINE-FAILED resolves T5 — so no
+`EEXIST`/`EPERM`/`EIO`/`ENOSPC` can escape `observe()` as an exception.
+
+9.2.2 **Normative `OBSERVE()` (v1.8: one frozen snapshot per artifact; no second presence check, no path read).**
 
 ```
 function OBSERVE(run_id, pin | None, egress_count | None, receipt_pin | None, journal_pin | None) -> TerminalState:
-    # ENTRY SNAPSHOT — read before any mutation this observation performs, so a step-2 self-quarantine (or a
-    # stale-sibling quarantine by an earlier observation) never flips the state seen by a later one:
-    q_pre = exists(<run_id>.unverified)                  # pre-existing quarantine (K8 / prior K-row)
+    # ---- 0. FROZEN FACT SNAPSHOT (V17-03/R5): each name is opened AT MOST ONCE; every branch below reads these ----
+    snap_journal = snapshot(pfd, f"{run_id}.refusal.json", JOURNAL_MAX_BYTES)     # content: ABSENT | FAULT | Snapshot
+    snap_receipt = snapshot(pfd, f"{run_id}.receipt.json", RECEIPT_MAX_BYTES)     # content: ABSENT | FAULT | Snapshot
+    fin = stat_component(pfd, run_id)                                             # presence/type: ABSENT|FAULT|PRESENT
+    stg = stat_component(pfd, f".{run_id}.staging")
+    qre = stat_component(pfd, f"{run_id}.unverified")
+    q_pre = qre is PRESENT                        # pre-existing quarantine (K8 / a prior K-row)
+    # `.receipt.tmp` is DELIBERATELY not observed: a crashed pre-publication temp must never change the T-row (K12).
     # 1. refusal journal
-    if refusal_exists(run_id):
-        raw = read_bytes(refusal)
-        j = parse_strict(raw)                            # exact 9-key set, exact types, journal_digest verified
-        if j is None or not j.format == "obs-refusal/1": return T2      # torn/invalid → crash, NEVER T0
-        if journal_pin is None or sha256(raw) != journal_pin:
-                                     return T3            # V16-01: journal_pin MANDATORY — absent/mismatch fails
-                                                          # closed; self-digest alone never grants T0 (D31)
-        if final_exists(run_id) or staging_exists(run_id) or q_pre:
-                                     return T3           # refusal ∧ artifacts/quarantine contradiction
-        return T0                                        # journal_pin present ∧ byte-SHA-256 matched (V16-01);
-                                                          # (record_count reported, not resolved here)
+    if snap_journal is not ABSENT:
+        if snap_journal is FAULT:                        return T3     # unreadable ⇒ never T0 (§9.2.0(4))
+        j = parse_strict(snap_journal.bytes)             # exact 9-key set, exact types, journal_digest verified
+        if j is None or j.format != "obs-refusal/1":     return T2     # torn/invalid JSON ⇒ the crash signature
+        if journal_pin is None or snap_journal.sha256 != journal_pin:
+                                                         return T3     # V16-01: journal_pin MANDATORY (D31)
+        if fin is FAULT or stg is FAULT or qre is FAULT: return T3     # the artifact set could not be established
+        if fin is PRESENT or stg is PRESENT or q_pre or snap_receipt is not ABSENT:
+                                                         return T3     # refusal ∧ artifacts/receipt/quarantine
+                                                                       #   contradiction (orphan receipt: R6)
+        return T0
     # 2. final run directory
-    if final_exists(run_id):
-        conflict = q_pre                                 # our quarantined attempt alongside a final (K8 signature)
-        if staging_exists(run_id):                        # stale sibling (K1/K8); T unchanged when it moves:
-            qc = try_quarantine(staging)                 # V16-02: NEVER raises — every outcome classified
-            if qc is QUARANTINE-FAILED: return T5        # final + UNMOVABLE stale staging → fail closed (§9.3 T5)
-            conflict = True                              # CONFLICT: moved aside, or unverified sibling already there
-        # Verification-failure precedence (V14-06): K8's foreign final cannot authenticate against our pin and fails
-        # load/audit → T5 + conflict report; an own final failing with no conflict → T3. A final that PASSES
-        # verification ignores `conflict`, so re-observation of a run whose stale sibling was quarantined stays
+    if fin is PRESENT:
+        if not stat.S_ISDIR(fin.mode):                   return T3     # symlink/file under <run_id> is an impostor
+        conflict = q_pre
+        if stg is FAULT or qre is FAULT:                 return T3      # unverifiable sibling set ⇒ fail closed
+        if stg is PRESENT:                                # stale sibling (K1/K8); T unchanged when it moves:
+            qc = try_quarantine(f".{run_id}.staging")     # V16-02: NEVER raises — every outcome classified
+            if qc is QUARANTINE-FAILED:                  return T5      # final + UNMOVABLE stale staging (§9.3 T5)
+            conflict = True                               # CONFLICT: moved aside, or an unverified sibling exists
+        # Verification-failure precedence (V14-06, restated v1.7): K8's foreign final cannot authenticate against our
+        # pin and fails load/audit → T5 + conflict report; an own final failing with no conflict → T3. A final that
+        # PASSES verification ignores `conflict`, so re-observation of a run whose stale sibling was quarantined stays
         # T4/T1/T6. With no out-of-band pin the two cases are indistinguishable AND unverifiable: both fail closed
         # before any load (V15-04) — stated limit (§10.1).
-        if pin is None: return T5 if conflict else T3     # V15-04: never load a final without its manifest pin
+        if pin is None:                                  return T5 if conflict else T3
         run = load_run(final, pinned = pin)              # receipt_pin is a hex string — never passed as a pin
-        if run fails structurally:      return T5 if conflict else T3
-        # R3 (V16-01/V16-06): the receipt is AUTHENTICATED before ANY of its fields is used — receipt_pin is
-        # MANDATORY for T1/T6 (absent → T3, byte-SHA-256 mismatch → T3, D31). No count and no outcome from an
-        # unauthenticated receipt may reach the audit or the classifier.
-        raw = read_bytes(receipt_path) if receipt_exists(run_id) else None
-        receipt = parse_strict(raw) if raw is not None else None   # exact key set, receipt_digest verified (V14-05)
-        if receipt_exists(run_id):
-            if receipt is None or receipt.run_id != run_id:
-                                     return T3            # torn/foreign receipt → FAILED-AUDIT (V14-06)
-            if receipt_pin is None or sha256(raw) != receipt_pin:
-                                     return T3            # V16-01: receipt_pin MANDATORY — self-digest never enough
-            if receipt.manifest_sha256 != pin:
-                                     return T3            # content chain broken (pin non-None above; V15-04)
-        # wrapper_count: exactly two admissible INDEPENDENT sources (V15-03) — (1) the out-of-band egress_count
-        # print (§10.1(1b): transport.sent, flushed beside the manifest pin) and (2) receipt.wrapper_count — now
-        # only from an AUTHENTICATED receipt (R3). Any count derived from the record stream is BANNED: it would make
-        # audit check (g) tautological (audit.py:289–296 requires a caller-supplied counter, 623–626).
+        if run fails structurally:                       return T5 if conflict else T3
+        # ---- receipt: ONE snapshot, authenticated over the EXACT bytes that will be parsed (R3 ∧ V17-03) ----
+        if snap_receipt is ABSENT:
+            receipt = None                               # no receipt at all ⇒ T4 candidate (preconditions below)
+        elif snap_receipt is FAULT:
+            return T3                                    # unreadable / not regular / > RECEIPT_MAX_BYTES ⇒ T3
+        else:
+            if receipt_pin is None or snap_receipt.sha256 != receipt_pin:
+                return T3                                # V16-01/D31: MANDATORY pin over the snapshot bytes;
+                                                         #   self-digest alone never grants T1/T6
+            receipt = parse_strict(snap_receipt.bytes)   # the SAME immutable bytes ⇒ no re-read, no drift, no TOCTOU
+            if receipt is None or receipt.run_id != run_id:            return T3   # torn/foreign receipt
+            if receipt.manifest_sha256 != pin:                         return T3   # content chain broken (pin non-None)
+        # wrapper_count: exactly two admissible INDEPENDENT sources (V15-03) — the out-of-band `egress_count`
+        # (§10.1(1b)) and `receipt.wrapper_count` from an AUTHENTICATED receipt (R3). Structural derivation is BANNED.
         wc = egress_count if egress_count is not None else (receipt.wrapper_count if receipt is not None else None)
-        # R4 (V16-06/D36): explicit mirror of audit check (g) BEFORE audit_run — wc must be an integer (not bool,
-        # not None) and must equal len(run.records); any other combination fails closed (conflict → T5, else T3)
-        # instead of reaching audit_run and failing only "by incident":
+        # R4 (V16-06/D36): mirror of audit check (g) BEFORE audit_run — supplied, integer-not-bool, == len(records)
         if not isinstance(wc, int) or isinstance(wc, bool) or wc != len(run.records):
-                                     return T5 if conflict else T3   # check (g) mirror: supplied / int / == len
+            return T5 if conflict else T3
         result = audit_run(..., wrapper_count = wc, abort_seq = abort_condition_seq(run.records), ...)
-        if not result.ok:               return T5 if conflict else T3   # after R4 only a TOCTOU change lands here
-        if not receipt_exists(run_id):  return T4          # final NAME only; .receipt.tmp ignored (§5.2.4);
-                                     # preconditions: pin ∧ audit pass ∧ wc from egress_count (V16-03/V16-06)
+        if not result.ok:                                return T5 if conflict else T3   # only a TOCTOU change lands here
+        if receipt is None:                              return T4    # snapshot ABSENT ∧ pin ∧ audit pass ∧ wc from
+                                                                     #   egress_count (V16-03/V16-06 preconditions)
         if egress_count is not None and receipt.wrapper_count != egress_count:
-                                     return T3            # independent egress sources disagree (V15-03)
-        if receipt.outcome == "ABORTED":       return T1   # receipt authenticated (R3), count cross-checked above
+            return T3                                    # independent egress sources disagree (V15-03)
+        if receipt.outcome == "ABORTED":                 return T1    # authenticated (R3) and count-cross-checked
         if receipt.outcome in {"COMPLETE-VALID", "INCONCLUSIVE-TIMING", "FAILED"}: return T6
-        return T3                                        # outcome outside the closed enum → FAILED-AUDIT (V14-06)
-    # 3. staging without final
-    if staging_exists(run_id):
-        if not q_pre: try_quarantine(staging)            # V16-02: NEVER raises; EEXIST/EPERM/EIO/… classified
-        return T5                                        # staging present → T5 on EVERY outcome (K1/K7), fail closed
-    # 4. pre-existing quarantine alone (stale K-row result)
-    if q_pre:                                            return T5
-    # 5. nothing
-    return T2                                            # crash with no trustworthy artifact (incl. missing journal)
+        return T3                                        # outcome outside the closed enum (V14-06)
+    # 3. no final
+    if fin is FAULT:                                     return T3    # presence could not be established
+    if snap_receipt is not ABSENT:                       return T3    # ORPHAN receipt (R6): CP3 cannot precede CP1
+    if stg is FAULT:                                     return T3
+    if stg is PRESENT:
+        if not q_pre:
+            if qre is FAULT:                             return T3
+            try_quarantine(f".{run_id}.staging")         # V16-02: never raises; T5 on EVERY outcome
+        return T5                                        # staging present → T5 always (K1/K7), fail closed
+    if q_pre:                                            return T5    # pre-existing quarantine alone (stale K-row)
+    return T2                                            # nothing trustworthy (incl. journal absent)
 ```
+
+The v1.7 defects this replaces, concretely: `raw = read_bytes(receipt_path) if receipt_exists(run_id) else None`
+performed a presence check and a PATH read that could disagree, authenticated a byte string that was then re-parsed
+into a different object, and left a second `if not receipt_exists(run_id): return T4` AFTER the audit — so a receipt
+appearing during the audit flipped T4 to T1/T6 mid-classification, and a receipt disappearing flipped T1/T6 to T4.
+`snap_receipt` is now read once, before anything else, and the T4/T1/T6 decision uses that single frozen value.
 
 9.3 **T0–T6 resolver table (exhaustive; every state is exactly one row):**
 
 | T | Name | Defining persisted state (all conditions) | Exit | Recovery allowed |
 |---|---|---|---|---|
-| T0 | REFUSED | valid `obs-refusal/1` ∧ `journal_pin` supplied ∧ sha256(journal bytes) = `journal_pin` (V16-01) ∧ no final ∧ no staging ∧ no quarantine | 2 | none (terminal) |
+| T0 | REFUSED | valid `obs-refusal/1` (read through ONE snapshot, §9.2.1) ∧ `journal_pin` supplied ∧ sha256(journal snapshot bytes) = `journal_pin` (V16-01) ∧ no final ∧ no staging ∧ no quarantine ∧ no receipt (an orphan receipt is a contradiction → T3, R6) | 2 | none (terminal) |
 | T1 | ABORTED-SEALED | final ∧ verify+audit pass ∧ receipt valid (incl. `receipt_pin` supplied ∧ sha256(receipt bytes) = `receipt_pin`, V16-01) ∧ `receipt.outcome = ABORTED` (incident ladder, N/T/E rows, or signal reason) | 1 / 130 / 143 | none; owner reports to reviewer before rerun |
-| T2 | INCONCLUSIVE-CRASH | nothing for `run_id`, or journal present but torn/invalid, or (power loss) rename lost before CP2 | 1 | none automatic: rerun is a NEW `run_id` |
-| T3 | FAILED-AUDIT | final present that fails verification — including a final presented with no out-of-band manifest pin, fail-closed V15-04 — with NO staging/quarantine conflict ∨ receipt invalid (torn/foreign/digest-or-pin mismatch/`receipt_pin` absent or mismatched V16-01/`wrapper_count` disagreement V15-03/outcome outside the enum) ∨ refusal present with `journal_pin` absent or mismatched (V16-01) ∨ refusal ∧ artifacts/quarantine contradiction | 1 | none; quarantine-or-report per reviewer |
-| T4 | SEALED-UNRECEIPTED | final ∧ pin supplied ∧ verify+audit pass (incl. check (g): `egress_count` supplied, integer, `== len(records)` — V16-06) ∧ receipt absent (no pin ⇒ resolves T3/T5, never T4 — V15-04; no admissible independent count ⇒ T5/T3, never T4 — V16-06) | 1 | NONE — TERMINAL incomplete state requiring operator review (v1.7, V16-03/D33): no CP1-durable receipt draft exists, so no code path may write/fsync/publish a receipt after CP1; a rerun uses a new `run_id` |
+| T2 | INCONCLUSIVE-CRASH | nothing for `run_id`, or journal present, READABLE and torn/invalid JSON (`parse_strict` → None), or (power loss) rename lost before CP2 — an UNREADABLE journal is not a crash signature and resolves T3 | 1 | none automatic: rerun is a NEW `run_id` |
+| T3 | FAILED-AUDIT | final present that fails verification — including a final presented with no out-of-band manifest pin, fail-closed V15-04 — with NO staging/quarantine conflict ∨ receipt invalid (snapshot FAULT: unreadable, non-regular or > `RECEIPT_MAX_BYTES`; torn/foreign; digest-or-pin mismatch; `receipt_pin` absent or mismatched V16-01; `wrapper_count` disagreement V15-03; outcome outside the enum) ∨ a receipt PRESENT with no final (orphan, R6) ∨ refusal present with `journal_pin` absent or mismatched (V16-01) or with an unreadable journal snapshot ∨ refusal ∧ artifacts/receipt/quarantine contradiction ∨ a presence FAULT that prevents establishing the artifact set (R5) | 1 | none; quarantine-or-report per reviewer |
+| T4 | SEALED-UNRECEIPTED | final ∧ pin supplied ∧ verify+audit pass (incl. check (g): `egress_count` supplied, integer, `== len(records)` — V16-06) ∧ receipt snapshot ABSENT (§9.2.1 — ONE open established the absence; no pin ⇒ T3/T5, never T4 — V15-04; no admissible independent count ⇒ T5/T3, never T4 — V16-06) | 1 | NONE — TERMINAL incomplete state requiring operator review (v1.7, V16-03/D33): no CP1-durable receipt draft exists, so no code path may write/fsync/publish a receipt after CP1; a rerun uses a new `run_id` |
 | T5 | QUARANTINED | staging found without final (K1/K7), or `<run_id>.unverified/` present with final absent (any K-row/`INVALID-PACING`/seal failure/E11/N14 path), or final present that fails verification while staging/quarantine is also present (K8 conflict, reported), or final present whose stale staging sibling cannot be moved aside (`try_quarantine` → QUARANTINE-FAILED, V16-02), or a final presented without its manifest pin while a conflict exists (V15-04 fail-closed) | 1 | none (fresh `run_id` for a rerun) |
 | T6 | COMMITTED | S holds (§2.4 — incl. `receipt_pin` supplied ∧ sha256(receipt bytes) = `receipt_pin`, V16-01); `receipt.outcome` ∈ {COMPLETE-VALID, INCONCLUSIVE-TIMING, FAILED} | 0 / 1 / 1 | none |
 
-Exhaustiveness argument (v1.5, V14-06; extended v1.6 for V15-03/V15-04; v1.7 for V16-01/V16-02/V16-06): the inputs
-are the five filesystem artifacts (refusal, staging, final, receipt, quarantine), receipt validity (torn / foreign /
-digest-or-pin mismatch / `receipt_pin` absent / valid) and the closed outcome enum (three values ∪ invalid), plus the
+Exhaustiveness argument (v1.5, V14-06; extended v1.6 for V15-03/V15-04; v1.7 for V16-01/V16-02/V16-06; v1.8 for
+V17-03): the inputs are the five filesystem artifacts (refusal, staging, final, receipt, quarantine), each observed as
+THREE possible facts — ABSENT / PRESENT with a frozen Snapshot / FAULT(kind) (§9.2.1) — receipt validity (torn / foreign
+/ digest-or-pin mismatch / `receipt_pin` absent / valid) and the closed outcome enum (three values ∪ invalid), plus the
 out-of-band inputs `pin`, `egress_count`, `journal_pin`, `receipt_pin` (present/absent each — V15-04/V15-03/V16-01)
-and both quarantine outcomes (CONFLICT / QUARANTINE-FAILED, V16-02). Steps 1→5 partition them: refusal present →
+and both quarantine outcomes (CONFLICT / QUARANTINE-FAILED, V16-02). FAULT is folded deterministically and adds NO new
+state: it resolves T3 for every name except a READABLE-but-torn journal, which is the crash signature → T2. Steps 1→5 partition them: refusal present →
 T0 (valid ∧ `journal_pin` present ∧ byte-matched ∧ no artifacts) / T2 (torn) / T3 (`journal_pin` absent or mismatched,
 or artifacts/quarantine contradiction); refusal absent ∧ final present → T5 (staging sibling unmovable —
 QUARANTINE-FAILED — or verification × conflict; `pin` absent fails closed before any load — never T4/T6) / T4 (receipt
@@ -1320,8 +1663,9 @@ out-of-band egress count `egress_count = transport.sent` — the transport's wra
 This is the first admissible independent `wrapper_count` source for `audit_run`/`observe()` (V15-03): live runs pass
 `transport.sent` directly (§5.4); `observe()` uses the printed `egress_count` when supplied, else the
 AUTHENTICATED `receipt.wrapper_count` (§9.2 R3, V16-01); a count derived from the record stream is banned (audit
-check (g), audit.py:289–296), and disagreement between the two independent sources resolves T3 (§9.2). (2) After CP3
-the runner prints `sha256(<run_id>.receipt.json bytes)` with a flush — the receipt pin; `observe()` **REQUIRES**
+check (g), audit.py:289–296), and disagreement between the two independent sources resolves T3 (§9.2). (2) After CP3e (§5.2.4 step 9) the runner prints `snap.sha256` — the SHA-256 of the bytes READ BACK from the
+published `<run_id>.receipt.json`, which CP3e has already proved equal to the digest computed while writing, with a
+flush — the receipt pin; v1.7 printed the digest of the intended bytes at CP3 instead, before any read-back. `observe()` **REQUIRES**
 `receipt_pin`: absent → T3, byte-SHA-256 mismatch → T3 — T1/T6 are unreachable without it (V16-01/D31);
 `receipt_pin` is NEVER used as a manifest pin — a final without `pin` fails closed before any load (§9.2, V15-04).
 (3) After refusal step 5 the runner prints `sha256(<run_id>.refusal.json bytes)` with a flush — the journal pin
@@ -1341,8 +1685,10 @@ commit_sha, working_tree_clean, admitted_decisions, skip_summary, boundary_skips
 budgets}, diagnostics {late_wakes, weight_max_seen}, receipt_digest`. It is a sibling published by §5.2.4; it MUST NOT be
 stored inside the run directory (it must remain individually no-replace publishable and independently stat-able for T4).
 `receipt_digest = sha256(canonical of all the other receipt keys)` — the manifest self-digest discipline (V14-05):
-the strict parser recomputes it, and after CP3 the runner prints the receipt's byte SHA-256 out-of-band (§10.1),
-which `observe()` verifies when `receipt_pin` is supplied. `wrapper_count` is minted from `transport.sent` at CP3
+the strict parser recomputes it, and after CP3e the runner prints the receipt's byte SHA-256 out-of-band (§10.1),
+which `observe()` verifies against the SAME immutable snapshot bytes it then parses (V17-03). The key set is unchanged
+by v1.8 — no version field is added (R-4) — and the file is bounded by `RECEIPT_MAX_BYTES = 131,072 B` (§12), which the
+snapshot enforces before a single byte of it reaches the parser. `wrapper_count` is minted from `transport.sent` at CP3
 and is the second admissible independent egress source (§10.1(1b), V15-03).
 
 10.3 **Frozen schemas:** `records.jsonl` object keys = `_RECORD_KEYS` (12 keys, exact); `events.jsonl` keys = `_EVENT_KEYS`;
@@ -1350,14 +1696,14 @@ and is the second admissible independent egress source (§10.1(1b), V15-03).
 free-form `error` string (records) or the receipt's `reason`/`diagnostics` (protocol §0/§3.3 alignment: record shapes stay
 frozen under `obs-run-manifest/1`).
 
-## 11. Gates and decisions (v1.7 adds G-V16-01–07 and D31–D37; v1.6 adds G-V15-01–07 and D24–D30; v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable)
+## 11. Gates and decisions (v1.8 adds G-V17-01–04 and D38–D42; v1.7 adds G-V16-01–07 and D31–D37; v1.6 adds G-V15-01–07 and D24–D30; v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable)
 
 | Gate | Assertion | Killer-test sketch |
 |---|---|---|
 | G-V13-01 | ladder branch order == `abort_condition_seq` order | generate record streams hitting B1/B2/B3/B4 boundaries (non-200 mid-streak; `CANCEL_FAILED` with `status=None`; streak 2→3; 200 reset); assert runner abort `seq` == `abort_condition_seq` result; mutation: swap B1/B2 → must fail |
 | G-V13-02 | exact syscall arguments | fake libc records `(pfd, b".<id>.staging", pfd, b"<id>", 1)`; component names with `/`, `..`, `\0` rejected pre-call; EEXIST → `PublishConflict` |
 | G-V13-03 | identity checks + no fallback | spy asserts `os.rename`/`os.replace`/`os.link`/`shutil.move` NEVER called during publish; parent-path swap (fstat≠stat) aborts; ENOSYS/EINVAL → `PublishUnavailable` (no fallback path exists); post-rename inode mismatch quarantines the published name, then raises (V14-07) |
-| G-V13-04 | budgets | chunk loop at `budget−1 / budget / budget+1` bytes; 4 MiB+1 response; §6.5 three-phase peaks pinned to ≤ 8,781,824 / 151,552 / 11,202,224 B under the 12,582,912 B budget (measured 8,724,640 / 148,113 / 11,196,453 B, V15-07); gzip bomb hits 1000:1 and 50 MiB ceilings; mutation: remove chunk check → killer fails |
+| G-V13-04 | budgets | chunk loop at `budget−1 / budget / budget+1` bytes; 4 MiB+1 response; §6.5 three-phase peaks pinned to ≤ 8,781,824 / 151,552 / 11,202,224 B under the 12,582,912 B budget (measured 8,396,848 / 147,848 / 11,186,544 B interposed, A.2; v1.7 campaign 8,724,640 / 148,113 / 11,196,453 B, V15-07); gzip bomb hits 1000:1 and 50 MiB ceilings; mutation: remove chunk check → killer fails |
 | G-V13-05 | pseudocode conformance | instrumented clock counts reads: exactly one per admission iteration and predicate-read == `start_ns`; GV-6 loop wakes twice and starts at `300,030,003,001 ns`; interrupt flag set between iterations → no record |
 | G-V14-01 | doc anchors match the branch | CI: the §0 anchor commit == HEAD of `impl-obs-harness-provenance`; `git diff <anchor> -- tools/obs/` empty for the doc-only-claim window; `audit.py:70` still opens `def abort_condition_seq` |
 | G-V14-02 | streaming writer byte-equality + fsync order | randomized records (4 MiB body, unicode, escapes): §5.1.1 output == `_lines([record_to_json…])` byte-for-byte; spy asserts fsync order F1–F4 before return and that no allocation ≥ one whole line/file occurs; crash injection at each write/fsync → K2–K7 state |
@@ -1377,10 +1723,15 @@ frozen under `obs-run-manifest/1`).
 | G-V16-01 | mandatory out-of-band pins (V16-01) | resolver property test (G-V14-06 dimensions): refusal with `journal_pin = None` or one flipped byte → T3, never T0; receipt with `receipt_pin = None` or flipped byte → T3, never T1/T6 — a CORRECTLY RECOMPUTED self-digest does not help; grep gate: the old optional-pin form (`journal_pin is not None and …` / `receipt_pin is not None and …`) absent from §9.1/§9.2; mutation: restore an optional-pin check → killer fails |
 | G-V16-02 | catch-and-classify quarantine (V16-02) | inject EEXIST/EPERM/EIO/ENOSPC/EXDEV/ENOSYS into BOTH `observe()` staging-quarantine sites → `observe()` returns exactly one T-row and NEVER raises (final + unmovable staging → T5 immediately; staging-only → T5 on every outcome); spy: no quarantine exception crosses the `observe()` boundary; seal-time step-5 impostor quarantine still raises fatally (D28 unchanged) |
 | G-V16-03 | T4 terminal, no receipt reconstitution (V16-03) | AST/grep gate: no receipt `publish_file`/`fsync(pfd)` call reachable after CP1 outside the CP3 sequence; crash injection at K10/K11/K12 → `observe()` = T4 and STAYS T4 on every subsequent observation (idempotent, no CP2/CP3 completion, no receipt file ever appears); mutation: add receipt-republish recovery → killer fails |
-| G-V16-04 | reproducible memory accounting (V16-04) | CI reruns the Appendix A protocol (probe1–probe7, CPython 3.12.3, fixed inputs) → recorded values must match Appendix A: 8,462,496 / 148,113 / 11,188,261 / 11,188,197 B, native `mallinfo2` Δ 277,120 B → conservative phase-1 total 8,739,616 ≤ 8,781,824 B; a drifted value or missing Appendix row fails the gate |
+| G-V16-04 | reproducible memory accounting (V16-04; instrument rules restated by V17-04) | CI reruns the Appendix A protocol (`python -m tools.obs.probes.run_all --check`, CPython 3.12.3, deterministic inputs) → every recorded value must match A.2/A.3 (8,396,983 / 148,004 / 11,188,520 / 11,188,600 / 11,188,520 B tracemalloc; 8,396,848 / 147,848 / 11,186,544 B interposed), the banned `no_del` variant must still FAIL its bound, and `native_headroom`'s request region must satisfy 227,128 B ≤ `HTTP_HEADROOM`; a `mallinfo2` figure is REPORTED and never compared (A.5.3), a drifted value or a missing Appendix row fails the gate |
 | G-V16-05 | loader precedence + dialect equivalence (V16-05) | differential test: for every input class (bad body on line 1 + bad keys on line 5; duplicate key; `NaN`; non-UTF-8; truncated; line > `MAX_LINE`; digest mismatch; count mismatch) assert Step-1's `load_run` and the new `load_run` raise the SAME `ManifestError` message at the SAME precedence position on the same bytes — sole exemption: lines > `MAX_LINE` (new rejects, Step-1 cannot); mutation: decode a body before all-lines structure validation → killer fails |
 | G-V16-06 | audit check (g) alignment (V16-06) | property test: every `wc` that reaches `audit_run` is `int` (not `bool`, not `None`) and `== len(records)` — the R4 mirror enforces it pre-audit; `wc` ∈ {absent, bool, str, ≠ len} → T5-with-conflict or T3, and `audit_run` is NEVER called with an invalid `wc`; ordering spy: an unauthenticated receipt's `wrapper_count` never reaches the audit (R3 before use); mutation: delete the R4 mirror → killer fails |
 | G-V16-07 | receipt temp-inode binding (V16-07) | spy substitutes `.<run_id>.receipt.tmp` for a foreign file between `close(tmp_fd)` and `publish_file` → step-3 `expect` mismatch → publication refused BEFORE `renameat2` (or, for a swap after the step-3 stat, step-5 `PublishIdentityMismatch`) → CP3 fails → `observe()` = T4 (the real receipt never published) or T3 (foreign bytes standing under the final name fail `receipt_pin`) — NEVER T6; grep gate: §5.2.4 passes `expect = st_tmp`, never `expect = None` for a file target |
+
+| G-V17-01 | loader contract, `MAX_LINE` and the differential corpus (V17-01) | (a) code/doc identity: `LOADER_CONTRACT_ID == "obs-loader/2"`, `LOADER_CONTRACT_SUPERSEDES == "obs-loader/1"`, and the §1.0/§5.1.2.0 literals agree; (b) `MAX_LINE == 4 * ((MAX_BODY_BYTES + 2) // 3) + FRAMING_ALLOWANCE_BYTES == 5,592,920` and `FRAMING_ALLOWANCE_BYTES == 512`, asserted at import, plus a measured worst-case framing ≤ 512 B; (c) boundary replay of §5.1.2.1 cases A–D asserting ACCEPT/ACCEPT/REJECT/REJECT with the exact cap message and line number; (d) the full corpus D-01…D-20 against the hash-pinned `legacy_loader.py` oracle, asserting identical outcome, identical message INCLUDING JSON positions (D-07 proves the P-9a terminator rule), identical `LoadedRun`/manifest, and equality on the legacy archive (D-18); (e) monotonicity over D-19: `accept(/2) ⇒ accept(/1)`, with the only permitted asymmetry being the cap class; (f) AST gate: no `read_bytes`, no `raw.split(b"\n")`, no `record_to_json`, and no `/1` fallback path reachable in the load path; mutations that MUST kill: parse the terminator-inclusive buffer (D-07 → `line 2 column 1`), remove the cap (D-04/D-05 accepted → 139.8 MB class returns), decode a body before all-lines structure (D-11/D-12), reorder digests after parsing (D-13) |
+| G-V17-02 | creation-identity binding + CP3e (V17-02) | spy substitutes `.<run_id>.receipt.tmp` with a foreign file BETWEEN the step-3 `stat` and the `renameat2` call → step 5 compares `st_dst` to `fstat(tmp_fd)` → `PublishIdentityMismatch`, impostor quarantined, NO `receipt_pin` printed, `observe()` ∈ {T3, T4}, never T6; the SAME fixture with step 5 anchored on `st_src` (v1.7's rule) PUBLISHES the impostor — re-introducing that anchor MUST kill the gate; CP3e fixture: rewrite the published receipt in place before step 8 → `snap.sha256 ≠ receipt_sha_written` → CP3 fails, no pin printed; AST/grep gate: every `publish_file` call site passes a non-None `expect` and `identity_source = CREATION`, and `publish_quarantine_of` is the only `OBSERVED` caller; `st_nlink == 1` and `S_ISREG(st_tmp.st_mode)` asserted at step 4 |
+| G-V17-03 | descriptor-relative receipt snapshotting (V17-03) | runtime spy: for every observation, exactly ONE `os.open` per artifact name through `pfd` and ZERO path-based reads/presence calls (`Path.read_bytes`, `open(path)`, `os.path.exists`, `os.lstat`, path `os.stat`); substitution matrix — replace the receipt with (i) absent, (ii) a symlink, (iii) a FIFO, (iv) a directory, (v) a `RECEIPT_MAX_BYTES + 1` file, (vi) foreign bytes, (vii) a swap immediately after the snapshot, (viii) a swap between the audit and the outcome branch — each yields exactly one T-row, (ii)–(v) → T3 via FAULT, (vii)/(viii) → the classification of the FROZEN snapshot (unchanged by the swap); orphan-receipt fixture (receipt, no final) → T3; peak memory of `snapshot` ≤ `RECEIPT_MAX_BYTES + CHUNK_BYTES`; mutation: reintroduce a second presence check or a path read → killer fails |
+| G-V17-04 | native instrumentation + repository probes (V17-04) | CI runs `python -m tools.obs.probes.run_all --check` (exit 0 required) on the pinned interpreter, asserting for every phase BOTH instruments: `tracemalloc` peaks (8,396,983 / 148,004 / 11,188,520 / 11,188,600 / 11,188,520 B) and interposed malloc-level peaks (8,396,848 / 147,848 / 11,186,544 B) within their §6.5 bounds, the banned `no_del` variant still FAILING its bound (5,656,528 B), byte equality at 8,511,232 B, and `native_headroom`'s request-region malloc peak (227,128 B measured) ≤ `HTTP_HEADROOM = 262,144 B`; probe6's `mallinfo2` sample max is reported and NEVER compared (it is a lower bound — 115,664–159,360 B across runs against an 84,640–87,088 B end delta, which is the under-read A.5.3 documents); `HTTP_HEADROOM == 2 × 131,072` and the four analytic terms sum to ≤ 131,072 B; a probe file whose sha256 differs from the recorded manifest without a doc revision fails; doc gate: A.5 must contain the `uordblks`/`hblkhd`/`MMAP_THRESHOLD`/per-thread-arena/kernel-buffer clauses, the retraction sentence and the arena-granularity caveat — deleting any of them fails |
 
 Decisions (new): **D11** dynamic target supplied as `target_fn` evaluated per admission read (static path retained);
 **D12** on budget breach, discard the whole body (`b""` + `error=INCIDENT-MEMORY`) rather than persisting a partial one;
@@ -1439,7 +1790,26 @@ len(records)`) and only ever passes an `egress_count`/authenticated-`receipt.wra
 authentication (R3) precedes every use of a receipt field (V16-06);
 **D37** receipt publication binds the temp inode: `st_tmp = os.fstat(tmp_fd)` on the creation descriptor before
 close, passed as `expect` into `publish_file()` — never `expect = None` for a file target; substitution → CP3 fails
-→ T4 (or T3 if foreign bytes stand at the final name) — a substituted receipt never authenticates (V16-07).
+→ T4 (or T3 if foreign bytes stand at the final name) — a substituted receipt never authenticates (V16-07); 
+**D38** the loader is a VERSIONED contract: `obs-loader/1` (Step-1, frozen, oracle only) is superseded by `obs-loader/2`
+(bounded, normative), with no runtime selection, no fallback and no silent change — every future change mints
+`obs-loader/3` and updates the registry, §11 and §12 together (V17-01);
+**D39** `MAX_LINE = 4 × ⌈MAX_BODY_BYTES/3⌉ + FRAMING_ALLOWANCE_BYTES (5,592,920 B)` is a DERIVED, inclusive cap asserted at
+import; cap and truncation are file-level pre-parse facts that outrank every parse error and sit after both digest
+checks; line CONTENT (terminator stripped) is what gets parsed; and `/2`'s accept set is a strict subset of `/1`'s —
+the sole divergence is the over-long-line class, proved unreachable for schema-valid artifacts (V17-01);
+**D40** receipt (and staging-directory) publication proves the DESTINATION against the CREATION identity captured by
+`fstat` on the creating descriptor under `identity_source = CREATION`, never against the substitutable pre-syscall
+source stat; `OBSERVED` is confined to quarantine moves; CP3e re-reads the published receipt and must reproduce the
+written digest before `receipt_pin` is printed (V17-02);
+**D41** `observe()` learns every artifact fact through exactly one descriptor-relative `snapshot()`/`stat_component()`
+per name, authenticates the immutable snapshot bytes against the mandatory pin, parses those same bytes, and classifies
+from frozen facts only — path reads, second presence checks, re-reads and FAULT-to-ABSENT collapse are banned, a receipt
+without a final is a contradiction (T3), and an unreadable artifact is never "absent" (V17-03);
+**D42** native memory is bounded ANALYTICALLY and enforced by gate, not inferred from a difference sample: `uordblks`
+alone is a lower bound (blind to mmapped regions, non-main arenas and intra-window peaks), the four-term headroom table
+(≤ 131,072 B) is doubled to `HTTP_HEADROOM = 262,144 B`, event-point sampling plus an `LD_PRELOAD` peak interposer
+provide the measurement, and the probe suite is a set of repository files under `tools/obs/probes/` (V17-04).
 
 ## 12. Normative constants (single table; source of truth `tools/obs/params.py` + runner additions)
 
@@ -1451,9 +1821,11 @@ close, passed as `expect` into `publish_file()` — never `expect = None` for a 
 | `CONNECT/READ/WRITE/POOL_TIMEOUT_S` | 5.0 / 12.0 / 5.0 / 1.0 s; `SEND_TIMEOUT_S` 0.25 s | params.py |
 | `MAX_CONSECUTIVE_NO_RESPONSE` | 3 | params.py, ladder B3 |
 | `MAX_BODY_BYTES` / `SESSION_BODY_BUDGET_BYTES` | 4,194,304 B / 52,428,800 B | transport.py / runner, §6 |
-| `MAX_LINE` | 5,592,920 B (4 × ⌈MAX_BODY_BYTES / 3⌉ + 512) | runstore `_jsonl` framing; §5.1.2/§6.5 phase 3 (V15-02) |
-| `CHUNK_BYTES` | 65,536 B | §6.4 |
-| `HTTP_HEADROOM` / `SEAL_SLICE_BYTES` | 262,144 B / 49,152 B (3-aligned) | §6.5 phase 1 / §5.1.1 (V14-03); native-headroom substantiation Appendix A.5 (V16-04) |
+| `MAX_LINE` / `FRAMING_ALLOWANCE_BYTES` / `READLINE_SLACK_BYTES` | 5,592,920 B = 4 × ⌈MAX_BODY_BYTES / 3⌉ + 512; 512 B; 2 B (`f.readline(MAX_LINE + 2)`) | `obs-loader/2` cap (§5.1.2.1, V17-01/D39); derived + import-asserted; inclusive; §6.5 phase 3 (V15-02) |
+| `LOADER_CONTRACT_ID` / `LOADER_CONTRACT_SUPERSEDES` | `"obs-loader/2"` / `"obs-loader/1"` | §5.1.2.0 registry (V17-01/D38); not persisted — derived binding (§5.1.2.0 R-4) |
+| `CHUNK_BYTES` | 65,536 B | §6.4; also the `snapshot()` read size (§9.2.1) |
+| `RECEIPT_MAX_BYTES` / `JOURNAL_MAX_BYTES` | 131,072 B / 16,384 B | §9.2.1 bounded snapshot caps (V17-03); receipt ≤ 100 KiB and journal ≤ 4 KiB by schema (§6.6), 1.3×/4× headroom |
+| `HTTP_HEADROOM` / `SEAL_SLICE_BYTES` | 262,144 B / 49,152 B (3-aligned) | §6.5 phase 1 / §5.1.1 (V14-03); ANALYTIC four-term headroom ≤ 131,072 B × 2, checked by the interposer (request region 227,128 B), Appendix A.5 (V17-04/D42) |
 | `TRANSIENT_BUDGET_BYTES` | 12,582,912 B (12 MiB) | §6.1/§6.5 measured proofs (V13-04; re-derived V14-03, D19; OFFICIAL V15-07, D30; reproducible via Appendix A protocol, V16-04/D34) |
 | `HARNESS_FIXED_BUDGET_BYTES` / `RUN_RECORD_LIMIT` | 2,097,152 B / 2,000 | §6.6 |
 | `MAX_DECOMPRESSED_BYTES` / `MAX_EXPANSION_RATIO` | 52,428,800 B / 1000:1 | §6.7 |
@@ -1464,102 +1836,1042 @@ close, passed as `expect` into `publish_file()` — never `expect = None` for a 
 | `PUBLISH_LOCK_TIMEOUT_NS` / `INTERRUPT_POLL_NS` / `CHECKPOINT_DEFER_MAX_MS` | 30 s / 100 ms / 250 ms | §5.2.1, §7.1, §7.4 |
 | Host / paths / params | `data-api.binance.vision`; `/api/v3/time`, `/api/v3/klines` exactly; `symbol,interval,startTime,endTime,limit`; GET only | params.py, protocol §2 |
 
-**Runner additions (normative here; Step-2 code).** `TRANSIENT_BUDGET_BYTES`, `MAX_LINE`, `SEAL_SLICE_BYTES`,
-`HTTP_HEADROOM`, `CHUNK_BYTES` and the §5.1.1/§5.1.2 contracts are normative in this document; `params.py` remains
+**Runner additions (normative here; Step-2 code).** `TRANSIENT_BUDGET_BYTES`, `MAX_LINE`,
+`FRAMING_ALLOWANCE_BYTES`, `READLINE_SLACK_BYTES`, `SEAL_SLICE_BYTES`, `HTTP_HEADROOM`, `CHUNK_BYTES`,
+`RECEIPT_MAX_BYTES`, `JOURNAL_MAX_BYTES`, the `LOADER_CONTRACT_ID`/`LOADER_CONTRACT_SUPERSEDES` pair and the
+§5.1.1/§5.1.2 contracts are normative in this document; `params.py` remains
 the source of truth for the OBS parameters above. Any new runner constant joins this table in the next reviewed
 revision — the budget may change only with a re-derived §6.5 under the Appendix A protocol (D13/D19/D30/D34).
 
-## 13. Appendix A — Memory-accounting probe methodology, raw measurements and native headroom (V16-04; informative)
+## 13. Appendix A — Memory-accounting probes, native-instrumentation boundaries and probe blueprints (V16-04, V17-04; informative)
 
-This appendix is the reproducibility record for every §6.5 number: how it was measured, on what, with what raw values —
-the evidence V16-04 found missing from the document itself. All values below were re-measured for this revision (v1.7)
-on the verification environment. The probe scripts are review artifacts, not repository files (§0 anchor).
+This appendix is the reproducibility record for every §6.5 number: how it is measured, with which instrument, on what,
+with which raw values — plus, since v1.8, the honest boundaries of the native instrument and the complete source of the
+probe programs. The bounds of §6.5 are UNCHANGED by this revision; what changes is that every value below was produced
+by the repository probes of A.7 and that `python -m tools.obs.probes.run_all --check` exits 0 on them.
+
+### A.0 Probe artifacts are repository files (V17-04)
+
+The suite SHALL live in the repository, land with the Step-2 commit and be reviewed with it. Nothing in this appendix
+is an off-repository note any more.
+
+| Path | Role |
+|---|---|
+| `tools/obs/probes/__init__.py` | package marker (empty) |
+| `tools/obs/probes/probe_common.py` | constants, deterministic input builders, `measure()` harness, JSON emission |
+| `tools/obs/probes/probe1_phase1.py` | phase 1 — the §6.4 request path (chunked scratch + `bytes(scratch)`) |
+| `tools/obs/probes/probe2_seal.py` | phase 2 — §5.1.1 seal fragments, plus the banned retain-the-chunk variant |
+| `tools/obs/probes/probe3_decode.py` | phase 3 — §5.1.2 `decode_pass` release order on a `MAX_LINE` line |
+| `tools/obs/probes/probe4_decode_fresh.py` | phase 3 — the same order fed by a real `readline(MAX_LINE + 2)` buffer |
+| `tools/obs/probes/probe5_byte_equality.py` | §5.1.1 writer vs `_lines([record_to_json…])` (G-V14-02) |
+| `tools/obs/probes/probe6_native.py` | the native term: `mallinfo2` sample points + interposed request-region peak |
+| `tools/obs/probes/probe7_structure.py` | phase 3 — §5.1.2 `scan_structure` (parse + key check + discard) |
+| `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` peak interposer (every arena, every thread, true peak) |
+| `tools/obs/probes/run_all.py` | driver: `--check` (CI gate) / `--record` / `--interpose` |
+| `tools/obs/probes/expected.json` | the recorded values §6.5 rests on |
+| `tools/obs/probes/README.md` | run instructions, TLS fixture, interposer build line, what needs a doc revision |
+
+Rules: stdlib only; no network beyond a loopback TLS listener; no wall-clock or random input (every probe is
+deterministic and byte-exact); exit codes 0 = pass, 1 = mismatch, 2 = environment refused. Editing a probe's
+MEASUREMENT LOGIC without a reviewed revision of this appendix fails G-V17-04.
 
 ### A.1 Environment and measurement protocol
 
-* **Interpreter:** CPython 3.12.3 — the target interpreter of `tools/obs/` (OpenSSL 3.0.13), Linux x86-64, glibc with
-  `mallinfo2`; stdlib only (`json`, `base64`, `hashlib`, `tracemalloc`, `ssl`, `socket`, `ctypes`). No JIT, no
-  third-party packages.
-* **Measurement method:** `tracemalloc.start()` → execute the EXACT normative sequence (the pseudocode of §5.1.1 /
-  §5.1.2 / §6.4–§6.5 transcribed line-for-line, same order, same `del` points) → `tracemalloc.get_traced_memory()` →
-  record the PEAK → `stop()`. `tracemalloc` traces Python-object allocations only; native buffers (SSL, socket,
-  glibc arenas) are accounted separately in A.5.
-* **Inputs:** worst-case BY CONSTRUCTION, fully deterministic — no randomness, no seeds: every probe builds its input
-  inline from the §12 constants (`MAX_BODY_BYTES = 4,194,304`, `MAX_LINE = 5,592,920`,
-  `SESSION_BODY_BUDGET_BYTES = 52,428,800`, …) using Step-1's own `_canonical` (sort_keys, separators `(",",":")`),
-  so byte lengths are exact (the worst-case record line INCLUDING its JSONL terminator measures 5,592,919 B ≤ `MAX_LINE = 5,592,920` — probe7's exact input).
-* **Pass criterion:** each phase peak ≤ its §6.5 bound (8,781,824 / 151,552 / 11,202,224 B), the three sequential
-  phases never summed, max ≤ `TRANSIENT_BUDGET_BYTES = 12,582,912`. A probe whose measured value EXCEEDS its bound
-  documents a BANNED pattern (A.4), enforced by mutation tests in the §11 gates.
+* **Interpreter:** CPython **3.12.3** (the target of `tools/obs/`), OpenSSL **3.0.13**, Linux x86-64, glibc with
+  `mallinfo2`, `cc` available for the interposer. `run_all.py` REFUSES to run (exit 2) on any other patch release:
+  a different interpreter invalidates every recorded byte count.
+* **Tracemalloc protocol:** `tracemalloc.start()` → run the exact normative sequence → `get_traced_memory()[1]` (the
+  peak) → `stop()`. **Inputs are built BEFORE the measurement starts** — a 4 MiB body allocated inside the measured
+  region would be attributed to the phase and swamp it; `probe_common.measure` documents and enforces the convention.
+* **Second instrument:** the same sequence is re-run in a child with `alloc_peak.so` preloaded (A.7.9), which counts
+  live malloc-family bytes across every arena and thread and therefore sees allocations that live and die inside the
+  region. Its figures are reported as `interposed`.
+* **Inputs:** worst-case by construction, deterministic: `MAX_BODY_BYTES = 4,194,304`, `MAX_LINE = 5,592,920`,
+  `SEAL_SLICE_BYTES = 49,152`, `CHUNK_BYTES = 65,536`, serialized with Step-1's `_canonical` (sort_keys, separators
+  `(",", ":")`). The framing of a schema-valid record with an empty body measures **348 B** (A.7.1), so the widest
+  legal record line measures **5,592,756 B** — 164 B below `MAX_LINE` — and the probes additionally exercise a synthetic
+  line at exactly `MAX_LINE` to pin the §5.1.2.1 boundary cases.
+* **Pass criterion:** each phase ≤ its §6.5 bound under BOTH instruments, phases never summed, max ≤
+  `TRANSIENT_BUDGET_BYTES`. `phase2_seal_no_del` is the mirror image: the gate fails if it ever PASSES its bound.
+* **Determinism:** repeated runs reproduce every tracemalloc and interposed figure exactly (measured twice each); only
+  the `mallinfo2` sample figures move, which is why they are reported and never gated.
 
-### A.2 Probe inventory (v1.7)
+### A.2 Probe inventory and recorded values
 
-| Probe | What it measures | Normative target |
-|---|---|---|
-| probe1 | phase-1 request conversion (worst-case record incl. base64 of a 4 MiB body) | §6.5 phase 1 |
-| probe2 | phase-2 seal fragments (meta-fragment, digest-line, `b64encode`-slice; superseded for full-line values by probe3/4) | §6.5 phase 2 |
-| probe3 | phase-3 decode pass, normative `del` release order, `MAX_LINE` line | §5.1.2 `decode_pass` |
-| probe4 | phase-3 decode pass, fresh-buffer variant (same release order) | §5.1.2 `decode_pass` |
-| probe5 | byte-equality: §5.1.1 writer vs `_lines([record_to_json…])` (1,020 records, 5,894,085 B) | G-V14-02 |
-| probe6 | native headroom over a real local-TLS HTTP request (`mallinfo2` + `tracemalloc`) | `HTTP_HEADROOM`, A.5 |
-| probe7 | phase-3 STRUCTURE pass peak (parse + key-set check + discard; no body decode) | §5.1.2 `scan_structure` |
+| Probe | Measurement | Bound (B) | `tracemalloc` (B) | Interposed (B) | Verdict |
+|---|---|---|---|---|---|
+| probe1 | `phase1_request` — §6.4 request path | 8,781,824 | 8,396,983 | 8,396,848 | PASS |
+| probe2 | `phase2_seal` — §5.1.1 seal, normative `del` | 151,552 | 148,004 | 147,848 | PASS |
+| probe2 | `phase2_seal_no_del` — BANNED retain-the-chunk | 151,552 | 5,656,528 | — | FAILS (intended) |
+| probe3 | `phase3_decode` — §5.1.2 decode pass | 11,202,224 | 11,188,520 | 11,186,544 | PASS |
+| probe4 | `phase3_decode_fresh` — real `readline` buffer | 11,202,224 | 11,188,600 | — | PASS |
+| probe7 | `phase3_structure` — §5.1.2 structure pass | 11,202,224 | 11,188,520 | — | PASS |
+| probe5 | `byte_equality` — §5.1.1 vs `record_to_json` | — | — | — | PASS (8,511,232 B, 1,020 records) |
+| probe6 | `native_headroom` — request region | 262,144 | — | 227,128 | PASS |
 
-### A.3 Raw measurements (CPython 3.12.3, this revision)
+The v1.7 campaign figures (produced by probes outside the repository, over a slightly wider measured region that
+included the header dict and record metadata) were 8,462,496 / 148,113 / 11,188,261 / 11,188,197 / 5,656,645 B. The
+v1.8 repository probes reproduce them within 0.8 % on the same interpreter and attribute strictly less, which is the
+safe direction: the BOUNDS are untouched and the margin is what §6.5 states.
 
-| Case | Bound (B) | Measured peak (B) | Verdict |
+### A.3 Raw values and reconciliation
+
+**A.3.1 Tracemalloc (Python-object attribution), CPython 3.12.3, this revision.**
+
+| Case | Bound (B) | Measured (B) | Slack (B) |
 |---|---|---|---|
-| phase 1 — request conversion, Python-level (probe1) | 8,781,824 | 8,462,496 | PASS (slack 319,328) |
-| phase 1 — + named `HTTP_HEADROOM` (262,144; §6.5 arithmetic) | 8,781,824 | 8,724,640 | PASS (slack 57,184) |
-| phase 1 — + RAW native arena peak (probe6, A.5) | 8,781,824 | 8,739,616 | PASS (slack 42,208) |
-| phase 2 — streaming seal, normative `del` order (probe3 path) | 151,552 | 148,113 | PASS (slack 3,439) |
-| phase 3 — decode pass, `MAX_LINE` line (probe3) | 11,202,224 | 11,188,261 | PASS |
-| phase 3 — decode pass, fresh-buffer variant (probe4) | 11,202,224 | 11,188,197 | PASS |
-| phase 3 — structure pass, `MAX_LINE` line (probe7) | 11,202,224 | 11,188,197 | PASS |
-| phase 3 — §6.5 adjusted value (11,188,261 + 8,192 file buffer, §6.5 phase 3) | 11,202,224 | 11,196,453 | PASS |
-| phase 2 — WITHOUT the normative `del` (anti-pattern) | 151,552 | 5,656,645 | BANNED |
-| phase 2 — meta fragment / digest line / b64encode slice | 151,552 | 2,099 / 1,410 / 147,524 | PASS |
-| banned — `base64.b64decode(str)` (stdlib re-encodes the whole string) | 11,202,224 | 15,381,335 | BANNED |
-| banned — `json.loads(bytes)` with the buffer held | 11,202,224 | 16,781,149 | BANNED |
-| banned — Step-1's whole-file `_read` + `_jsonl` (50 MiB session) | 12,582,912 | ≥ 139,810,133 | BANNED |
+| phase 1 — request path | 8,781,824 | 8,396,983 | 384,841 |
+| phase 2 — seal, normative `del` | 151,552 | 148,004 | 3,548 |
+| phase 2 — WITHOUT the `del` (BANNED) | 151,552 | 5,656,528 | −5,504,976 |
+| phase 3 — decode pass | 11,202,224 | 11,188,520 | 13,704 |
+| phase 3 — decode, fresh buffer | 11,202,224 | 11,188,600 | 13,624 |
+| phase 3 — structure pass | 11,202,224 | 11,188,520 | 13,704 |
+| phase 3 — §6.5 adjusted (+8,192 file buffer) | 11,202,224 | 11,196,712 | 5,512 |
+| banned — `base64.b64decode(str)` | 11,202,224 | 15,381,335 | BANNED (v1.7 campaign) |
+| banned — `json.loads(bytes)` with the buffer held | 11,202,224 | 16,781,149 | BANNED (v1.7 campaign) |
+| banned — whole-file `_read` + `_jsonl` (50 MiB session) | 12,582,912 | ≥ 139,810,133 | BANNED (v1.7 campaign) |
 
-Reconciliation: budget = max(8,781,824; 151,552; 11,202,224) = 11,202,224 ≤ 12,582,912 B (margin 1,380,688 B,
-12.3 %); worst measured phase-3 peak 11,196,453 B ≤ bound. The structure pass (probe7) peaks below the decode pass
-because it releases the line and the dict in the same order without the base64 dance — it cannot exceed the decode
-bound that already includes both.
+**A.3.2 Interposer (malloc-level peak, every arena and thread), deterministic.**
 
-### A.4 Banned patterns (normative summary; each is a plausible shortcut a mutation test kills)
+| Region | Bound (B) | Measured (B) | Slack (B) |
+|---|---|---|---|
+| phase 1 — request path | 8,781,824 | 8,396,848 | 384,976 |
+| phase 2 — seal | 151,552 | 147,848 | 3,704 |
+| phase 3 — decode pass | 11,202,224 | 11,186,544 | 15,680 |
+| request region (TLS handshake + 64 KiB body) vs `HTTP_HEADROOM` | 262,144 | 227,128 | 35,016 |
 
-1. `base64.b64decode(str)` — the stdlib re-encodes the full string to bytes first (+4.2 MB over the phase-3 bound).
-2. Holding `line bytes + decoded text + parsed dict` simultaneously (e.g. `json.loads(raw_bytes)` with the buffer
+`interposed ≥ native`, because every native allocation in the process goes through the malloc family, so the
+request-region figure UPPER-BOUNDS the native share of that region; it also contains the region's small Python
+objects, which is why it is compared with `HTTP_HEADROOM` as a whole and never decomposed.
+
+**A.3.3 `mallinfo2` samples (reported, never gated).** Six sample points around the request, values relative to the
+first: `0 → 1,776 B`, `1 → 111,136–113,520 B`, `2 → 112,912–115,664 B`, `3 → 115,328–159,360 B`, `4 → 100,672–112,016 B`,
+`5 → 73,888–85,312 B`; the end-to-end difference is 84,640–87,088 B. Two facts matter and both are the reason this
+instrument is not the design's evidence: the sample MAXIMA (115,664–159,360 B) and the END DELTA (84,640–87,088 B)
+differ by up to 46 %, i.e. a before/after difference under-reads this very fixture; and the figures move run to run
+because they are arena state, not a measurement (A.5.3).
+
+**A.3.4 Reconciliation.** `budget = max(8,781,824; 151,552; 11,202,224) = 11,202,224 ≤ TRANSIENT_BUDGET_BYTES =
+12,582,912` (margin 1,380,688 B, 12.3 %); the largest measured phase is 11,196,712 B including the file buffer, and
+the interposed figures are all below the tracemalloc-derived bounds. Domain A is released before verification starts
+(single-copy rule, §5.4/§6.5), so phase-1 objects never coexist with phase-3 peaks, and the `observe()`/CP3e receipt
+snapshot (≤ `RECEIPT_MAX_BYTES + CHUNK_BYTES` = 196,608 B) is charged to Domain C.
+
+### A.4 Banned patterns (normative; each is a plausible shortcut a mutation test kills or the gate catches)
+
+1. `base64.b64decode(str)` — the stdlib re-encodes the whole string first (+4.2 MB over the phase-3 bound).
+2. Holding `line bytes + decoded text + parsed dict` simultaneously (`json.loads(raw_bytes)` with the buffer
    referenced) — 16,781,149 B.
 3. Any whole-file read of records/events (`path.read_bytes()`, `raw.split(b"\n")`) — Step-1's ≥ 139.8 MB failure.
-4. Retaining parsed lines/records across a pass (suspended generators, an output list in the structure pass).
+4. Retaining parsed lines/records across a pass (suspended generators, an output list in the structure pass); the
+   `phase2_seal_no_del` probe is the executable form of the seal variant and MUST keep failing its bound.
 5. Materializing a whole record line at seal (`record_to_json` / `r.body` / the `body_b64` string).
+6. Reading an artifact by PATH inside `observe()` or CP3e (V17-03) — a path read cannot be bound to the presence fact.
+7. Building the probe's worst-case INPUT inside the measured region — it attributes the fixture to the phase and
+   silently invalidates the bound (A.1).
 
-### A.5 Native headroom — the `HTTP_HEADROOM = 262,144 B` term (probe6)
+### A.5 Native instrumentation — what `mallinfo2()` can and cannot bound (v1.8, V17-04)
 
-`tracemalloc` sees only Python objects; SSL buffers, socket staging and glibc arena metadata are native. Probe6
-measures that native term directly against a real local-TLS request (ephemeral `http.server` + `ssl` loopback socket,
-first-ever cold request, sampled twice):
+**A.5.1 What `mallinfo2` reports.** It describes the CALLING thread's glibc main arena (plus any arena it owns) at that
+instant: `uordblks` = in-use bytes of the non-mmapped arena, `hblkhd` = in-use bytes of mmapped blocks, `arena`/
+`fordblks` = capacity/free. Probe6 samples `uordblks + hblkhd` at six points and reports the maximum and the
+end-to-end difference.
 
-* **native arena peak** — glibc `mallinfo2().uordblks` after minus before the request: **277,120 B** (identical in
-  both runs);
-* **Python peak** for the same request: **8,398,928 B** / **8,399,008 B** (two runs);
-* **RSS was rejected as the method:** page-level RSS masks the footprint (shared arenas, allocator reuse) and
-  understates it; `mallinfo2` reports the arena's own in-use bytes directly.
+**A.5.2 Seven reasons a difference of two samples is not a peak.** Each one is visible in this revision's own numbers:
 
-Substantiation of the §6.5 phase-1 bound under BOTH headroom terms: named term → 8,462,496 + 262,144 = **8,724,640 ≤
-8,781,824** (slack 57,184); raw measured native → 8,462,496 + 277,120 = **8,739,616 ≤ 8,781,824** (slack 42,208).
-The bound therefore holds even when the named 262,144 B constant is replaced by the FULL raw native measurement —
-the ceiling does not depend on rounding the headroom term down. (A real combined measurement of the request itself:
-8,399,008 + 277,120 = 8,676,048 B, slack 105,776 B.)
+| Blind spot | Why it bites | Evidence here |
+|---|---|---|
+| Allocations that live and die inside the window | the counter returns to its old value; only the NET change survives | sample max 115,664–159,360 B vs end delta 84,640–87,088 B — up to 46 % under-read |
+| Arena/`mmap` granularity | `uordblks` counts whole arena extents and `hblkhd` whole mmapped blocks, so it can OVER-state a small live set while missing a freed one | the sample figures move between identical runs while the interposed figure does not |
+| `mmap`ed blocks vs `uordblks` | blocks ≥ `MMAP_THRESHOLD` (128 KiB default, adaptive up to 32 MiB) never appear in `uordblks` | why `hblkhd` is summed in, and why `uordblks` alone is banned as a bound |
+| Per-thread arenas | `mallinfo2` reports the calling thread's arena(s) only; other threads' allocations are invisible | the runner's request executes on `obs-request`, so a main-thread probe is a PROXY for the runner, never a measurement of it |
+| Allocator reuse | a freed block satisfies the next request, so the counter may not move at all | repeated requests under-report churn relative to a single worst case |
+| Fragmentation | free space inside the arena is not in-use space | `arena` growth is invisible to any in-use counter |
+| Non-malloc memory | kernel socket buffers (`sk_buff`), page cache, library-owned mappings | outside the counter and outside Domain B (A.5.6) |
+
+**A.5.3 Retraction.** v1.7 argued that "the ceiling does not depend on rounding the headroom term down" after
+substituting a raw 277,120 B Δ`uordblks` for the 262,144 B constant. That inference is RETRACTED: a difference sample
+is a LOWER BOUND on the native transient peak (A.5.2), so 8,739,616 B was a lower bound presented as a proof. The rule
+now is absolute: **`Δuordblks` (or `Δ(uordblks + hblkhd)`) may never be used as an upper bound**, and no gate compares
+it to a recorded value. It is retained in the appendix only as evidence of its own limitations.
+
+**A.5.4 The instrument that IS a peak.** `alloc_peak.c` (A.7.9) interposes `malloc`/`calloc`/`realloc`/`free` and tracks
+live bytes with atomics, exposing `alloc_peak_reset()` (baseline) and `alloc_peak_peak()`. It sees every arena and every
+thread and catches microsecond-lived allocations, which is precisely what A.5.2 lists as invisible to `mallinfo2`. The
+probe runs the phase (or the request region) in a child with `LD_PRELOAD=alloc_peak.so`, resets immediately before the
+region and reads the peak immediately after.
+
+**A.5.5 The analytic headroom term.** The constant is still derived, not measured — measurement only CHECKS it:
+
+| Consumer | Worst case (B) | Reasoning |
+|---|---|---|
+| TLS record buffers (one in, one out) | 32,768 | 2 × 16,384 B maximum TLS record payload |
+| OpenSSL per-connection state (SSL, SSL3_STATE, cipher context, verification chain) | 65,536 | one connection; the `SSL_CTX` is process-global and amortised |
+| `http.client`/`socket` user space (buffered reader, header block, write staging) | 20,480 | 8,192 + 8,192 + 4,096 |
+| Allocator bookkeeping and padding (chunk headers, alignment, top-of-arena slack) | 12,288 | 16 B per live block × ≤ 256 blocks + alignment |
+| **Sum of enumerated terms** | **131,072** | |
+| **`HTTP_HEADROOM` (design constant)** | **262,144** | the table × 2, covering unenumerated consumers: stdlib `_ssl` C objects, `getaddrinfo`/resolver scratch, codec/locale state |
+
+Checked, not assumed: the request region's interposed peak is **227,128 B** across runs (224,800–227,168 B), ≤ 262,144 B
+with 35,016 B of slack; the four enumerated terms still sum to ≤ 131,072 B. Phase 1's absolute slack over its
+tracemalloc peak is 8,781,824 − 8,396,983 = **384,841 B**, and the interposed phase-1 peak (8,396,848 B) is inside the
+same bound, so the phase bound holds with the native term measured rather than modelled.
+
+**A.5.6 Out of the domain, stated rather than hidden.** Kernel socket buffers and page cache are outside `mallinfo2`,
+outside `tracemalloc`, outside the interposer and outside Domain B: Domain B is the runner's own transient ALLOCATION
+budget, not its RSS. A container memory limit therefore observes more than this budget. This is a scope statement, not
+a mitigation: if a deployment caps RSS, the cap must be `TRANSIENT_BUDGET_BYTES + HARNESS_FIXED_BUDGET_BYTES +
+SESSION_BODY_BUDGET_BYTES` plus interpreter and kernel overhead, and that total is explicitly NOT claimed here.
 
 ### A.6 Budget reconciliation (normative §6.5 restated with the measured evidence)
 
-The three phases run sequentially (single-flight; seal after all requests; verify after seal), so the budget is the
-max phase peak, never the sum: max ≤ 11,202,224 B ≤ `TRANSIENT_BUDGET_BYTES = 12,582,912 B`. Domain A is released
-before verify starts (single-copy rule, §5.4/§6.5), so phase-1 objects cannot coexist with phase-3 peaks. Any future
-change to `MAX_BODY_BYTES`, the writer or the reader re-runs this whole protocol (D34) before the budget may change.
+Phases run sequentially (single-flight; seal after all requests; verify after seal), so the budget is the max phase
+peak, never the sum: 11,202,224 B ≤ `TRANSIENT_BUDGET_BYTES = 12,582,912 B`, largest measured 11,196,712 B. Any change
+to `MAX_BODY_BYTES`, the writer, the reader or the receipt schema re-runs this whole protocol (D34/D42) before the
+budget may change — and now literally re-runs it, since the protocol is `python -m tools.obs.probes.run_all --check`.
 
-End of v1.7. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
+### A.7 Complete probe blueprints (V17-04)
+
+Each file below is normative in structure: the measurement sequence, the bound and the emitted JSON shape are fixed;
+comments and helper naming may vary, byte-level inputs may not. The listing is the code that was executed to produce
+A.2/A.3, and `run_all.py --check` exits 0 on it.
+
+
+#### A.7.1 `probe_common.py`
+
+```python
+"""Shared harness for the Appendix A memory protocol. Deterministic, stdlib only, no network."""
+from __future__ import annotations
+
+import base64
+import json
+import tracemalloc
+
+# Section 12 constants - the probes never read these from a mutable config.
+MAX_BODY_BYTES = 4 * 1024 * 1024
+FRAMING_ALLOWANCE_BYTES = 512
+MAX_LINE = 4 * ((MAX_BODY_BYTES + 2) // 3) + FRAMING_ALLOWANCE_BYTES  # 5,592,920
+CHUNK_BYTES = 65_536
+SEAL_SLICE_BYTES = 49_152  # 3 x 16,384: base64-aligned, no mid-line padding
+SESSION_BODY_BUDGET_BYTES = 52_428_800
+HTTP_HEADROOM = 262_144
+PAD_LIMIT = 4_096
+
+BOUNDS = {
+    "phase1_request": 8_781_824,
+    "phase2_seal": 151_552,
+    "phase2_seal_no_del": 151_552,
+    "phase3_decode": 11_202_224,
+    "phase3_decode_fresh": 11_202_224,
+    "phase3_structure": 11_202_224,
+    "native_headroom": HTTP_HEADROOM,
+}
+
+RECORD_KEYS = frozenset({
+    "seq", "role", "path", "start_ns", "end_ns", "status", "error", "group_name", "group_kind",
+    "boundary_ms", "body_b64", "headers",
+})
+
+
+def canonical(obj: object) -> str:
+    """Step-1's serializer (runstore._canonical): sort_keys, compact separators."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+
+
+def body(size: int = MAX_BODY_BYTES) -> bytes:
+    """Deterministic worst-case body: every byte value, repeated, exactly `size` bytes."""
+    pattern = bytes(range(251))
+    return (pattern * (size // len(pattern) + 1))[:size]
+
+
+def record_line(body_bytes: bytes, pad: int = 0) -> bytes:
+    """One schema-valid record line (12 keys, canonical order); `pad` extends the `error` field by `pad` bytes."""
+    return canonical({
+        "seq": 2000,
+        "role": "K5m",
+        "path": "/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=1000&startTime=0&endTime=1",
+        "start_ns": 1_700_000_000_000_000_000,
+        "end_ns": 1_700_000_000_017_000_000,
+        "status": 200,
+        "error": "x" * pad,
+        "group_name": "resync",
+        "group_kind": "5m",
+        "boundary_ms": 180000,
+        "body_b64": base64.b64encode(body_bytes).decode("ascii"),
+        "headers": [["content-type", "application/json"], ["x-mbx-used-weight-1m", "1234"]],
+    }).encode("utf-8")
+
+
+def line_at(content_bytes: int) -> bytes:
+    """A valid record line whose UTF-8 content is EXACTLY `content_bytes` long (<= MAX_LINE)."""
+    base = len(record_line(b""))
+    if content_bytes < base:
+        raise SystemExit(f"{content_bytes} is below the empty-body framing ({base} B)")
+    target_b64 = content_bytes - base
+    length = min(MAX_BODY_BYTES, 3 * (target_b64 // 4))
+    line = record_line(body(length), 0)
+    pad = content_bytes - len(line)
+    if not 0 <= pad <= PAD_LIMIT:
+        raise SystemExit(f"cannot build a {content_bytes}-byte line (pad {pad})")
+    line = record_line(body(length), pad)
+    assert len(line) == content_bytes, (len(line), content_bytes)
+    return line
+
+
+def measure(name: str, fn, **detail) -> dict:
+    """Run `fn` under tracemalloc; report the peak. INPUTS MUST BE BUILT OUTSIDE `fn` (A.1)."""
+    tracemalloc.start()
+    try:
+        value = fn()
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    bound = BOUNDS.get(name)
+    return {
+        "probe": name,
+        "peak": peak,
+        "bound": bound,
+        "pass": None if bound is None else peak <= bound,
+        "detail": {"value": value if isinstance(value, int) else None, **detail},
+    }
+```
+
+#### A.7.2 `probe1_phase1.py`
+
+```python
+"""Phase 1 - request path (section 6.4): chunked scratch accumulation then `bytes(scratch)`.
+
+Normative sequence, bound 8,781,824 B. The body is built BEFORE the measurement starts (A.1): only the request-path
+allocations are attributed to this phase.
+"""
+from __future__ import annotations
+
+from tools.obs.probes import probe_common as C
+
+
+def sequence(payload: bytes) -> int:
+    scratch = bytearray()
+    offset = 0
+    while offset < len(payload):
+        chunk = payload[offset:offset + C.CHUNK_BYTES]      # <= 64 KiB transient, as in 6.4
+        scratch += chunk
+        offset += len(chunk)
+        del chunk
+    finished = bytes(scratch)                              # 2 x MAX_BODY peak: the bytearray AND its copy
+    assert len(finished) == len(payload)
+    return len(finished)
+
+
+def main() -> list[dict]:
+    payload = C.body()
+    return [C.measure("phase1_request", lambda: sequence(payload),
+                      max_body_bytes=C.MAX_BODY_BYTES, chunk_bytes=C.CHUNK_BYTES)]
+
+
+def interposed() -> int:
+    """Peak malloc-level bytes for this phase with alloc_peak.so preloaded (A.5.4/A.7.9)."""
+    import ctypes
+
+    lib = ctypes.CDLL(None)
+    lib.alloc_peak_peak.restype = ctypes.c_size_t
+    payload = C.body()
+    lib.alloc_peak_reset()
+    sequence(payload)
+    return int(lib.alloc_peak_peak())
+
+
+if __name__ == "__main__":
+    print(C.canonical(main()))
+```
+
+#### A.7.3 `probe2_seal.py`
+
+```python
+"""Phase 2 - the section 5.1.1 seal: one 48 KiB slice -> b64encode -> write, `del` before the next slice.
+
+Bound 151,552 B (normative order) ; the retained-chunk variant is the BANNED anti-pattern (A.4.4).
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+
+from tools.obs.probes import probe_common as C
+
+
+class Sink:
+    """Stands in for the staging fd: hashes and drops every write (section 5.1.1 `write_all`)."""
+
+    def __init__(self) -> None:
+        self.sha = hashlib.sha256()
+        self.bytes_written = 0
+
+    def write(self, data: bytes) -> None:
+        self.sha.update(data)
+        self.bytes_written += len(data)
+
+
+def sequence(payload: bytes, tail: bytes, retain: bool) -> int:
+    sink = Sink()
+    sink.write(b'{"body_b64":"')
+    kept: list[bytes] = []
+    for offset in range(0, len(payload), C.SEAL_SLICE_BYTES):
+        chunk = base64.b64encode(payload[offset:offset + C.SEAL_SLICE_BYTES])
+        sink.write(chunk)
+        if retain:
+            kept.append(chunk)                             # anti-pattern: every chunk stays alive
+        else:
+            del chunk                                      # normative release BEFORE the next slice
+    sink.write(tail)
+    return sink.bytes_written
+
+
+def main() -> list[dict]:
+    payload = C.body()
+    tail = b'"' + b"," + C.canonical({k: v for k, v in _record_meta().items()})[1:].encode() + b"\n"
+    return [
+        C.measure("phase2_seal", lambda: sequence(payload, tail, False),
+                  slices=-(-len(payload) // C.SEAL_SLICE_BYTES)),
+        C.measure("phase2_seal_no_del", lambda: sequence(payload, tail, True)),
+    ]
+
+
+def _record_meta() -> dict:
+    return {"seq": 2000, "role": "K5m", "path": "/api/v3/time", "start_ns": 1, "end_ns": 2, "status": 200,
+            "error": None, "group_name": None, "group_kind": None, "boundary_ms": None, "headers": []}
+
+
+def interposed() -> int:
+    """Peak malloc-level bytes for this phase with alloc_peak.so preloaded (A.5.4/A.7.9)."""
+    import ctypes
+
+    lib = ctypes.CDLL(None)
+    lib.alloc_peak_peak.restype = ctypes.c_size_t
+    payload = C.body()
+    tail = b'"' + b"," + C.canonical(_record_meta())[1:].encode() + b"\n"
+    lib.alloc_peak_reset()
+    sequence(payload, tail, False)
+    return int(lib.alloc_peak_peak())
+
+
+if __name__ == "__main__":
+    print(C.canonical(main()))
+```
+
+#### A.7.4 `probe3_decode.py`
+
+```python
+"""Phase 3 - the section 5.1.2 `decode_pass` order on ONE line at MAX_LINE.
+
+Normative release order: decode -> del line bytes -> json.loads -> del text -> pop body_b64 -> encode ascii ->
+del the str -> b64decode(bytes) -> del raw. Bound 11,202,224 B.
+"""
+from __future__ import annotations
+
+import base64
+import json
+
+from tools.obs.probes import probe_common as C
+
+
+def decode_one(line: bytes) -> int:
+    text = line.decode("utf-8")
+    del line                                     # release the bytes BEFORE parsing
+    obj = json.loads(text)
+    del text                                     # release the text BEFORE touching the value
+    if not isinstance(obj, dict) or set(obj) != C.RECORD_KEYS:
+        raise SystemExit("fixture is not a schema-valid record line")
+    value = obj.pop("body_b64")                  # the <= 5,592,408 B str leaves the dict FIRST
+    raw = value.encode("ascii")
+    del value                                    # release the str BEFORE decoding
+    body = base64.b64decode(raw, validate=True)
+    del raw                                      # BYTES in: b64decode(str) would re-encode the whole string
+    return len(body) + len(obj)
+
+
+def main() -> list[dict]:
+    line = C.line_at(C.MAX_LINE)
+    return [C.measure("phase3_decode", lambda: decode_one(line), line_bytes=len(line))]
+
+
+def interposed() -> int:
+    """Peak malloc-level bytes for this phase with alloc_peak.so preloaded (A.5.4/A.7.9)."""
+    import ctypes
+
+    lib = ctypes.CDLL(None)
+    lib.alloc_peak_peak.restype = ctypes.c_size_t
+    line = C.line_at(C.MAX_LINE)
+    lib.alloc_peak_reset()
+    decode_one(line)
+    return int(lib.alloc_peak_peak())
+
+
+if __name__ == "__main__":
+    print(C.canonical(main()))
+```
+
+#### A.7.5 `probe4_decode_fresh.py`
+
+```python
+"""Phase 3 - the same release order fed from a real buffered reader (`readline(MAX_LINE + 2)`), as `decode_pass` does.
+
+Independent re-measurement of the same order with a line buffer the reader allocated itself.
+"""
+from __future__ import annotations
+
+import io
+
+from tools.obs.probes import probe_common as C
+from tools.obs.probes.probe3_decode import decode_one
+
+
+def read_then_decode(stream: io.BytesIO) -> int:
+    raw = stream.readline(C.MAX_LINE + 2)        # the reader's own line buffer (<= MAX_LINE + 2 bytes)
+    return decode_one(raw)
+
+
+def main() -> list[dict]:
+    line = C.line_at(C.MAX_LINE)
+
+    def run() -> int:
+        return read_then_decode(io.BytesIO(line))
+
+    return [C.measure("phase3_decode_fresh", run, line_bytes=len(line))]
+
+
+if __name__ == "__main__":
+    print(C.canonical(main()))
+```
+
+#### A.7.6 `probe5_byte_equality.py`
+
+```python
+"""Probe 5 - byte equality: the section 5.1.1 streaming writer vs `_lines([record_to_json(r) ...])` (G-V14-02).
+
+1,020 deterministic records, one of them at MAX_BODY_BYTES. Equality is asserted on the SHA-256 of the whole stream.
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+
+from tools.obs.probes import probe_common as C
+
+
+def record(index: int) -> dict:
+    size = C.MAX_BODY_BYTES if index == 1_019 else (index * 37) % 4_096
+    return {"seq": index + 1, "role": "S1", "path": "/api/v3/time", "start_ns": index, "end_ns": index + 1,
+            "status": 200, "error": None, "group_name": None, "group_kind": None, "boundary_ms": None,
+            "body": C.body(size), "headers": []}
+
+
+def reference_line(obj: dict) -> bytes:
+    """Step-1 `record_to_json` + `_lines`: the byte sequence the writer must reproduce exactly."""
+    return C.canonical({
+        "seq": obj["seq"], "role": obj["role"], "path": obj["path"], "start_ns": obj["start_ns"],
+        "end_ns": obj["end_ns"], "status": obj["status"], "error": obj["error"], "group_name": obj["group_name"],
+        "group_kind": obj["group_kind"], "boundary_ms": obj["boundary_ms"], "headers": obj["headers"],
+        "body_b64": base64.b64encode(obj["body"]).decode("ascii"),
+    }).encode("utf-8") + b"\n"
+
+
+def streamed_line(obj: dict) -> bytes:
+    """Section 5.1.1 framing: `{` + "body_b64" value + `,` + the other 11 keys in canonical order + newline."""
+    meta = {k: v for k, v in obj.items() if k not in ("body_b64", "body")}
+    low = {k: v for k, v in meta.items() if k < "body_b64"}     # EMPTY under the frozen 12-key set
+    high = {k: v for k, v in meta.items() if k > "body_b64"}    # the other 11 keys
+    out = bytearray(b"{")
+    if low:
+        out += C.canonical(low)[1:-1].encode() + b","
+    out += b'"body_b64":"'
+    for offset in range(0, len(obj["body"]), C.SEAL_SLICE_BYTES):
+        out += base64.b64encode(obj["body"][offset:offset + C.SEAL_SLICE_BYTES])
+    out += b'"' + (b"," + C.canonical(high)[1:].encode() if high else b"}")
+    out += b"\n"
+    return bytes(out)
+
+
+def main() -> list[dict]:
+    records = [record(i) for i in range(1_020)]
+    reference = b"".join(reference_line(r) for r in records)
+    streamed = b"".join(streamed_line(r) for r in records)
+    equal = hashlib.sha256(reference).hexdigest() == hashlib.sha256(streamed).hexdigest()
+    return [{"probe": "byte_equality", "peak": 0, "bound": None, "pass": equal,
+             "detail": {"bytes": len(reference), "records": len(records),
+                        "max_body_bytes": C.MAX_BODY_BYTES}}]
+
+
+if __name__ == "__main__":
+    print(C.canonical(main()))
+```
+
+#### A.7.7 `probe6_native.py`
+
+```python
+"""Probe 6 - native memory around ONE local-TLS request (Appendix A.5).
+
+Two instruments, both reported, neither interchangeable:
+  * mallinfo2 at six sample points -> max(uordblks + hblkhd) since the first sample. A LOWER BOUND (A.5.2/A.5.3):
+    it is a net difference, blind to allocations that live and die inside the window, blind to other threads'
+    arenas, and (for uordblks alone) blind to mmapped blocks - so hblkhd is added.
+  * alloc_peak.so via LD_PRELOAD -> the true peak live-minus-baseline in the child that actually performs the
+    request, across all arenas and threads (A.5.4). This is the instrument the gate trusts when it is available.
+The gate NEVER treats the mallinfo2 delta as an upper bound.
+"""
+from __future__ import annotations
+
+import ctypes
+import http.server
+import json
+import os
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import threading
+
+from tools.obs.probes import probe_common as C
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CERT = os.path.abspath(os.path.join(HERE, "..", "..", "..", "tests", "fixtures", "tls", "localhost.pem"))
+SHIM = os.path.join(HERE, "alloc_peak.so")
+PAYLOAD = C.body(64 * 1024)          # a modest body: the native term is per-connection, not per-byte
+
+
+class _Mi(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_size_t) for name in
+                ("arena", "ordblks", "smblks", "hblks", "hblkhd", "usmblks", "fsmblks", "uordblks", "fordblks",
+                 "keepcost")]
+
+
+def _libc():
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    libc.mallinfo2.restype = _Mi
+    return libc
+
+
+def sample() -> int:
+    """In-use native bytes visible to the calling thread's arena(s): arena in-use + mmapped in-use."""
+    info = _libc().mallinfo2()
+    return int(info.uordblks) + int(info.hblkhd)
+
+
+class _Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self) -> None:                                   # noqa: N802 - http.server API
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(PAYLOAD)))
+        self.end_headers()
+        self.wfile.write(PAYLOAD)
+
+    def log_message(self, *args: object) -> None:
+        return
+
+
+def _serve() -> http.server.ThreadingHTTPServer:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(CERT)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def request_once(port: int, client: ssl.SSLContext) -> tuple[int, dict[int, int]]:
+    """The client MUST run on the main thread: mallinfo2 reports only the calling thread's arena(s) (A.5.2)."""
+    samples: dict[int, int] = {}
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
+        samples[0] = sample()                                   # before the handshake
+        with client.wrap_socket(raw, server_hostname="localhost") as sock:
+            samples[1] = sample()                               # after the handshake
+            sock.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            samples[2] = sample()                               # after the request bytes
+            received = 0
+            while True:
+                chunk = sock.recv(65_536)
+                if not chunk:
+                    break
+                received += len(chunk)
+                samples[3] = sample()                           # mid-body
+            samples[4] = sample()                               # last byte
+    samples[5] = sample()                                       # after close
+    return received, samples
+
+
+def interposed_peak() -> dict[str, object] | None:
+    """Re-run the same request in a child with alloc_peak.so; the child reports its own peak."""
+    if not os.path.exists(SHIM):
+        return None
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as handle:
+        report = handle.name
+    env = dict(os.environ, LD_PRELOAD=SHIM, ALLOC_PEAK_FILE=report,
+               PYTHONPATH=os.path.dirname(os.path.dirname(os.path.dirname(HERE))))
+    done = subprocess.run([sys.executable, "-m", "tools.obs.probes.probe6_native", "--child"],
+                          env=env, capture_output=True, timeout=300, cwd=os.path.dirname(HERE))
+    if done.returncode != 0:
+        return {"error": done.stderr.decode()[-400:]}
+    data = json.loads(done.stdout.decode() or "{}")
+    try:
+        os.unlink(report)
+    except OSError:
+        pass
+    return data
+
+
+def child() -> int:
+    """Child entry: build the fixture FIRST, reset the shim, then measure only the request region."""
+    lib = ctypes.CDLL(None)
+    lib.alloc_peak_peak.restype = ctypes.c_size_t
+    client = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=CERT)
+    server = _serve()
+    try:
+        lib.alloc_peak_reset()                       # baseline AFTER the SSL context and the listener exist
+        received, _ = request_once(server.server_address[1], client)
+        peak = int(lib.alloc_peak_peak())
+    finally:
+        server.shutdown()
+        server.server_close()
+    print(json.dumps({"peak": peak, "bytes_received": received}))
+    return 0
+
+
+def main() -> list[dict]:
+    if not os.path.exists(CERT):
+        raise SystemExit(f"missing TLS fixture {CERT} (see probes/README.md)")
+    client = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=CERT)
+    server = _serve()
+    try:
+        before = sample()
+        received, samples = request_once(server.server_address[1], client)
+        after = sample()
+    finally:
+        server.shutdown()
+        server.server_close()
+    peak = max(samples.values()) - before
+    return [{
+        "probe": "native_headroom",
+        "peak": peak,
+        "bound": None,
+        "detail": {
+            "instrument": "mallinfo2(uordblks+hblkhd) max over 6 sample points; LOWER BOUND (A.5.3)",
+            "bytes_received": received,
+            "after_minus_before": after - before,
+            "samples": {str(k): v - before for k, v in sorted(samples.items())},
+            "interposed": interposed_peak(),
+        },
+    }]
+
+
+if __name__ == "__main__":
+    if "--child" in sys.argv[1:]:
+        raise SystemExit(child())
+    print(C.canonical(main()))
+```
+
+#### A.7.8 `probe7_structure.py`
+
+```python
+"""Phase 3 - the section 5.1.2 `scan_structure` pass: parse + key check + DISCARD, no body decode.
+
+Bound 11,202,224 B. Retaining the dict (or the line) is the banned pattern A.4.4.
+"""
+from __future__ import annotations
+
+import json
+
+from tools.obs.probes import probe_common as C
+
+
+def scan(line: bytes) -> int:
+    text = line.decode("utf-8")
+    del line
+    obj = json.loads(text)
+    del text
+    ok = isinstance(obj, dict) and set(obj) == C.RECORD_KEYS
+    del obj                                      # DISCARD: the structure pass retains nothing
+    return int(ok)
+
+
+def main() -> list[dict]:
+    line = C.line_at(C.MAX_LINE)
+    return [C.measure("phase3_structure", lambda: scan(line), line_bytes=len(line))]
+
+
+if __name__ == "__main__":
+    print(C.canonical(main()))
+```
+
+#### A.7.9 `alloc_peak.c`
+
+```c
+// alloc_peak.c - LD_PRELOAD peak allocator for Appendix A.5 (V17-04).
+//
+// Counts LIVE malloc-family bytes across every arena and thread (atomic) and tracks the PEAK delta since the last
+// alloc_peak_reset(). This is what mallinfo2 cannot give: a difference of two samples misses allocations that live and
+// die between them, mallinfo2 sees only the calling thread's arena(s), and uordblks alone excludes mmapped blocks.
+//
+//   void   alloc_peak_reset(void): baseline := live, peak := 0 (call right before the measured region)
+//   size_t alloc_peak_peak(void):  peak live-minus-baseline since the reset, in bytes
+//
+// On exit it also writes {"peak":N} to $ALLOC_PEAK_FILE when set (fallback for processes that cannot call the getter).
+// Build: cc -shared -fPIC -O2 -o alloc_peak.so alloc_peak.c
+// Limits: malloc family only - direct mmap by a library and kernel socket buffers are not counted (A.5.2).
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <malloc.h>
+#include <stdatomic.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static _Atomic size_t live = 0;
+static _Atomic size_t base = 0;
+static _Atomic size_t peak = 0;
+static void *(*real_malloc)(size_t);
+static void  (*real_free)(void *);
+static void *(*real_calloc)(size_t, size_t);
+static void *(*real_realloc)(void *, size_t);
+
+static size_t usable(void *p) { return p ? malloc_usable_size(p) : 0; }
+
+static void track(long delta) {
+    size_t now = delta >= 0 ? atomic_fetch_add(&live, (size_t)delta) + (size_t)delta
+                            : atomic_fetch_sub(&live, (size_t)-delta) - (size_t)-delta;
+    size_t b = atomic_load(&base);
+    size_t rel = now > b ? now - b : 0;
+    size_t seen = atomic_load(&peak);
+    while (rel > seen && !atomic_compare_exchange_weak(&peak, &seen, rel)) { }
+}
+
+void alloc_peak_reset(void) {
+    atomic_store(&base, atomic_load(&live));
+    atomic_store(&peak, 0);
+}
+
+size_t alloc_peak_peak(void) { return atomic_load(&peak); }
+
+void *malloc(size_t size) {
+    if (!real_malloc) real_malloc = dlsym(RTLD_NEXT, "malloc");
+    void *p = real_malloc(size);
+    track((long)usable(p));
+    return p;
+}
+
+void free(void *p) {
+    if (!real_free) real_free = dlsym(RTLD_NEXT, "free");
+    track(-(long)usable(p));
+    real_free(p);
+}
+
+void *calloc(size_t n, size_t size) {
+    if (!real_calloc) real_calloc = dlsym(RTLD_NEXT, "calloc");
+    void *p = real_calloc(n, size);
+    track((long)usable(p));
+    return p;
+}
+
+void *realloc(void *old, size_t size) {
+    if (!real_realloc) real_realloc = dlsym(RTLD_NEXT, "realloc");
+    long was = (long)usable(old);
+    void *p = real_realloc(old, size);
+    track((long)usable(p) - was);
+    return p;
+}
+
+__attribute__((destructor)) static void report(void) {
+    const char *path = getenv("ALLOC_PEAK_FILE");
+    if (!path || !*path) return;
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "{\"peak\":%zu}\n", atomic_load(&peak));
+    fclose(f);
+}
+```
+
+#### A.7.10 `run_all.py`
+
+```python
+"""Driver for the Appendix A probe suite (V17-04).
+
+  python -m tools.obs.probes.run_all --check     # CI gate: exit 0 pass / 1 mismatch / 2 environment refused
+  python -m tools.obs.probes.run_all --record    # print a new expected.json body for a REVIEWED revision
+  python -m tools.obs.probes.run_all --interpose <probe>   # internal: one phase under alloc_peak.so (A.7.9)
+
+Two instruments are checked per phase: `tracemalloc` (Python-object attribution) and, when `alloc_peak.so` builds,
+the interposer (malloc-level, all arenas and threads, including allocations that live and die inside the region).
+mallinfo2 figures are REPORTED only: they are lower bounds (A.5.3) and are never gated.
+"""
+from __future__ import annotations
+
+import importlib
+import json
+import os
+import platform
+import subprocess
+import sys
+
+from tools.obs.probes import probe_common as C
+
+PROBES = ("probe1_phase1", "probe2_seal", "probe3_decode", "probe4_decode_fresh", "probe5_byte_equality",
+          "probe6_native", "probe7_structure")
+BY_MEASUREMENT = {"phase1_request": "probe1_phase1", "phase2_seal": "probe2_seal", "phase3_decode": "probe3_decode"}
+PINNED_PYTHON = "3.12.3"          # A.1: another interpreter invalidates every recorded value
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+SHIM = os.path.join(HERE, "alloc_peak.so")
+
+
+def collect() -> list[dict]:
+    results: list[dict] = []
+    for name in PROBES:
+        produced = importlib.import_module(f"tools.obs.probes.{name}").main()
+        results.extend(produced if isinstance(produced, list) else [produced])
+    return results
+
+
+def interposed(measurement: str) -> int | None:
+    """Re-run one phase in a child with alloc_peak.so preloaded; None when the shim cannot be used."""
+    module = BY_MEASUREMENT.get(measurement)
+    if module is None or not os.path.exists(SHIM):
+        return None
+    done = subprocess.run([sys.executable, "-m", "tools.obs.probes.run_all", "--interpose", module],
+                          env=dict(os.environ, LD_PRELOAD=SHIM, PYTHONPATH=ROOT),
+                          capture_output=True, timeout=300, cwd=ROOT)
+    if done.returncode != 0:
+        return None
+    return int(json.loads(done.stdout.decode() or "{}")["peak"])
+
+
+def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]:
+    failures: list[str] = []
+    by_name = {m["probe"]: m for m in measured}
+    for want in expected["measurements"]:
+        name = want["probe"]
+        got = by_name.get(name)
+        if got is None:
+            failures.append(f"{name}: not measured")
+            continue
+        tolerance = want.get("tolerance", 0.02)
+        if want.get("expected_fail"):
+            if got.get("pass") is not False:
+                failures.append(f"{name}: banned pattern PASSED its bound (it must fail)")
+        elif got.get("pass") is False:
+            failures.append(f"{name}: peak {got['peak']} exceeds its bound {got['bound']}")
+        if want.get("peak") and name != "native_headroom":
+            if abs(got["peak"] - want["peak"]) > want["peak"] * tolerance:
+                failures.append(f"{name}: peak {got['peak']} != recorded {want['peak']} (tolerance {tolerance:.0%})")
+        if want.get("interposed") is not None and name != "native_headroom":
+            peak = probe_interposed(name)
+            if peak is None:
+                failures.append(f"{name}: interposer unavailable — build alloc_peak.so (A.7.8)")
+            elif want.get("bound") is not None and peak > want["bound"]:
+                failures.append(f"{name}: interposed peak {peak} exceeds the bound {want['bound']}")
+            elif abs(peak - want["interposed"]) > want["interposed"] * tolerance:
+                failures.append(f"{name}: interposed {peak} != recorded {want['interposed']}")
+        if name == "native_headroom":
+            detail = got.get("detail") or {}
+            peak = (detail.get("interposed") or {}).get("peak")
+            if peak is None:
+                failures.append("native_headroom: interposer unavailable (the analytic term cannot be checked)")
+            elif peak > C.HTTP_HEADROOM:
+                failures.append(f"native_headroom: request-region malloc peak {peak} > HTTP_HEADROOM {C.HTTP_HEADROOM}")
+            # the mallinfo2 figure is a LOWER BOUND and is deliberately NOT compared to a recorded value
+    return failures
+
+
+def main(argv: list[str]) -> int:
+    mode = argv[1] if len(argv) > 1 else "--check"
+    if mode == "--interpose":
+        module = importlib.import_module(f"tools.obs.probes.{argv[2]}")
+        print(json.dumps({"peak": int(module.interposed())}))
+        return 0
+    if sys.version.split()[0] != PINNED_PYTHON:
+        print(f"refused: interpreter {sys.version.split()[0]} != {PINNED_PYTHON} (A.1)", file=sys.stderr)
+        return 2
+    measured = collect()
+    if mode == "--record":
+        print(json.dumps({"env": {"python": sys.version.split()[0], "platform": platform.platform()},
+                          "measurements": measured}, indent=2))
+        return 0
+    expected = json.load(open(os.path.join(HERE, "expected.json")))
+    failures = compare(expected, measured, interposed)
+    for line in failures:
+        print(line, file=sys.stderr)
+    return 0 if not failures else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
+```
+
+#### A.7.11 `tools/obs/probes/README.md`
+
+```markdown
+# Appendix A probes (V17-04)
+
+    python -m tools.obs.probes.run_all --check     # CI gate; exit 0 pass, 1 mismatch, 2 environment refused
+    python -m tools.obs.probes.run_all --record    # print a new expected.json body for a REVIEWED revision
+
+## Environment pin
+
+CPython 3.12.3 with OpenSSL 3.0.13, Linux x86-64, glibc `mallinfo2`, `cc` for the interposer. Any other interpreter is
+refused (exit 2): the recorded byte counts are interpreter-specific (Appendix A.1).
+
+## TLS fixture (probe6)
+
+    mkdir -p tests/fixtures/tls && cd tests/fixtures/tls
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 1 \
+        -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost"
+    cat cert.pem key.pem > localhost.pem
+
+`localhost.pem` (certificate first, then key) is what `probe6_native.py` loads for both ends.
+
+## Interposer
+
+    cc -shared -fPIC -O2 -o tools/obs/probes/alloc_peak.so tools/obs/probes/alloc_peak.c
+
+`alloc_peak.so` is a build artifact: never commit it. Without it, `--check` fails both phase interposition and
+`native_headroom`, because the analytic headroom term must be checked, not inferred (A.5.5).
+
+## Discipline
+
+* Inputs are built OUTSIDE the measured region (`probe_common.measure`).
+* `mallinfo2` figures are LOWER BOUNDS (A.5.2/A.5.3): never compare them to a bound, never lower `HTTP_HEADROOM`
+  because a sample came out small.
+* Changing a measurement sequence, a bound, an input size or an expected value requires a reviewed revision of the
+  design document's Appendix A (G-V17-04); `--record` output is a proposal, not a new baseline.
+* `tests/fixtures/tls/` is test-only material; the private key there is a throwaway generated by the command above.
+
+```
+#### A.7.12 `tools/obs/probes/expected.json`
+
+```json
+{
+  "env": {"python": "3.12.3", "openssl": "3.0.13", "platform": "Linux x86-64", "updated": "v1.8"},
+  "measurements": [
+    {"probe": "phase1_request", "peak": 8396983, "bound": 8781824, "tolerance": 0.02,
+     "instrument": "tracemalloc", "interposed": 8396848, "v17_campaign": 8462496},
+    {"probe": "phase2_seal", "peak": 148004, "bound": 151552, "tolerance": 0.02,
+     "instrument": "tracemalloc", "interposed": 147848, "v17_campaign": 148113},
+    {"probe": "phase2_seal_no_del", "peak": 5656528, "bound": 151552, "tolerance": 0.02,
+     "instrument": "tracemalloc", "expected_fail": true, "v17_campaign": 5656645},
+    {"probe": "phase3_decode", "peak": 11188520, "bound": 11202224, "tolerance": 0.02,
+     "instrument": "tracemalloc", "interposed": 11186544, "v17_campaign": 11188261},
+    {"probe": "phase3_decode_fresh", "peak": 11188600, "bound": 11202224, "tolerance": 0.02,
+     "instrument": "tracemalloc", "v17_campaign": 11188197},
+    {"probe": "phase3_structure", "peak": 11188520, "bound": 11202224, "tolerance": 0.02,
+     "instrument": "tracemalloc", "v17_campaign": 11188197},
+    {"probe": "byte_equality", "peak": 0, "bound": null, "bytes": 8511232, "records": 1020},
+    {"probe": "native_headroom", "peak": 159360, "bound": 262144, "tolerance": 0.20,
+     "instrument": "mallinfo2 sample max (LOWER BOUND)", "interposed": 227128, "end_delta": 87088}
+  ]
+}
+```
+
+`peak` for `native_headroom` is the sample maximum of the recording run; it is reported, never gated (A.5.3).
+
+End of v1.8. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
 document, not an implementation choice.
