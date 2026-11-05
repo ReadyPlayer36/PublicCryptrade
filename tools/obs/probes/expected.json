@@ -1,0 +1,21 @@
+{
+  "env": {"python": "3.12.3", "openssl": "3.0.13", "platform": "Linux x86-64", "updated": "v1.9"},
+  "measurements": [
+    {"probe": "phase1_request", "peak": 8396983, "bound": 8781824, "tolerance": 0.02,
+     "instrument": "tracemalloc", "interposed": 8400920, "interposed_map_peak": 0, "v17_campaign": 8462496},
+    {"probe": "phase2_seal", "peak": 148004, "bound": 151552, "tolerance": 0.02,
+     "instrument": "tracemalloc", "interposed": 147848, "interposed_map_peak": 0, "v17_campaign": 148113},
+    {"probe": "phase2_seal_no_del", "peak": 5656528, "bound": 151552, "tolerance": 0.02,
+     "instrument": "tracemalloc", "expected_fail": true, "v17_campaign": 5656645},
+    {"probe": "phase3_decode", "peak": 11188520, "bound": 11202224, "tolerance": 0.02,
+     "instrument": "tracemalloc", "interposed": 11186544, "interposed_map_peak": 0, "v17_campaign": 11188261},
+    {"probe": "phase3_decode_fresh", "peak": 11188600, "bound": 11202224, "tolerance": 0.02,
+     "instrument": "tracemalloc", "v17_campaign": 11188197},
+    {"probe": "phase3_structure", "peak": 11188520, "bound": 11202224, "tolerance": 0.02,
+     "instrument": "tracemalloc", "v17_campaign": 11188197},
+    {"probe": "byte_equality", "peak": 0, "bound": null, "bytes": 8511232, "records": 1020},
+    {"probe": "native_headroom", "peak": 112272, "bound": 262144, "tolerance": 0.20,
+     "instrument": "mallinfo2 sample max (LOWER BOUND)", "interposed": 195184, "interposed_map_peak": 16384,
+     "end_delta": 72272}
+  ]
+}

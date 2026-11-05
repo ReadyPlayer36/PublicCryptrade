@@ -1,31 +1,39 @@
-# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v1.8 (NORMATIVE)
+# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v1.9 (NORMATIVE)
 
 Status: design only. No live request is authorized by this document. Milestone 1 remains **BLOCKED** until the reviewer accepts
-the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.7**: it resolves all four
-blocking findings of the v1.7 review (V17-01…V17-04, §1.0) and re-states every affected section at implementation granularity;
-where v1.7 and this document disagree, this document governs, and sections not restated here remain normative as written in
-v1.7. The v1.6/v1.5/v1.4/v1.3 maps are retained unchanged as §1.1–§1.4.
+the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.8**: it resolves all three
+blocking findings of the v1.8 review (V18-01…V18-03, §1.0) and restates every affected section at implementation granularity.
+Three changes of substance: the loader's over-long-line divergence is now an EXPLICIT REJECTION POLICY rather than an
+impossibility claim (§5.1.2.6; Step-1 validates no string length, so the class is reachable and is refused by design); the
+Appendix A probe suite is delivered as repository code with a pinned file manifest (A.0, `tools/obs/probes/`, 13 files) and was
+executed for this revision; and the native instrument's blind spots are closed by measurement — a second interposed channel
+for direct `mmap` — plus a proof that the four-term headroom constant bounds what any uninstrumented allocator path can add
+(A.5.4/A.5.7). Where v1.8 and this document disagree, this document governs, and sections not restated here remain normative as
+written in v1.8. The v1.7/v1.6/v1.5/v1.4/v1.3 maps are retained unchanged as §1.1–§1.5.
 
 Anchor: repository `ReadyPlayer36/PublicCryptrade`, branch `main`, commit
-`7b1493e0005f3b8d8b9f3a3dd8519008b46acca5` (lineage `impl-obs-step1` → `f337862e52dada43f425cee05154e18f212987aa` →
-`dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f` → `673f9a2ace30a449267adace9af0f9d94865bda1` →
-`11ff12535e42639e3bab53304651e3ea2b5cd6b3` → this commit), reviewed against the actual Step-1 code in `tools/obs/` at that
-commit. Branch-sync result re-established for this revision: `git diff 11ff125 7b1493e -- tools/obs/` is EMPTY and
-`git diff dbfe53c 7b1493e -- tools/obs/` is EMPTY — `tools/obs/` is byte-identical across every documented anchor (only this
-document changed after `dbfe53c`), so every correction below is a design-text-versus-code discrepancy, not code drift. Hard
-citations re-verified at `7b1493e`: `audit.py` 70–86 (`abort_condition_seq`), 289–296 (check (g): `wrapper_count` must be a
+`f0c0ad0d36e1eb84517af98b82a0d55f8ca978f5` (this revision's anchor). Its predecessor
+`7b1493e0005f3b8d8b9f3a3dd8519008b46acca5` is v1.8's anchor and belongs to the same lineage (`impl-obs-step1` →
+`f337862e52dada43f425cee05154e18f212987aa` → `dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f` →
+`673f9a2ace30a449267adace9af0f9d94865bda1` → `11ff12535e42639e3bab53304651e3ea2b5cd6b3` → `7b1493e` → `f0c0ad0`); this
+document is reviewed against the actual Step-1 code in `tools/obs/` at `f0c0ad0`. Branch-sync result re-established for this
+revision: `git diff 7b1493e f0c0ad0` touches ONLY this document and the new `tools/obs/probes/` suite — `git diff 11ff125
+7b1493e -- tools/obs/`, `git diff dbfe53c 7b1493e -- tools/obs/` and `git diff 7b1493e f0c0ad0 -- tools/obs/` are all EMPTY, so
+every correction below is a design-text-versus-code discrepancy, not code drift. Hard
+citations re-verified at `f0c0ad0` (byte-identical to `7b1493e`): `audit.py` 70–86 (`abort_condition_seq`), 289–296 (check (g): `wrapper_count` must be a
 caller-supplied integer — the "independent egress counter"), 619–631 (`audit_run` reloads the run via `load_run` at 626);
 `runstore.py` 35/39–42 (format + frozen key sets), 45 (`ManifestError(ValueError)`), 172/217 (`_canonical`/`_lines`),
 194–201 (`_parse_json` dialect: `_no_duplicate_keys`, `parse_constant` rejection), 206–209 (`record_to_json` base64-encodes
 the body), 221–244 (`write_run`: path opens, no fsync), 246–250 (`_read`), 253–258 (`load_manifest` fails closed without a
-64-hex pin), 279–286 (`_jsonl`: whole-file split, truncation first), 291–328 (field validators), 348–357
+64-hex pin), 279–286 (`_jsonl`: whole-file split, truncation first), 291–346 (field validators), 348–357
 (`_record_from_json` decodes `body_b64` from a str first), 370–388 (`load_run`); `eventlog.py` 50–58 (digest-line format;
 `bytes(r.body)` is `r.body` — probe-verified identity, so bodies hash in place). Phase memory numbers in §6.5 and Appendix A
 are measurements over the exact normative sequences on CPython 3.12.3 (`tracemalloc`, worst-case inputs); methodology, raw
-values, the native-instrumentation boundaries and the complete probe-script blueprints are Appendix A — and those probes are
-specified as REPOSITORY files under `tools/obs/probes/` (A.0/A.7, V17-04), superseding v1.7's "review artifacts, not
-repository files" — and executed for this revision: `python -m tools.obs.probes.run_all --check` exits 0 on every
-recorded value in A.2/A.3.
+values, the native-instrumentation boundaries and the probe sources are Appendix A. Those probes ARE repository code at
+`tools/obs/probes/` (13 files, A.0 records size and SHA-256 for each; v1.9, V18-02 supersedes v1.7's "review artifacts, not repository
+files" and v1.8's listings-only form), and they were executed from the repository root for this revision:
+`PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check` exits 0 on every value in A.2/A.3, twice consecutively, including
+the direct-`mmap` channel that V18-03 added (A.5.7).
 Imperative key words MUST, MUST NOT, SHALL, SHOULD, SHOULD NOT are normative. "§n" refers to a section of this document;
 "protocol §n" refers to `docs/obs-protocol.md` v0.5. Code identifiers in `monospace` refer to real symbols in `tools/obs/`
 unless explicitly marked *runner* (Step-2 code that this document specifies).
@@ -46,8 +54,10 @@ preserve every observable outcome of the current implementation (record shapes, 
 counters, and for `write_run` the exact bytes it writes / for `load_run` the exact accept-reject set, error precedence
 and `LoadedRun` contents — the `load_run` contract is made exact by v1.7 for V16-05 and is VERSIONED by v1.8 for V17-01 as the `obs-loader/2`
 contract: Step-1's error precedence and JSON dialect are reproduced verbatim, with the `MAX_LINE` cap as the sole
-documented acceptance divergence — now an explicit, derived, versioned bound with its own registry, size table,
-precedence position and differential corpus (§5.1.2.0–§5.1.2.4, D35/D38/D39)) and
+documented acceptance divergence — an explicit, derived, versioned bound with its own registry, size table, precedence
+position, differential corpus and, since v1.9 (V18-01), an explicit REJECTION POLICY: a line above the cap is refused by
+design even where Step-1 would accept it, because Step-1 enforces no string length at all (§5.1.2.0–§5.1.2.6,
+D35/D38/D39/D43)) and
 land with the regression tests named in §11.
 
 0.3 Persisted artifacts (all names are exact):
@@ -82,30 +92,38 @@ checks (a)–(g) of `audit_pace`, `validate_missed_window_decision` + `validate_
 (single-flight, record append, `abort_seq` convention), `watchdog.py::run_with_deadline` (absolute deadline + 1 s
 cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pin), `params.py` (all numeric constants).
 
-## 1. Revision maps — V17 findings resolved in v1.8; V16/V15/V14/V13 findings retained
+## 1. Revision maps — V18 findings resolved in v1.9; V17/V16/V15/V14/V13 findings retained
 
-### 1.0 V17 findings resolved in v1.8
+### 1.0 V18 findings resolved in v1.9
+
+| ID | Finding (v1.8 review) | Where resolved | Resolution in one line |
+|---|---|---|---|
+| V18-01 | §5.1.2 called the over-long-line class "impossible under the frozen schema" and "proved unreachable for schema-valid artifacts". That claim is unproven and false in the general case: Step-1 validates NO string length — `_jsonl` splits on `b"\\n"` with no upper bound (runstore.py:279–286), `_record_from_json` bounds only three integer ranges (348–357), and `_req_str`/`_req_headers` accept arbitrarily long strings (304–331) — so a Step-1-ACCEPTED legacy artifact can exceed `MAX_LINE`, and `/2` would reject it silently as a side effect of a budget constant rather than as a stated policy | §5.1.2.6 (new: rejection policy), §5.1.2.0 R-1/R-6, §5.1.2.1 (predicate split), §5.1.2.4 (D-21…D-23), §5.1.2.5 (rewritten), §0.2, §11 (G-V18-01), D43 | `obs-loader/2` now states an EXPLICIT REJECTION POLICY: a line whose CONTENT exceeds `MAX_LINE` is rejected BY DESIGN with the deterministic P-6 message, whatever `/1` would have done with it. The impossibility claim is WITHDRAWN and replaced by two named predicates — CONFORMING (written by §5.1.1: the bound is a theorem) and LEGACY-ADMITTED (accepted by `/1`: the bound is NOT a theorem, and the artifact is refused with its line number) — the reachability evidence is cited line by line, and the corpus now ASSERTS reachability: the frozen `/1` oracle must ACCEPT fixture D-21 and `/2` must REJECT it with the cap message, so the case fails if it ever becomes vacuous. No flag, no tolerance, no truncation, no silent skip; verifying oversize legacy evidence requires a reviewed `obs-loader/3` |
+| V18-02 | The Appendix A probe suite existed only as listings inside A.7: a reviewer could read it but not RUN it, nothing bound the printed numbers to bytes that exist, and a drift between a listing and the code it claims to be was undetectable | §A.0 (file manifest: path, role, size, SHA-256), §A.1, §A.2/A.3 (values from this run), §A.7 (mirrors regenerated from the files), `tools/obs/probes/` (13 files), §11 (G-V18-02), D44 | The suite is repository code at the paths the appendix names — `run_all.py`, `alloc_peak.c`, `expected.json`, `README.md` and `probe6_native.py`, plus the six other probe modules, `probe_common.py` and `__init__.py` that they import — and was executed from the repository root for this revision (`python -m tools.obs.probes.run_all --check` exits 0, twice). A.0 records size + SHA-256 per file, `run_all --manifest` prints the same table (G-V18-02 diffs them), the driver REFUSES to run when a file is missing, and A.7 is generated from the files, so a listing can no longer drift from the code it documents |
+| V18-03 | A.5.4 asserted that `alloc_peak.c` "sees every arena and every thread" — but it wrapped only `malloc`/`calloc`/`realloc`/`free`. CPython's object allocator obtains its 1 MiB arenas with a DIRECT `mmap` that the shim never sees, and A.5 offered no argument bounding what an uninstrumented path could hide, so the headroom constant rested on an unexamined channel | §A.5.4 (interception inventory + fenced limits), §A.5.7 (new: direct-`mmap` fence and the allocator-independence proof), §A.2/A.3 (measured channels), §6.6, §11 (G-V18-03), D45 | The over-claim is withdrawn and the channel is closed by MEASUREMENT: `alloc_peak.c` now also interposes `mmap`/`mmap64`/`munmap` for `MAP_ANONYMOUS\\|MAP_PRIVATE` and exposes a second peak — 16,384 B in the native request region and 0 B in each measured phase — and the gate requires `malloc peak + mmap peak ≤ HTTP_HEADROOM` (measured 195,184 + 16,384 = 211,568 ≤ 262,144). A.5.4 itemises every allocator that is and is not intercepted; A.5.7 proves the four-term constant bounds each consumer independently of which allocator serves it, page-rounding included |
+
+### 1.1 V17 findings resolved in v1.8 (retained)
 
 | ID | Finding (v1.7 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
-| V17-01 | `MAX_LINE` was documented only as a "sole acceptance divergence" buried inside §5.1.2: no contract identity, no version, no statement that Step-2's bounded reader *supersedes* Step-1's unconstrained `_jsonl` string split, no exact size arithmetic beyond one formula line, no defined position in the error ladder, and no differential corpus — so the loader could evolve silently and the divergence was unenforceable | §5.1.2.0 (registry), §5.1.2.1 (bounds + boundary table), §5.1.2.2 (precedence ladder P-0…P-13 + the P-9a terminator rule), §5.1.2.3 (pseudocode), §5.1.2.4 (differential corpus D-01…D-20), §0.2, §12, D38/D39, G-V17-01 | New `obs-loader/2` contract with a named registry that SUPERSEDES `obs-loader/1` (Step-1, kept only as a hash-pinned test oracle), no negotiation and no fallback; `MAX_LINE` derived (`4 × ⌈MAX_BODY_BYTES/3⌉ + 512 = 5,592,920 B`) with an import-time assertion, a four-case boundary table (cap inclusive), a schema-valid upper-bound proof and a measured framing allowance; a 14-row precedence ladder that places the cap in Step-1's pre-parse slot (after both digests, truncation first, before every parse error); and a reviewable 20-class differential corpus asserting identical messages, identical positions and identical `LoadedRun` against legacy records — which also fixed a real message-drift defect (v1.7 parsed the terminator-inclusive buffer, reporting `line 2 column 1` where Step-1 reports `line 1 column 6`) |
+| V17-01 | `MAX_LINE` was documented only as a "sole acceptance divergence" buried inside §5.1.2: no contract identity, no version, no statement that Step-2's bounded reader *supersedes* Step-1's unconstrained `_jsonl` string split, no exact size arithmetic beyond one formula line, no defined position in the error ladder, and no differential corpus — so the loader could evolve silently and the divergence was unenforceable | §5.1.2.0 (registry), §5.1.2.1 (bounds + boundary table), §5.1.2.2 (precedence ladder P-0…P-13 + the P-9a terminator rule), §5.1.2.3 (pseudocode), §5.1.2.4 (differential corpus D-01…D-23), §0.2, §12, D38/D39, G-V17-01 | New `obs-loader/2` contract with a named registry that SUPERSEDES `obs-loader/1` (Step-1, kept only as a hash-pinned test oracle), no negotiation and no fallback; `MAX_LINE` derived (`4 × ⌈MAX_BODY_BYTES/3⌉ + 512 = 5,592,920 B`) with an import-time assertion, a four-case boundary table (cap inclusive), a two-predicate split (CONFORMING is a theorem, LEGACY-ADMITTED is a refusal — the "impossible under the frozen schema" claim is withdrawn in v1.9, V18-01) and a measured framing allowance; a 14-row precedence ladder that places the cap in Step-1's pre-parse slot (after both digests, truncation first, before every parse error); and a reviewable 23-class differential corpus asserting identical messages, identical positions and identical `LoadedRun` against legacy records — which also fixed a real message-drift defect (v1.7 parsed the terminator-inclusive buffer, reporting `line 2 column 1` where Step-1 reports `line 1 column 6`) |
 | V17-02 | Receipt publication step 5 compared `st_dst` against `st_src` — the PRE-SYSCALL stat of the staging NAME — so a substitution landing inside the stat→`renameat2` window published the impostor and SATISFIED the proof (`st_dst == st_src == impostor`): the "post-rename identity proof" was vacuous in exactly the window it claimed to close | §5.2 steps 3/5 (explicit `identity_source = CREATION`), §5.2.4 (new steps 1–9 incl. CP3e), §7.5 CP3, §10.1, D40, G-V17-02 | Destination verification now compares `(st_dst.st_dev, st_dst.st_ino)` **directly against `expect`**, the creation identity captured by `fstat(tmp_fd)` before close (and, for the run directory, by `fstat` of the `O_DIRECTORY` descriptor opened immediately after `mkdir`); `st_src` is demoted to a pre-syscall gate only, and quarantine moves — whose source identity cannot be known in advance — are the sole `OBSERVED` mode; a new CP3e re-proof re-reads the published receipt through the same descriptor-relative snapshot and requires its digest to equal the digest written, and the out-of-band `receipt_pin` is printed only after it |
 | V17-03 | `observe()` handled the receipt as a sequence of independent looks: `receipt_exists()` before the read, `read_bytes(receipt_path)` by PATH, a sha256 of a buffer it then re-parsed, and a SECOND `receipt_exists()` after the audit — so a receipt swapped between the checks could flip T4↔T6/T3, a symlink/FIFO/non-regular substitution was reachable, and "presence" and "content" were never the same object | §9.2.0 (read discipline), §9.2.1 (`snapshot`), §9.2.2 (rewritten `OBSERVE`), §9.3, §10.2, D41, G-V17-03 | Every receipt (and journal) fact now comes from ONE descriptor-relative `snapshot(pfd, name, max_bytes)`: a single `O_RDONLY\|O_NOFOLLOW\|O_CLOEXEC\|O_NONBLOCK` open decides existence, one bounded read yields immutable `bytes`, and `sha256` is computed over exactly those bytes — so presence, content, authentication against the mandatory `receipt_pin` and parsing all bind the SAME object; the classifier branches on frozen facts only (`ABSENT` / `FAULT(kind)` / `Snapshot`), a second presence check is impossible by construction, and path-based reads plus any post-snapshot re-check are BANNED in `observe()` |
 | V17-04 | A.5 presented Δ`mallinfo2().uordblks` as though it bounded the native peak: a before/after difference cannot see a buffer allocated and freed inside the window, `uordblks` excludes mmapped regions and every non-main arena, and the "the ceiling does not depend on rounding the headroom term down" claim therefore over-claimed certainty; the probe scripts also stayed outside the repository, so the numbers were unverifiable by a reviewer | Appendix A.0–A.7 (rewritten), §6.5 phase 1, §6.6, §12, D42, G-V17-04 | A.5 states the sampling boundary item by item (`uordblks` vs `hblkhd`, `MMAP_THRESHOLD`, per-thread arenas, allocator reuse, arena granularity, kernel socket buffers, amortised OpenSSL state), RETRACTS the v1.7 over-claim, and replaces inference with measurement: six sample points reported as a lower bound, an `LD_PRELOAD` peak interposer (`alloc_peak.c`) that counts real peak bytes across all arenas and threads (measured 8,396,848 / 147,848 / 11,186,544 B for the three phases, and 227,128 B for the request region against `HTTP_HEADROOM = 262,144`), plus the analytic four-term table (≤ 131,072 B, ×2) that explains the constant; A.0/A.7 specify the complete suite (9 Python modules + 1 C shim + `expected.json` + `README.md`) as repository files, and the whole suite was executed here: `run_all --check` exits 0 |
 
-### 1.1 V16 findings resolved in v1.7 (retained)
+### 1.2 V16 findings resolved in v1.7 (retained)
 
 | ID | Finding (v1.6 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
 | V16-01 | The resolver treated `journal_pin`/`receipt_pin` as optional (`if pin is not None and sha256(raw) != pin`): a refusal authenticated only by its recomputable self-digest classified authoritative T0, and a receipt with no `receipt_pin` could accept T1/T6 — self-digests are tamper-evidence any same-UID writer can forge, so they granted authoritative status | §9.1, §9.2 rules R2/R3, §9.3 T0/T1/T3/T6 rows, §2.4, §10.1, D31, G-V16-01 | All three pins mandatory and fail closed: T0 requires `journal_pin` supplied ∧ byte-SHA-256 match; T1/T6 require `receipt_pin` supplied ∧ byte-SHA-256 match; pin absent or mismatched → T3 (never T0/T1/T6); self-digest recheck retained as necessary but not sufficient |
 | V16-02 | `observe()`'s two quarantine calls were naked: `EEXIST` (`PublishConflict`) and `EPERM`/`EIO`/`ENOSYS`/`EXDEV`/`ENOSPC` (`PublishUnavailable`/`OSError`) escaped `observe()` as exceptions instead of resolving terminal states — the resolver could raise, breaking its exactly-one-T-row contract | §9.2 `try_quarantine` (both branches), §9.3 T5 row, D32, G-V16-02 | New `try_quarantine` helper that NEVER raises (`PublishConflict` → CONFLICT; `PublishUnavailable`/`PublishIdentityMismatch`/`OSError` → QUARANTINE-FAILED): final-branch QUARANTINE-FAILED → T5 immediately (final + unmovable stale staging fails closed), staging-branch → T5 on every outcome; seal-time step 5 stays strictly fatal (D28) |
 | V16-03 | §7.5/K10–K12/T4 promised automatic T4→T6 receipt reconstitution ("`observe()` may complete CP2+CP3"), but the receipt's complete field set (admitted decisions, skip summaries, memory/diagnostics, pins, `wrapper_count`) exists only in the in-memory draft that dies with the process — no CP1-durable draft exists, so reconstitution is impossible | §5.3, §7.5, §8.5 K10–K12, §9.2, §9.3 T4 row, D14/D33, G-V16-03 | T4 made a TERMINAL incomplete state requiring operator review: no code path may write/fsync/publish a receipt after CP1, K10–K12 resolve T4 only, `observe()` is idempotent on T4; T4 still requires `pin` + full audit pass incl. check (g) with `egress_count` |
-| V16-04 | The 12 MiB ceiling rested on quoted numbers with no reproducible measurement record in the document: probe methodology, raw CPython 3.12.3 values and the derivation of the 262,144 B native `HTTP_HEADROOM` term were external to the review artifact | new Appendix A, §6.5, §12, D34, G-V16-04 | New Appendix A: environment and protocol (CPython 3.12.3, `tracemalloc` over the exact normative sequences, worst-case inputs, fixed seeds), probe inventory (probe1–probe7), raw phase and banned-pattern tables (all values re-measured for this revision), and native-headroom accounting over a real local-TLS request via glibc `mallinfo2` (native-arena peak 277,120 B; conservative phase-1 total 8,739,616 ≤ 8,781,824 B) — the NATIVE half of this row is SUPERSEDED by V17-04/§1.0 and A.5: a Δ`uordblks` sample is a lower bound and is no longer offered as evidence |
-| V16-05 | §5.1.2 interleaved structure and body-decode per line (line 1's bad body masked line 5's bad keys — Step-1 validates ALL lines' structure before decoding ANY body, runstore.py:375–379) and parsed with plain `json.loads`, accepting duplicate keys and `NaN`/`Infinity` that Step-1's `_parse_json` rejects; the §0.2 exact accept-reject/error-precedence contract was therefore not met | §5.1.2 rewritten, §0.2, §6.5 phase 3, D24/D35, G-V16-05 | Five bounded stages with Step-1's exact precedence (both digests → records structure for ALL lines → records decode for ALL lines → events structure → events decode → count), Step-1's JSON dialect (`_no_duplicate_keys`, `parse_constant` rejection, verbatim messages, normalization net), structure dicts discarded and decode re-reads (O(1) memory, two reads per file); sole documented acceptance divergence: lines longer than `MAX_LINE` (impossible under the frozen schema; accepting them unbounded would violate the same review's budget) |
+| V16-04 | The 12 MiB ceiling rested on quoted numbers with no reproducible measurement record in the document: probe methodology, raw CPython 3.12.3 values and the derivation of the 262,144 B native `HTTP_HEADROOM` term were external to the review artifact | new Appendix A, §6.5, §12, D34, G-V16-04 | New Appendix A: environment and protocol (CPython 3.12.3, `tracemalloc` over the exact normative sequences, worst-case inputs, fixed seeds), probe inventory (probe1–probe7), raw phase and banned-pattern tables (all values re-measured for this revision), and native-headroom accounting over a real local-TLS request via glibc `mallinfo2` (native-arena peak 277,120 B; conservative phase-1 total 8,739,616 ≤ 8,781,824 B) — the NATIVE half of this row is SUPERSEDED by V17-04/§1.1 and A.5: a Δ`uordblks` sample is a lower bound and is no longer offered as evidence |
+| V16-05 | §5.1.2 interleaved structure and body-decode per line (line 1's bad body masked line 5's bad keys — Step-1 validates ALL lines' structure before decoding ANY body, runstore.py:375–379) and parsed with plain `json.loads`, accepting duplicate keys and `NaN`/`Infinity` that Step-1's `_parse_json` rejects; the §0.2 exact accept-reject/error-precedence contract was therefore not met | §5.1.2 rewritten, §0.2, §6.5 phase 3, D24/D35, G-V16-05 | Five bounded stages with Step-1's exact precedence (both digests → records structure for ALL lines → records decode for ALL lines → events structure → events decode → count), Step-1's JSON dialect (`_no_duplicate_keys`, `parse_constant` rejection, verbatim messages, normalization net), structure dicts discarded and decode re-reads (O(1) memory, two reads per file); sole documented acceptance divergence: lines longer than `MAX_LINE` — REACHABLE for `/1`-accepted legacy evidence, since Step-1 validates no string length (V18-01), and REFUSED by explicit policy with the P-6 message (§5.1.2.6/D43) because accepting them unbounded would violate the same review's budget |
 | V16-06 | Resolver↔audit check (g) drift: `wrapper_count` could reach `audit_run` as `None`/non-int (failing only by incident), an UNAUTHENTICATED receipt's count could feed check (g) because `receipt_pin` was verified after the audit, and T4's precondition of an independent integer count == `len(records)` was implicit | §9.2 restructured (authenticate receipt → resolve `wc` → mirror check (g) → audit), §9.3 T4 row, D36, G-V16-06 | Receipt authenticated (R3) before ANY of its fields is used; `wc` sourced only from `egress_count` or authenticated `receipt.wrapper_count`; check (g)'s three tests (supplied, int-not-bool, `== len(records)`) mirrored explicitly and failed closed to T3/T5 BEFORE `audit_run`; T4/T1/T6 rows each state their count precondition |
 | V16-07 | §5.2.4 published the receipt with `expect = None`: between writing `.<run_id>.receipt.tmp` and `renameat2` a same-UID process could substitute the temp file; neither step 3 nor step 5 pinned its inode, so foreign bytes could be published as the receipt | §5.2.4, §5.2 step 3, D37, G-V16-07 | `st_tmp = os.fstat(tmp_fd)` captured on the creation descriptor BEFORE close and passed as `expect` into `publish_file()`: step 3 pins `(st_dev, st_ino)` pre-syscall, step 5 proves post-rename identity (type relative to `st_src`, so files publish too); substitution → step-3 require aborts before the syscall, or step-5 `PublishIdentityMismatch` after it → CP3 fails → T4 (or T3 when foreign bytes stand under the final name — `receipt_pin` never matches) — terminal, never T6 |
 
-### 1.2 V15 findings resolved in v1.6 (retained)
+### 1.3 V15 findings resolved in v1.6 (retained)
 
 | ID | Finding (v1.5 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
@@ -117,7 +135,7 @@ cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pi
 | V15-06 | §5.2.5 bounded the mode (`& 0o022 == 0`) but never stated the UID trust boundary: no owner check (`st_uid`), no explicit statement about same-UID processes (which can rename inside `RUN_ROOT` without taking the flock) | §5.2 step 1, §5.2.5, D29, G-V15-06 | Owner validation `st_pfd.st_uid == os.geteuid()` at lock time; explicit two-tier boundary: different-UID writers kernel-prevented (owner-only mode + `O_NOFOLLOW` + identity re-proof), same-UID writers detected-not-prevented (step-5 inode proof, CP1b, pins → quarantine/T3/T5), §10.1 residual restated |
 | V15-07 | The 12 MiB budget was asserted with formula-only phase peaks that did not match the code those paths would run (v1.5 phase 2 assumed 124,928 B while its own `record_to_json` calls cost ~11 MB; phase 3's `+1,024` term was 757 B short of measurement; no measured evidence) | §6.1, §6.5, §12, G-V13-04, G-V14-03, G-V15-07, D30 | Official `TRANSIENT_BUDGET_BYTES = 12,582,912` (D30) with per-instant measured proofs: peak₁ ≤ 8,781,824 (measured 8,724,640), peak₂ ≤ 151,552 (measured 148,113), peak₃ ≤ 11,202,224 (measured 11,188,261); budget = max ≤ 12,582,912, margin 1,380,688 B (12.3 %); banned patterns measured: `b64decode(str)` 15,381,335, `json.loads(bytes)` held 16,781,149, retained chunks 5,656,645 |
 
-### 1.3 V14 findings resolved in v1.5 (retained)
+### 1.4 V14 findings resolved in v1.5 (retained)
 
 | ID | Finding (v1.4 review) | Where resolved | Resolution in one line |
 |---|---|---|---|
@@ -130,7 +148,7 @@ cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pi
 | V14-07 | TOCTOU: the step-3 `stat(staging)` → `renameat2` window was closed only by a post-hoc assert that aborted *after* publishing an impostor; no `RUN_ROOT` permission/symlink boundary; no content re-proof after rename | §5.2 steps 1/3/5, new §5.2.5, §7.5 CP1b, G-V14-07 | Absolute `RUN_ROOT`, `O_NOFOLLOW` open, owner-only mode check; pre-syscall re-stat; identity mismatch → quarantine the published name (never left standing); CP1b content re-verification against the pin before CP3; residual limits stated |
 | V14-08 | The 250 ms second-signal deferral had no enforcement mechanism: a main-thread handler cannot run while the main thread is inside a blocking synchronous syscall | §2.1, §7.4, §8.4 E3, D22, G-V14-08 | Named daemon watchdog thread `obs-watchdog` arms once from the handler and exits the process via `os._exit` at the bound; deferred exit point after syscall + bookkeeping; EINTR/PEP-475 and D-state limits stated |
 
-### 1.4 V13 findings resolved in v1.4 (retained)
+### 1.5 V13 findings resolved in v1.4 (retained)
 
 | ID | Finding (re-audit) | Where resolved | Resolution in one line |
 |---|---|---|---|
@@ -538,7 +556,7 @@ Failure mapping: a write `OSError` → K2/K3/K4; manifest write → K5; any `fsy
 old behavior (mkdir-if-absent + these same bytes) so Step-1's regression tests stay green; live sealing calls the
 fd-based entry with the locked `pfd`.
 
-5.1.2 **Normative reader — the versioned `obs-loader/2` contract (V15-02, V16-05, V17-01; the fourth Step-2 extension
+5.1.2 **Normative reader — the versioned `obs-loader/2` contract (V15-02, V16-05, V17-01, V18-01; the fourth Step-2 extension
 point, §0.2; D24/D35/D38/D39).** The Step-1 `load_run` (runstore.py:370–388) reads each file whole (`_read` →
 `path.read_bytes()`, 246–250), splits it in memory (`raw.split(b"\n")`, `_jsonl` 279–286), parses every line and holds
 all records: for a 50 MiB session that peaks at ≥ 139.8 MB of transient (≥ 2 × 4/3 × `SESSION_BODY_BUDGET_BYTES` of
@@ -567,8 +585,10 @@ Rules (all normative):
 
 * **R-1 — supersession.** `/2` is the ONLY loader any Step-2 code path may call: `write_run`'s pre-publication
   self-check (§5.4), CP1b (§7.5) and `observe()` (§9.2). It supersedes `/1`'s unconstrained string loader: a line whose
-  CONTENT exceeds `MAX_LINE` is REJECTED where `/1` would have parsed it. That is the single intended acceptance change;
-  §5.1.2.1 proves no schema-valid artifact can trigger it.
+  CONTENT exceeds `MAX_LINE` is REJECTED where `/1` would have parsed it. That is the single intended acceptance change,
+  and it is an explicit POLICY, not an impossibility (§5.1.2.6, V18-01): §5.1.2.1 shows the bound is a theorem for the
+  records §5.1.1 writes and for nothing else. Step-1 checks no string length anywhere, so a `/1`-ACCEPTED legacy artifact
+  can exceed the cap; `/2` refuses it by design, with the deterministic P-6 message and its line number.
 * **R-2 — no negotiation, no fallback.** There is no runtime switch, environment variable, keyword argument, platform
   probe or `try/except ImportError` that selects `/1`. A fallback would restore the whole-file load that D30 forbids, so
   a `/2` that cannot run FAILS CLOSED: the run resolves T3/T5 exactly like any other audit failure. Verifying live
@@ -583,7 +603,13 @@ Rules (all normative):
   record line written by §5.1.1 satisfies `line content ≤ MAX_LINE` by construction, so a `/2`-conforming artifact is
   always `/1`-conforming. The converse does not hold — and that single direction IS the documented divergence.
 * **R-5 — code/doc identity.** G-V17-01a asserts that the `LOADER_CONTRACT_ID` constant, the literal string in this
-  section and the §1.0 map agree; a mismatch fails CI, so the version cannot drift out of the review artifact.
+  section and the §1.1 map agree; a mismatch fails CI, so the version cannot drift out of the review artifact.
+* **R-6 — the cap is a REJECTION BOUNDARY, not a conformance claim (V18-01).** A `/1`-accepted artifact that exceeds
+  `MAX_LINE` is REFUSED, never repaired: no truncation, no line splitting, no skip-and-continue, no "oversize tolerance"
+  flag, no environment variable, and no attempt to stream a single line in pieces (a partial line cannot be parsed as one
+  record, and the digest that authenticates the file is over the whole file, so a subset verdict could not be defended).
+  §5.1.2.6 states the policy, its reachability evidence, its terminal consequences and the only legitimate route for such
+  evidence — a reviewed `obs-loader/3`, never a runtime switch.
 
 5.1.2.1 **Exact size bounds and the derived `MAX_LINE` (V17-01).**
 
@@ -605,10 +631,19 @@ allow-list; `group_name` ≤ 16 B; `group_kind` ≤ 8 B; `boundary_ms` ≤ 6 dig
 the longest incident token is 16 B, `CANCEL_FAILED` is 13 B — and ≤ 2 whitelisted header pairs ≤ 144 B; the fixed
 `"body_b64":""` adds 13 B and base64 needs no escaping). 512 B therefore leaves 164 B of slack (348 B measured) for header-whitelist growth without minting a new contract:
 the widest legal record line is 5,592,756 B, exactly 164 B below the cap, and G-V17-01b fails if the measured framing
-ever exceeds 512 B. **Schema-valid upper bound:** every record the §5.1.1 writer can emit has `len(body) ≤ MAX_BODY_BYTES`
-⇒ `len(body_b64) ≤ B64_BYTES` ⇒ `line content ≤ MAX_LINE`. Step-1 wrote the same 12-key schema through the same
-`record_to_json`, so archived legacy records satisfy the same inequality — fixture D-18 re-proves it on the archive
-rather than assuming it.
+ever exceeds 512 B. **Two predicates, and only one of them is a theorem (V18-01).** v1.8 wrote that lines above the cap are "impossible under
+the frozen schema" and "proved unreachable for schema-valid artifacts". The schema is not the question; the VALIDATORS
+are, and Step-1's validators bound no string at all. The claim is therefore withdrawn and replaced by the split below.
+
+| Predicate | Who defines it | Is `line content ≤ MAX_LINE` a theorem? | `/2` verdict |
+|---|---|---|---|
+| **CONFORMING** | §5.1.1's writer: `len(body) ≤ MAX_BODY_BYTES` is enforced when the record is built, `body_b64` comes from `base64.b64encode` (no line breaks), and the other 11 keys are bounded by the reviewed plan and header whitelist | YES — `len(body_b64) ≤ B64_BYTES` ⇒ `≤ MAX_LINE` by the arithmetic above, with 164 B of slack | ACCEPT |
+| **LEGACY-ADMITTED** | Step-1's `load_run` accepting the bytes: `_jsonl` splits on `b"\n"` with no upper bound (runstore.py:279–286), `_req_str` accepts any string (304–308), `_record_from_json` bounds only `seq`/`start_ns`/`end_ns`/`status`/`boundary_ms` (348–357) | NO — `body_b64`, `path`, `error`, `role`, header names and values, `group_name` and `group_kind` are unbounded strings | REJECT (P-6) if any line exceeds the cap — policy §5.1.2.6 |
+
+So the inequality is proved for what Step 2 Writes and is not proved for what Step 1 Accepted. Fixture D-18 re-proves it
+on the archive that exists (every run under `evidence/`, written by the same `record_to_json` with transport-capped
+bodies) — that is evidence about those bytes, never a claim about all legacy data — and D-21…D-23 construct the
+counter-examples that make the reachability explicit and executable.
 
 **The cap is INCLUSIVE and the read is EXACT.** `f.readline(MAX_LINE + 2)` returns at most `MAX_LINE + 2` bytes, so a
 conforming line (content ≤ `MAX_LINE` plus its `\n`) is never split, and any read that fills the buffer without a
@@ -641,7 +676,7 @@ produce.
 | P-5 | records truncation | file non-empty ∧ its FINAL byte ≠ `\n` | `records.jsonl is truncated (no final newline)` | yes |
 | P-6 | records cap | the FIRST line whose content exceeds `MAX_LINE`; its line number is reported | `records.jsonl line {n} exceeds the maximum line length` | **/2 only** |
 | P-7 | records line structure | per line ascending; within one line the JSON parse precedes the key-set check; the FIRST offending line wins | `records.jsonl line {n} is not valid JSON: {exc}` ∨ `duplicate JSON key {k!r}` ∨ `records.jsonl line {n}: {c} is not allowed` ∨ `records.jsonl line {n}: unexpected or missing keys` | yes |
-| P-8 | records decode + fields | ALL records, line order, `body_b64` decoded FIRST within each record | `records.jsonl line {n}: invalid body: …`, then every `_req_*` message (291–328, 348–357) | yes |
+| P-8 | records decode + fields | ALL records, line order, `body_b64` decoded FIRST within each record | `records.jsonl line {n}: invalid body: …`, then every `_req_*` message (291–346, 348–357) | yes |
 | P-9 | events truncation | as P-5 for `events.jsonl` | `events.jsonl is truncated (no final newline)` | yes |
 | P-10 | events cap | as P-6 | `events.jsonl line {n} exceeds the maximum line length` | **/2 only** |
 | P-11 | events line structure | as P-7 | as P-7 with `events.jsonl` | yes |
@@ -818,17 +853,82 @@ runs, never the evidence originals.
 | D-18 | LEGACY CORPUS: every archived run under `evidence/` (copies) plus fixtures written by Step-1's `write_run` reference serializer | ACCEPT | ACCEPT | `LoadedRun`, manifest, `records_file_sha256` and `records_digest` all equal; proves legacy records load byte-identically under `/2` |
 | D-19 | DETERMINISTIC FUZZ: 2,000 seeded mutations of D-01 (single-byte flips, truncations, line duplications, inserted `\n`, oversized padding) | mixed | mixed | monotonicity: `accept(/2) ⇒ accept(/1)`; wherever BOTH reject, identical `(message, position)`; the only permitted asymmetry is a `/2`-only rejection carrying the cap message (D-04/D-05 class) |
 | D-20 | over-cap line at line 9 + malformed line at line 3 | REJECT (line 3) | REJECT (cap, line 9) | asserts the STATED precedence divergence: `/2` reports P-6 and `/1` reports P-7 — documented, not accidental |
+| D-21 | ONE otherwise-valid record whose `body_b64` holds 5 MiB — written by Step-1's own `write_run` — producing a line of content 6,990,684 B (1,397,764 B over the cap) | ACCEPT (asserted) | REJECT | V18-01 REACHABILITY: the frozen `/1` oracle MUST accept this fixture and `/2` MUST reject it with `records.jsonl line 1 exceeds the maximum line length`; if `/1` ever rejects the fixture the test FAILS as vacuous |
+| D-22 | ONE record with a 6 MiB `error` string and an EMPTY body (line content 6,291,630 B, 698,710 B over the cap — no body bytes at all) | ACCEPT (asserted) | REJECT | the class is any unbounded string, not just `body_b64`: no body bytes are involved and the message is the same |
+| D-23 | 4 MiB body at line 1 + over-cap line at line 2 | ACCEPT (asserted) | REJECT (cap, line 2) | the cap is a FILE-level pre-parse fact: P-6 outranks P-8, so no body is decoded at all |
+
+D-21…D-23 exist because V18-01 is a REACHABILITY finding, not an arithmetic one: they are the fixtures that would have
+failed had v1.8's "impossible" claim been left in place. Their `/1` column is an assertion about the ORACLE — the test
+runs the frozen copy first and fails loudly if it rejects the fixture — so the rejection policy can never decay into an
+untested belief that oversize legacy artifacts do not exist.
 
 D-19's generator is a fixed `random.Random(20261105)` seeded loop, so the corpus bytes are reproducible; no fixture
 requires network access, a live clock or a filesystem race. G-V17-01 fails if any fixture's recorded message changes
 without a `/3` revision.
 
 5.1.2.5 **What the divergence costs and why it is safe (normative summary).** `/2`'s accept set is a STRICT SUBSET of
-`/1`'s for stable inputs: it loses exactly the over-long-line class, which no schema-valid artifact can produce
-(§5.1.2.1), and it additionally rejects mid-read mutations that `/1` cannot observe at all (R-2). Every rejection is
-fail-closed and lands in the existing vocabulary — digest, truncation, cap, structure, decode, count — so `observe()`
-resolves T3/T5 and a seal aborts to quarantine (§5.5) exactly as before; no new terminal state, message family or
-receipt/journal field is introduced (D39).
+`/1`'s for stable inputs. It loses exactly one class — a line whose content exceeds `MAX_LINE` — and that class is
+REACHABLE for `/1`-accepted legacy evidence (§5.1.2.1, §5.1.2.6): it is refused deliberately, because accepting it would
+break the phase-3 bound within 6,852 B of tolerance and the 12 MiB budget within 697,196 B (§5.1.2.6 P3), and because a
+partially read line cannot be authenticated by a whole-file digest. `/2` additionally rejects mid-read mutations that
+`/1` cannot observe at all (R-2). Every rejection is fail-closed and lands in the existing vocabulary — digest,
+truncation, cap, structure, decode, count — so `observe()` resolves T3/T5 and a seal aborts to quarantine (§5.5) exactly
+as before; no new terminal state, message family or receipt/journal field is introduced (D39/D43).
+
+5.1.2.6 **Rejection policy for over-cap artifacts (V18-01; normative).** This subsection is the contract for the one
+input class `/2` refuses and `/1` accepts. It exists because v1.8 justified the rejection with an impossibility claim
+(§5.1.2.1) that the Step-1 code does not support.
+
+**P1 — What is rejected.** A file whose line CONTENT exceeds `MAX_LINE = 5,592,920 B` — in `records.jsonl` (P-6) or
+`events.jsonl` (P-10) — is rejected as a whole. "Content" means the bytes of the line with its `\n` terminator removed
+(case A–D of §5.1.2.1). The rejection is a property of the artifact, not of a caller's preference, and it applies identically
+to evidence produced by Step 1, by an older harness, by a third party, or by hand.
+
+**P2 — Why the class is reachable (evidence, not assertion).** Step-1 enforces NO length bound at any layer:
+`_jsonl` splits the whole file on `b"\n"` with no cap (runstore.py:279–286); `_req_str` returns any `str` unchanged
+(304–308); `_req_headers` bounds neither the number of pairs nor the length of a name or value (320–331);
+`_record_from_json` range-checks five integers and type-checks the rest (348–357); `record_to_json` writes whatever
+`r.body` holds (206–209). The only cap in Step 1 lives in `transport.py` at FETCH time (4 MiB per response), which
+constrains what Step-1's own writer could have produced in a compliant run — not what an artifact on disk may contain, and
+not what a `/1`-accepting verifier will happily parse. The counter-examples are therefore constructible and are constructed:
+D-21 (5 MiB body), D-22 (6 MiB `error`, empty body), D-23 (over-cap line after a maximal body). Both line lengths above were
+MEASURED for this revision: the artifacts were written by Step-1's own `write_run` and then accepted by Step-1's own
+`load_run` (with the manifest pin it returned), which is the shortest possible demonstration that a `/1`-admitted artifact can
+exceed the cap. The corpus asserts the same for the frozen oracle, so the reachability claim is tested rather than argued.
+
+**P3 — Why rejection, and not tolerance, is the only safe verdict.** A single line of L bytes costs at least 2L at parse
+time (line bytes + decoded text, then the parsed `body_b64` string): the measured peak for L = 5,592,920 B is
+11,188,520 B = 2L + 2,680 B. Two consequences follow from the constants this document already gates:
+`peak₃ ≤ 11,202,224 B` permits L ≤ 5,599,772 B — **6,852 B above the cap** — and `TRANSIENT_BUDGET_BYTES = 12,582,912 B`
+permits L ≤ 6,290,116 B. There is no room for "a little over": the first 6.9 KiB of tolerance would break the very bound
+that G-V14-03 and G-V17-04 enforce. Two further reasons are independent of arithmetic: a whole-file digest cannot
+authenticate a line that was never fully read, and a partial line is not a record, so any "best effort" reading would produce
+a verdict about a file that is not the file the manifest pins.
+
+**P4 — What rejection looks like (terminal, and already in the vocabulary).** `/2` raises
+`records.jsonl line {n} exceeds the maximum line length` (or the `events.jsonl` form) naming the FIRST offending line, before
+any parse error — P-6/P-10 precede P-7/P-8. Because §5.1.1's writer cannot produce such a line (CONFORMING, §5.1.2.1),
+every occurrence is foreign or legacy evidence: during sealing the self-check fails and the run is quarantined before
+publication (§5.4/§5.5, never a partial final); in `observe()` `load_run` fails structurally, so the resolver returns T5 when
+a stale sibling or quarantine forces the conflict branch and T3 otherwise — never T4 and never T6. No receipt, no journal
+entry and no terminal state is minted for this class; it reuses D24/D39 exactly.
+
+**P5 — What is NOT permitted.** Truncating, splitting, skipping or "repairing" the offending line; an oversize-tolerance
+flag, environment variable, keyword argument or lenient mode (R-2/R-6); verifying a SUBSET of the records and presenting it as
+verification of the artifact; re-writing the artifact under its own name; and any fallback to `/1`, which would restore the
+139.8 MB whole-file class that D30 forbids. A reviewer who wants any of those is asking for a different loader, which is
+`obs-loader/3`.
+
+**P6 — The legitimate route for oversize legacy evidence.** If such evidence must be verified, the options are (a) a reviewed
+`obs-loader/3` that changes the cap AND the phase-3 bound AND `TRANSIENT_BUDGET_BYTES` together, in one revision, with a
+re-measured Appendix A; or (b) an offline conversion that produces a NEW run directory with its own manifest, pin, digests and
+provenance — a new evidence object that references the old one, never a reinterpretation of it. Neither is a runtime switch,
+and neither is implemented by Step 2.
+
+**P7 — Enforcement.** G-V18-01 replays D-21…D-23 in the order oracle-then-implementation, asserts ACCEPT-then-REJECT with the
+exact message and line number, and asserts that no code path in the load chain can reach `/1` (AST gate, G-V17-01f). The
+PROSE is gated too: this document must contain no claim that the class is impossible, and a CI grep asserts that the tokens
+"impossible under the frozen schema" and "proved unreachable" do not reappear outside a quotation marked as retracted.
 
 5.2 **Publication — exact `renameat2(RENAME_NOREPLACE)` contract (V13-02, V13-03).** This sequence publishes either a run
 directory, the quarantine directory, or the receipt file; the normative unit is `publish_dir()`/`publish_file()`,
@@ -1127,12 +1227,15 @@ Phase 1 — request (per response, §6.4): scratch may reallocate while extendin
     peak₁ ≤ 2 × MAX_BODY_BYTES + CHUNK_BYTES + HTTP_HEADROOM + allocator margin
           = 8,388,608 + 65,536 + 262,144 + 65,536 = 8,781,824 B
     (HTTP_HEADROOM = 262,144 B: a design constant derived ANALYTICALLY in Appendix A.5 — four enumerated native
-     consumers ≤ 131,072 B, doubled for unenumerated ones (stdlib `_ssl` C objects, resolver scratch, allocator
-     bookkeeping) — and CHECKED, not inferred, by G-V17-04: the request region's malloc-level peak (measured
-     227,128 B, an upper bound on its native share) must be ≤ 262,144 B, and the whole phase-1 path's interposed
-     peak (measured 8,396,848 B) must be ≤ the 8,781,824 B bound. v1.7's claim that a Δ`uordblks` sample bounded
-     the native peak is RETRACTED: a before/after difference is a lower bound, and on the probe fixture the six
-     sample points reached 115,664–159,360 B against an 84,640–87,088 B end delta (A.5.2–A.5.3).)
+     consumers ≤ 131,072 B, doubled for the unenumerated ones (stdlib `_ssl` C objects, resolver scratch, allocator
+     bookkeeping); A.5.7.4 shows the doubling also absorbs one page of rounding per consumer, so the constant holds
+     even if every consumer were served by a direct `mmap` — and CHECKED, not inferred, by G-V17-04/G-V18-03 on TWO
+     interposed channels: the request region's malloc peak (measured 195,184 B) plus its direct-anonymous-`mmap`
+     peak (measured 16,384 B) must together be ≤ 262,144 B (211,568 B measured, 50,576 B of slack), and the whole
+     phase-1 path's interposed malloc peak (measured 8,400,920 B, mmap channel 0 B) must be ≤ the 8,781,824 B bound.
+     v1.7's claim that a Δ`uordblks` sample bounded the native peak is RETRACTED: a before/after difference is a
+     lower bound, and on the probe fixture the six sample points reached 112,272–159,360 B against a
+     72,272–87,088 B end delta (A.5.2–A.5.3).)
 
 Phase 2 — seal, §5.1.1 metadata-only writer (V15-01): ONE 48 KiB body slice + ONE ≤ 64 KiB base64 chunk + the
           CPython base64 encoder's 32,768 B working buffer + ≤ 4,096 B of digest line, head/tail fragments and
@@ -1696,7 +1799,7 @@ and is the second admissible independent egress source (§10.1(1b), V15-03).
 free-form `error` string (records) or the receipt's `reason`/`diagnostics` (protocol §0/§3.3 alignment: record shapes stay
 frozen under `obs-run-manifest/1`).
 
-## 11. Gates and decisions (v1.8 adds G-V17-01–04 and D38–D42; v1.7 adds G-V16-01–07 and D31–D37; v1.6 adds G-V15-01–07 and D24–D30; v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable)
+## 11. Gates and decisions (v1.9 adds G-V18-01–03 and D43–D45; v1.8 adds G-V17-01–04 and D38–D42; v1.7 adds G-V16-01–07 and D31–D37; v1.6 adds G-V15-01–07 and D24–D30; v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable)
 
 | Gate | Assertion | Killer-test sketch |
 |---|---|---|
@@ -1723,15 +1826,19 @@ frozen under `obs-run-manifest/1`).
 | G-V16-01 | mandatory out-of-band pins (V16-01) | resolver property test (G-V14-06 dimensions): refusal with `journal_pin = None` or one flipped byte → T3, never T0; receipt with `receipt_pin = None` or flipped byte → T3, never T1/T6 — a CORRECTLY RECOMPUTED self-digest does not help; grep gate: the old optional-pin form (`journal_pin is not None and …` / `receipt_pin is not None and …`) absent from §9.1/§9.2; mutation: restore an optional-pin check → killer fails |
 | G-V16-02 | catch-and-classify quarantine (V16-02) | inject EEXIST/EPERM/EIO/ENOSPC/EXDEV/ENOSYS into BOTH `observe()` staging-quarantine sites → `observe()` returns exactly one T-row and NEVER raises (final + unmovable staging → T5 immediately; staging-only → T5 on every outcome); spy: no quarantine exception crosses the `observe()` boundary; seal-time step-5 impostor quarantine still raises fatally (D28 unchanged) |
 | G-V16-03 | T4 terminal, no receipt reconstitution (V16-03) | AST/grep gate: no receipt `publish_file`/`fsync(pfd)` call reachable after CP1 outside the CP3 sequence; crash injection at K10/K11/K12 → `observe()` = T4 and STAYS T4 on every subsequent observation (idempotent, no CP2/CP3 completion, no receipt file ever appears); mutation: add receipt-republish recovery → killer fails |
-| G-V16-04 | reproducible memory accounting (V16-04; instrument rules restated by V17-04) | CI reruns the Appendix A protocol (`python -m tools.obs.probes.run_all --check`, CPython 3.12.3, deterministic inputs) → every recorded value must match A.2/A.3 (8,396,983 / 148,004 / 11,188,520 / 11,188,600 / 11,188,520 B tracemalloc; 8,396,848 / 147,848 / 11,186,544 B interposed), the banned `no_del` variant must still FAIL its bound, and `native_headroom`'s request region must satisfy 227,128 B ≤ `HTTP_HEADROOM`; a `mallinfo2` figure is REPORTED and never compared (A.5.3), a drifted value or a missing Appendix row fails the gate |
-| G-V16-05 | loader precedence + dialect equivalence (V16-05) | differential test: for every input class (bad body on line 1 + bad keys on line 5; duplicate key; `NaN`; non-UTF-8; truncated; line > `MAX_LINE`; digest mismatch; count mismatch) assert Step-1's `load_run` and the new `load_run` raise the SAME `ManifestError` message at the SAME precedence position on the same bytes — sole exemption: lines > `MAX_LINE` (new rejects, Step-1 cannot); mutation: decode a body before all-lines structure validation → killer fails |
+| G-V16-04 | reproducible memory accounting (V16-04; instrument rules restated by V17-04/V18-03) | CI reruns the Appendix A protocol (`python -m tools.obs.probes.run_all --check`, CPython 3.12.3, deterministic inputs) → every recorded value must match A.2/A.3 (8,396,983 / 148,004 / 11,188,520 / 11,188,600 / 11,188,520 B tracemalloc; 8,396,848 / 147,848 / 11,186,544 B interposed), the banned `no_del` variant must still FAIL its bound, and `native_headroom`'s request region must satisfy 227,128 B ≤ `HTTP_HEADROOM`; a `mallinfo2` figure is REPORTED and never compared (A.5.3), a drifted value or a missing Appendix row fails the gate |
+| G-V16-05 | loader precedence + dialect equivalence (V16-05) | differential test: for every input class (bad body on line 1 + bad keys on line 5; duplicate key; `NaN`; non-UTF-8; truncated; line > `MAX_LINE`; digest mismatch; count mismatch) assert Step-1's `load_run` and the new `load_run` raise the SAME `ManifestError` message at the SAME precedence position on the same bytes — sole exemption: lines > `MAX_LINE` (new rejects with the P-6 message, Step-1 accepts — D-04/D-05/D-21…D-23); mutation: decode a body before all-lines structure validation → killer fails |
 | G-V16-06 | audit check (g) alignment (V16-06) | property test: every `wc` that reaches `audit_run` is `int` (not `bool`, not `None`) and `== len(records)` — the R4 mirror enforces it pre-audit; `wc` ∈ {absent, bool, str, ≠ len} → T5-with-conflict or T3, and `audit_run` is NEVER called with an invalid `wc`; ordering spy: an unauthenticated receipt's `wrapper_count` never reaches the audit (R3 before use); mutation: delete the R4 mirror → killer fails |
 | G-V16-07 | receipt temp-inode binding (V16-07) | spy substitutes `.<run_id>.receipt.tmp` for a foreign file between `close(tmp_fd)` and `publish_file` → step-3 `expect` mismatch → publication refused BEFORE `renameat2` (or, for a swap after the step-3 stat, step-5 `PublishIdentityMismatch`) → CP3 fails → `observe()` = T4 (the real receipt never published) or T3 (foreign bytes standing under the final name fail `receipt_pin`) — NEVER T6; grep gate: §5.2.4 passes `expect = st_tmp`, never `expect = None` for a file target |
 
-| G-V17-01 | loader contract, `MAX_LINE` and the differential corpus (V17-01) | (a) code/doc identity: `LOADER_CONTRACT_ID == "obs-loader/2"`, `LOADER_CONTRACT_SUPERSEDES == "obs-loader/1"`, and the §1.0/§5.1.2.0 literals agree; (b) `MAX_LINE == 4 * ((MAX_BODY_BYTES + 2) // 3) + FRAMING_ALLOWANCE_BYTES == 5,592,920` and `FRAMING_ALLOWANCE_BYTES == 512`, asserted at import, plus a measured worst-case framing ≤ 512 B; (c) boundary replay of §5.1.2.1 cases A–D asserting ACCEPT/ACCEPT/REJECT/REJECT with the exact cap message and line number; (d) the full corpus D-01…D-20 against the hash-pinned `legacy_loader.py` oracle, asserting identical outcome, identical message INCLUDING JSON positions (D-07 proves the P-9a terminator rule), identical `LoadedRun`/manifest, and equality on the legacy archive (D-18); (e) monotonicity over D-19: `accept(/2) ⇒ accept(/1)`, with the only permitted asymmetry being the cap class; (f) AST gate: no `read_bytes`, no `raw.split(b"\n")`, no `record_to_json`, and no `/1` fallback path reachable in the load path; mutations that MUST kill: parse the terminator-inclusive buffer (D-07 → `line 2 column 1`), remove the cap (D-04/D-05 accepted → 139.8 MB class returns), decode a body before all-lines structure (D-11/D-12), reorder digests after parsing (D-13) |
+| G-V17-01 | loader contract, `MAX_LINE` and the differential corpus (V17-01) | (a) code/doc identity: `LOADER_CONTRACT_ID == "obs-loader/2"`, `LOADER_CONTRACT_SUPERSEDES == "obs-loader/1"`, and the §1.0/§5.1.2.0 literals agree; (b) `MAX_LINE == 4 * ((MAX_BODY_BYTES + 2) // 3) + FRAMING_ALLOWANCE_BYTES == 5,592,920` and `FRAMING_ALLOWANCE_BYTES == 512`, asserted at import, plus a measured worst-case framing ≤ 512 B; (c) boundary replay of §5.1.2.1 cases A–D asserting ACCEPT/ACCEPT/REJECT/REJECT with the exact cap message and line number; (d) the full corpus D-01…D-23 against the hash-pinned `legacy_loader.py` oracle, asserting identical outcome, identical message INCLUDING JSON positions (D-07 proves the P-9a terminator rule), identical `LoadedRun`/manifest, and equality on the legacy archive (D-18); (e) monotonicity over D-19: `accept(/2) ⇒ accept(/1)`, with the only permitted asymmetry being the cap class; (f) AST gate: no `read_bytes`, no `raw.split(b"\n")`, no `record_to_json`, and no `/1` fallback path reachable in the load path; mutations that MUST kill: parse the terminator-inclusive buffer (D-07 → `line 2 column 1`), remove the cap (D-04/D-05 accepted → 139.8 MB class returns), decode a body before all-lines structure (D-11/D-12), reorder digests after parsing (D-13) |
 | G-V17-02 | creation-identity binding + CP3e (V17-02) | spy substitutes `.<run_id>.receipt.tmp` with a foreign file BETWEEN the step-3 `stat` and the `renameat2` call → step 5 compares `st_dst` to `fstat(tmp_fd)` → `PublishIdentityMismatch`, impostor quarantined, NO `receipt_pin` printed, `observe()` ∈ {T3, T4}, never T6; the SAME fixture with step 5 anchored on `st_src` (v1.7's rule) PUBLISHES the impostor — re-introducing that anchor MUST kill the gate; CP3e fixture: rewrite the published receipt in place before step 8 → `snap.sha256 ≠ receipt_sha_written` → CP3 fails, no pin printed; AST/grep gate: every `publish_file` call site passes a non-None `expect` and `identity_source = CREATION`, and `publish_quarantine_of` is the only `OBSERVED` caller; `st_nlink == 1` and `S_ISREG(st_tmp.st_mode)` asserted at step 4 |
 | G-V17-03 | descriptor-relative receipt snapshotting (V17-03) | runtime spy: for every observation, exactly ONE `os.open` per artifact name through `pfd` and ZERO path-based reads/presence calls (`Path.read_bytes`, `open(path)`, `os.path.exists`, `os.lstat`, path `os.stat`); substitution matrix — replace the receipt with (i) absent, (ii) a symlink, (iii) a FIFO, (iv) a directory, (v) a `RECEIPT_MAX_BYTES + 1` file, (vi) foreign bytes, (vii) a swap immediately after the snapshot, (viii) a swap between the audit and the outcome branch — each yields exactly one T-row, (ii)–(v) → T3 via FAULT, (vii)/(viii) → the classification of the FROZEN snapshot (unchanged by the swap); orphan-receipt fixture (receipt, no final) → T3; peak memory of `snapshot` ≤ `RECEIPT_MAX_BYTES + CHUNK_BYTES`; mutation: reintroduce a second presence check or a path read → killer fails |
-| G-V17-04 | native instrumentation + repository probes (V17-04) | CI runs `python -m tools.obs.probes.run_all --check` (exit 0 required) on the pinned interpreter, asserting for every phase BOTH instruments: `tracemalloc` peaks (8,396,983 / 148,004 / 11,188,520 / 11,188,600 / 11,188,520 B) and interposed malloc-level peaks (8,396,848 / 147,848 / 11,186,544 B) within their §6.5 bounds, the banned `no_del` variant still FAILING its bound (5,656,528 B), byte equality at 8,511,232 B, and `native_headroom`'s request-region malloc peak (227,128 B measured) ≤ `HTTP_HEADROOM = 262,144 B`; probe6's `mallinfo2` sample max is reported and NEVER compared (it is a lower bound — 115,664–159,360 B across runs against an 84,640–87,088 B end delta, which is the under-read A.5.3 documents); `HTTP_HEADROOM == 2 × 131,072` and the four analytic terms sum to ≤ 131,072 B; a probe file whose sha256 differs from the recorded manifest without a doc revision fails; doc gate: A.5 must contain the `uordblks`/`hblkhd`/`MMAP_THRESHOLD`/per-thread-arena/kernel-buffer clauses, the retraction sentence and the arena-granularity caveat — deleting any of them fails |
+| G-V18-01 | explicit rejection policy for over-cap artifacts (V18-01) | (a) REACHABILITY, in this order: the hash-pinned `/1` oracle ACCEPTED fixtures D-21/D-22/D-23 — each is a valid 12-key record whose line content is 6,990,684 / 6,291,630 / > `MAX_LINE` B — and `/2` rejected each with `records.jsonl line {n} exceeds the maximum line length` at the right line number; the test FAILS if `/1` rejects a fixture (the reachability claim became vacuous) or if `/2` accepts one; (b) D-23 additionally asserts NONE of the bodies was decoded (P-6 precedes P-8: the cap is a file-level pre-parse fact); (c) AST/behaviour gate: no truncation, split, skip, retry-with-`/1`, tolerance flag, environment variable or keyword argument can change the verdict for an over-cap file — a mutation adding any of them MUST fail; (d) doc gate: §5.1.2.6 exists and contains the strings `REJECTION POLICY`, `CONFORMING`, `LEGACY-ADMITTED` and the 6,852 B / 697,196 B margin figures, and neither "impossible under the frozen schema" nor "proved unreachable" appears anywhere except inside an explicit retraction quotation (§5.1.2.1, §5.1.2.6 P7 — a grep gate) |
+| G-V18-02 | the probe suite is delivered code, not prose (V18-02) | (a) `python -m tools.obs.probes.run_all --manifest` reproduces A.0's thirteen path/size/SHA-256 rows byte for byte, and `--check` exits 0 on the pinned interpreter; (b) every A.7 listing is byte-identical to the file it names (CI regenerates the appendix from `tools/obs/probes/` and fails on any diff, so a listing cannot drift); (c) the driver REFUSES to run (exit 2) when any of the thirteen files is missing — a partially copied suite cannot silently narrow the protocol; (d) `alloc_peak.so` is absent from the committed tree and the gate FAILS, not skips, when `cc` cannot build it; (e) README.md documents the run line, the TLS-fixture policy (committed fixture preferred, ephemeral `openssl` fallback otherwise) and the instrument limits — deleting any of the three fails |
+| G-V18-03 | direct-`mmap` fence around the native term (V18-03) | (a) `alloc_peak.c` exports `alloc_peak_map_peak()` and its symbol table contains `mmap`, `mmap64` and `munmap` (build gate: `nm -D`); (b) `probe6` reports a `map_peak` for the request region and `run_all` compares the SUM `peak + map_peak` against `HTTP_HEADROOM`, failing when the interposer is unavailable instead of skipping; (c) the phases report their `map_peak` (0 B measured) and a phase whose channel exceeds `HTTP_HEADROOM` fails with the A.5.7 note that the malloc figure is no longer a usable bound; (d) a mutation that removes the mmap interposition MUST fail (a) and (b); a mutation that compares only the malloc channel MUST fail (b); (e) doc gate: A.5.4 contains the interception inventory (including `posix_memalign`/`aligned_alloc`/`brk` as NOT intercepted) and A.5.7 contains the acknowledgment, the measured channel table and the page-rounding lemma — deleting any of them fails |
+
+| G-V17-04 | native instrumentation + repository probes (V17-04; channels extended by V18-03) | CI runs `python -m tools.obs.probes.run_all --check` (exit 0 required) on the pinned interpreter, asserting for every phase BOTH instruments: `tracemalloc` peaks (8,396,983 / 148,004 / 11,188,520 / 11,188,600 / 11,188,520 B) and interposed malloc peaks (8,400,920 / 147,848 / 11,186,544 B) within their §6.5 bounds, the banned `no_del` variant still FAILING its bound (5,656,528 B), byte equality at 8,511,232 B, and `native_headroom`'s request region on BOTH channels — malloc 195,184 B plus direct `mmap` 16,384 B, SUM 211,568 B ≤ `HTTP_HEADROOM = 262,144 B`; probe6's `mallinfo2` sample max is reported and NEVER compared (it is a lower bound — 112,272–159,360 B across runs against a 72,272–87,088 B end delta, which is the under-read A.5.3 documents); `HTTP_HEADROOM == 2 × 131,072` and the four analytic terms plus one page of rounding each sum to ≤ 147,456 B (A.5.7.4); a probe file whose sha256 differs from A.0's manifest without a doc revision fails; doc gate: A.5 must contain the `uordblks`/`hblkhd`/`MMAP_THRESHOLD`/per-thread-arena/kernel-buffer clauses, the retraction sentence, the interception inventory (A.5.4) and the arena-granularity caveat — deleting any of them fails |
 
 Decisions (new): **D11** dynamic target supplied as `target_fn` evaluated per admission read (static path retained);
 **D12** on budget breach, discard the whole body (`b""` + `error=INCIDENT-MEMORY`) rather than persisting a partial one;
@@ -1784,7 +1891,8 @@ worst-case inputs, `tracemalloc` over the exact normative sequences, raw values 
 headroom measured via glibc `mallinfo2` — and any budget change re-runs it (V16-04);
 **D35** `load_run` reproduces Step-1's error precedence and JSON dialect exactly (five bounded stages; all-lines
 structure before any body decode), with lines longer than `MAX_LINE` as the SOLE documented acceptance divergence —
-impossible under the frozen schema and mandated by the Domain B budget (V16-05);
+REACHABLE for `/1`-accepted evidence, REFUSED by explicit policy (§5.1.2.6) and mandated by the Domain B budget
+(V16-05; corrected by V18-01/D43);
 **D36** `observe()` mirrors audit check (g) explicitly before `audit_run` (supplied, integer-not-bool, `==
 len(records)`) and only ever passes an `egress_count`/authenticated-`receipt.wrapper_count` value; receipt
 authentication (R3) precedes every use of a receipt field (V16-06);
@@ -1797,7 +1905,8 @@ close, passed as `expect` into `publish_file()` — never `expect = None` for a 
 **D39** `MAX_LINE = 4 × ⌈MAX_BODY_BYTES/3⌉ + FRAMING_ALLOWANCE_BYTES (5,592,920 B)` is a DERIVED, inclusive cap asserted at
 import; cap and truncation are file-level pre-parse facts that outrank every parse error and sit after both digest
 checks; line CONTENT (terminator stripped) is what gets parsed; and `/2`'s accept set is a strict subset of `/1`'s —
-the sole divergence is the over-long-line class, proved unreachable for schema-valid artifacts (V17-01);
+the sole divergence is the over-long-line class, which is REACHABLE for `/1`-accepted legacy evidence and therefore
+refused by explicit policy rather than by an impossibility claim (§5.1.2.6, V18-01/D43);
 **D40** receipt (and staging-directory) publication proves the DESTINATION against the CREATION identity captured by
 `fstat` on the creating descriptor under `identity_source = CREATION`, never against the substitutable pre-syscall
 source stat; `OBSERVED` is confined to quarantine moves; CP3e re-reads the published receipt and must reproduce the
@@ -1808,8 +1917,21 @@ from frozen facts only — path reads, second presence checks, re-reads and FAUL
 without a final is a contradiction (T3), and an unreadable artifact is never "absent" (V17-03);
 **D42** native memory is bounded ANALYTICALLY and enforced by gate, not inferred from a difference sample: `uordblks`
 alone is a lower bound (blind to mmapped regions, non-main arenas and intra-window peaks), the four-term headroom table
-(≤ 131,072 B) is doubled to `HTTP_HEADROOM = 262,144 B`, event-point sampling plus an `LD_PRELOAD` peak interposer
-provide the measurement, and the probe suite is a set of repository files under `tools/obs/probes/` (V17-04).
+(≤ 131,072 B) is doubled to `HTTP_HEADROOM = 262,144 B`, event-point sampling plus an `LD_PRELOAD` peak interposer on TWO
+channels (malloc family AND direct anonymous `mmap`, V18-03) provide the measurement, and the probe suite is repository
+code under `tools/obs/probes/` whose digests are pinned in A.0 (V17-04; V18-02).
+**D43** the cap is a REJECTION BOUNDARY, not a conformance claim: `obs-loader/2` intentionally refuses any line whose
+content exceeds `MAX_LINE`, including artifacts Step-1 accepts, because Step-1 validates no string length and the bound is a
+theorem only for records §5.1.1 writes; the refusal is the deterministic P-6/P-10 message with the offending line number,
+it is terminal (T5 with a conflict, T3 otherwise; a seal aborts to quarantine), and no flag, environment variable, truncation,
+skip, subset verdict or `/1` fallback may soften it — oversize legacy evidence requires a reviewed `obs-loader/3` (V18-01);
+**D44** the Appendix A probe suite is repository code, not an appendix listing: thirteen files under `tools/obs/probes/`,
+with size and SHA-256 pinned in A.0, regenerated listings in A.7, a driver that refuses to run on an incomplete suite, and a
+recorded-values file that only a reviewed revision may refresh (V18-02);
+**D45** a malloc-only interposer is not a bound: the native term is measured on TWO channels (malloc family and direct
+anonymous `mmap`), the analytic four-term constant is proved allocator-independent by page-rounding each term and doubling
+(A.5.7.4), reservations (obmalloc arenas) are never added to live-byte figures, and the gate compares the SUM against
+`HTTP_HEADROOM` rather than trusting one channel (V18-03).
 
 ## 12. Normative constants (single table; source of truth `tools/obs/params.py` + runner additions)
 
@@ -1843,37 +1965,58 @@ provide the measurement, and the probe suite is a set of repository files under 
 the source of truth for the OBS parameters above. Any new runner constant joins this table in the next reviewed
 revision — the budget may change only with a re-derived §6.5 under the Appendix A protocol (D13/D19/D30/D34).
 
-## 13. Appendix A — Memory-accounting probes, native-instrumentation boundaries and probe blueprints (V16-04, V17-04; informative)
+## 13. Appendix A — Memory-accounting probes, native-instrumentation boundaries and the delivered suite (V16-04, V17-04, V18-02, V18-03; informative)
 
 This appendix is the reproducibility record for every §6.5 number: how it is measured, with which instrument, on what,
-with which raw values — plus, since v1.8, the honest boundaries of the native instrument and the complete source of the
-probe programs. The bounds of §6.5 are UNCHANGED by this revision; what changes is that every value below was produced
-by the repository probes of A.7 and that `python -m tools.obs.probes.run_all --check` exits 0 on them.
+with which raw values — the boundaries of the native instrument (A.5.4, A.5.7), and the complete source of the probe
+programs, generated from the repository copies (A.7). The bounds of §6.5 are UNCHANGED by this revision. What v1.9 adds is
+that the suite is no longer only described here: it exists at `tools/obs/probes/` with size and SHA-256 pinned in A.0
+(V18-02), and every figure below was produced by running those exact files — `python -m tools.obs.probes.run_all --check`
+exits 0, twice, including the direct-`mmap` channel V18-03 introduced.
 
-### A.0 Probe artifacts are repository files (V17-04)
+### A.0 The probe suite IS repository code, delivered and pinned (V17-04; V18-02)
 
-The suite SHALL live in the repository, land with the Step-2 commit and be reviewed with it. Nothing in this appendix
-is an off-repository note any more.
+These thirteen files exist at the paths below in the repository; they are not a description of a suite, they ARE it. Every
+number in A.2/A.3 was produced by running them from the repository root, and the gate that reproduces those numbers is the
+same command a reviewer runs:
 
-| Path | Role |
-|---|---|
-| `tools/obs/probes/__init__.py` | package marker (empty) |
-| `tools/obs/probes/probe_common.py` | constants, deterministic input builders, `measure()` harness, JSON emission |
-| `tools/obs/probes/probe1_phase1.py` | phase 1 — the §6.4 request path (chunked scratch + `bytes(scratch)`) |
-| `tools/obs/probes/probe2_seal.py` | phase 2 — §5.1.1 seal fragments, plus the banned retain-the-chunk variant |
-| `tools/obs/probes/probe3_decode.py` | phase 3 — §5.1.2 `decode_pass` release order on a `MAX_LINE` line |
-| `tools/obs/probes/probe4_decode_fresh.py` | phase 3 — the same order fed by a real `readline(MAX_LINE + 2)` buffer |
-| `tools/obs/probes/probe5_byte_equality.py` | §5.1.1 writer vs `_lines([record_to_json…])` (G-V14-02) |
-| `tools/obs/probes/probe6_native.py` | the native term: `mallinfo2` sample points + interposed request-region peak |
-| `tools/obs/probes/probe7_structure.py` | phase 3 — §5.1.2 `scan_structure` (parse + key check + discard) |
-| `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` peak interposer (every arena, every thread, true peak) |
-| `tools/obs/probes/run_all.py` | driver: `--check` (CI gate) / `--record` / `--interpose` |
-| `tools/obs/probes/expected.json` | the recorded values §6.5 rests on |
-| `tools/obs/probes/README.md` | run instructions, TLS fixture, interposer build line, what needs a doc revision |
+```
+cc -shared -fPIC -O2 -o tools/obs/probes/alloc_peak.so tools/obs/probes/alloc_peak.c
+PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check      # exit 0 pass / 1 mismatch / 2 environment refused
+```
 
-Rules: stdlib only; no network beyond a loopback TLS listener; no wall-clock or random input (every probe is
-deterministic and byte-exact); exit codes 0 = pass, 1 = mismatch, 2 = environment refused. Editing a probe's
-MEASUREMENT LOGIC without a reviewed revision of this appendix fails G-V17-04.
+| Path | Role | Bytes | SHA-256 |
+|---|---|---|---|
+| `tools/obs/probes/probe_common.py` | §12 constants, deterministic worst-case fixtures, `measure()`, the shim's two getters | 4,044 | `c1662be01889bddbdba6426e566cd3da9b2bb7e50a955000c35670b9f7e5cca4` |
+| `tools/obs/probes/probe1_phase1.py` | phase 1 — the §6.4 request path (chunked scratch + `bytes(scratch)`) | 1,358 | `1f63e461fb71836d78c718d0f0ac98c64c46f4c64e99852c0afaf9e83fab38d2` |
+| `tools/obs/probes/probe2_seal.py` | phase 2 — §5.1.1 seal fragments, plus the banned retain-the-chunk variant | 2,326 | `455ef7b384c0057ea50a1e6ed711538bfa5ca6e904e22590a576be4bf4c7a20f` |
+| `tools/obs/probes/probe3_decode.py` | phase 3 — §5.1.2 `decode_pass` release order on a `MAX_LINE` line | 1,699 | `4320fbe9044b7bd4d9b70238d8d5731832e6348d28a710fe8f92368f1ae66066` |
+| `tools/obs/probes/probe4_decode_fresh.py` | phase 3 — the same order fed by a real `readline(MAX_LINE + 2)` buffer | 815 | `e72afb89e85274c90db48ec32d03435b32dae6ffa1577adc0f83d0b68e4129eb` |
+| `tools/obs/probes/probe5_byte_equality.py` | §5.1.1 writer vs `_lines([record_to_json…])` (G-V14-02) | 2,647 | `61278c289c1ab2cb10ed7305e3e572e63debed8f1a9b6997a2a440b5c0572a47` |
+| `tools/obs/probes/probe6_native.py` | native term: `mallinfo2` samples + BOTH interposed channels (malloc, direct mmap) | 8,285 | `94a0f0ec74ba80fb058cdf31f05d3ff6bb7015486d79917c91f92f5bc2c84a74` |
+| `tools/obs/probes/probe7_structure.py` | phase 3 — §5.1.2 `scan_structure` (parse + key check + discard) | 780 | `d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4` |
+| `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` dual-channel peak shim: malloc family AND direct anonymous `mmap` (A.5.7) | 6,579 | `13813656fbb5a67e940a1d275c2e059f5dfd71f8128a6c0bd1718c73dec5a743` |
+| `tools/obs/probes/run_all.py` | driver: `--check` / `--record` / `--manifest` / `--interpose` | 8,256 | `62bf2f2848a947d19da33057c562b80bd776336c44ad83e01c510cad132ec771` |
+| `tools/obs/probes/README.md` | run instructions, TLS fixture policy, instrument limits, what needs a doc revision | 5,915 | `0be6f34f1aa1c557fac264c84125f2c145885778375e0fee1aaa7ac9328ed3a5` |
+| `tools/obs/probes/expected.json` | the recorded values, bounds and tolerances (§6.5, A.2/A.3) | 1,497 | `baaa45f33fb8b4bda6b5749995df158a666e6220e7bd25c87bc96346aed685f0` |
+| `tools/obs/probes/__init__.py` | package marker (empty file; `touch tools/obs/probes/__init__.py`) | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| **13 files** | **total** | **44,201** | `python -m tools.obs.probes.run_all --manifest` prints this table |
+
+Rules (normative): stdlib only; no network beyond a loopback TLS listener; no wall-clock or unseeded random input (every
+probe is deterministic and byte-exact); exit codes 0 = pass, 1 = mismatch, 2 = environment refused. Editing a probe's
+MEASUREMENT LOGIC without a reviewed revision of this appendix fails G-V17-04; editing one without updating A.0's digest
+fails G-V18-02. `alloc_peak.so` is a build artifact and MUST NOT be committed; when `cc` is unavailable the gate reports
+the interposer as unavailable and FAILS rather than silently dropping the check (A.5.5 requires the constant to be checked).
+
+**Why the digests are in the document.** A listing that drifts from the code it claims to be is worse than no listing: it
+launders an unverified number into a review artifact. Three mechanisms replace trust: `--manifest` recomputes the table
+above from the files; A.7's listings are GENERATED from the same files, so the document cannot hold a stale copy; and the
+driver refuses to run (exit 2) when any of the thirteen files is missing, so a partial copy cannot narrow the protocol
+silently.
+
+**How to refresh a recorded value.** Only inside a reviewed revision: run `--record`, paste the new body into
+`expected.json`, regenerate A.0/A.7, and state the reason in A.3. A tolerance is not a licence to drift — D34/D42 list the
+changes that invalidate every value (interpreter, `MAX_BODY_BYTES`, writer, reader or receipt schema).
 
 ### A.1 Environment and measurement protocol
 
@@ -1883,9 +2026,16 @@ MEASUREMENT LOGIC without a reviewed revision of this appendix fails G-V17-04.
 * **Tracemalloc protocol:** `tracemalloc.start()` → run the exact normative sequence → `get_traced_memory()[1]` (the
   peak) → `stop()`. **Inputs are built BEFORE the measurement starts** — a 4 MiB body allocated inside the measured
   region would be attributed to the phase and swamp it; `probe_common.measure` documents and enforces the convention.
-* **Second instrument:** the same sequence is re-run in a child with `alloc_peak.so` preloaded (A.7.9), which counts
-  live malloc-family bytes across every arena and thread and therefore sees allocations that live and die inside the
-  region. Its figures are reported as `interposed`.
+* **Second instrument, two channels:** the same sequence is re-run in a child with `alloc_peak.so` preloaded (A.7.10),
+  which counts live malloc-family bytes across every MALLOC arena and thread — so it sees allocations that live and die
+  inside the region — and, separately, live `MAP_ANONYMOUS|MAP_PRIVATE` bytes, the channel a malloc-only instrument
+  cannot see (A.5.4, A.5.7). The figures are reported as `interposed` (malloc) and `map_peak` (direct mappings); the
+  native region's gate compares their SUM.
+* **TLS fixture (probe6):** the loopback server prefers the repository's `tests/fixtures/tls/localhost.pem`. When it is
+  absent — a clean clone — the probe generates an ephemeral self-signed certificate with `openssl` in a temporary
+  directory and deletes it at exit, so no key material is committed and the gate still runs. A different certificate
+  chain moves the request-region peak by a few kilobytes, which is why the native region carries a 20 % tolerance and
+  every phase carries a hard bound.
 * **Inputs:** worst-case by construction, deterministic: `MAX_BODY_BYTES = 4,194,304`, `MAX_LINE = 5,592,920`,
   `SEAL_SLICE_BYTES = 49,152`, `CHUNK_BYTES = 65,536`, serialized with Step-1's `_canonical` (sort_keys, separators
   `(",", ":")`). The framing of a schema-valid record with an empty body measures **348 B** (A.7.1), so the widest
@@ -1893,21 +2043,29 @@ MEASUREMENT LOGIC without a reviewed revision of this appendix fails G-V17-04.
   line at exactly `MAX_LINE` to pin the §5.1.2.1 boundary cases.
 * **Pass criterion:** each phase ≤ its §6.5 bound under BOTH instruments, phases never summed, max ≤
   `TRANSIENT_BUDGET_BYTES`. `phase2_seal_no_del` is the mirror image: the gate fails if it ever PASSES its bound.
-* **Determinism:** repeated runs reproduce every tracemalloc and interposed figure exactly (measured twice each); only
-  the `mallinfo2` sample figures move, which is why they are reported and never gated.
+* **Determinism:** repeated runs reproduce every `tracemalloc` figure exactly and every phase's malloc figure within
+  0.05 % (measured at least twice per revision); the native region's malloc peak varies with the certificate chain and
+  `map_peak` moves in 4 KiB page units, which the recorded tolerance covers; the `mallinfo2` sample figures move freely
+  and are reported, never gated (A.5.3).
 
 ### A.2 Probe inventory and recorded values
 
-| Probe | Measurement | Bound (B) | `tracemalloc` (B) | Interposed (B) | Verdict |
-|---|---|---|---|---|---|
-| probe1 | `phase1_request` — §6.4 request path | 8,781,824 | 8,396,983 | 8,396,848 | PASS |
-| probe2 | `phase2_seal` — §5.1.1 seal, normative `del` | 151,552 | 148,004 | 147,848 | PASS |
-| probe2 | `phase2_seal_no_del` — BANNED retain-the-chunk | 151,552 | 5,656,528 | — | FAILS (intended) |
-| probe3 | `phase3_decode` — §5.1.2 decode pass | 11,202,224 | 11,188,520 | 11,186,544 | PASS |
-| probe4 | `phase3_decode_fresh` — real `readline` buffer | 11,202,224 | 11,188,600 | — | PASS |
-| probe7 | `phase3_structure` — §5.1.2 structure pass | 11,202,224 | 11,188,520 | — | PASS |
-| probe5 | `byte_equality` — §5.1.1 vs `record_to_json` | — | — | — | PASS (8,511,232 B, 1,020 records) |
-| probe6 | `native_headroom` — request region | 262,144 | — | 227,128 | PASS |
+Every value below comes from `python -m tools.obs.probes.run_all --check` on the delivered files (A.0), not from a probe
+kept outside the repository.
+
+| Probe | Measurement | Bound (B) | `tracemalloc` (B) | Interposed malloc (B) | Interposed mmap (B) | Verdict |
+|---|---|---|---|---|---|---|
+| probe1 | `phase1_request` — §6.4 request path | 8,781,824 | 8,396,983 | 8,400,920 | 0 | PASS |
+| probe2 | `phase2_seal` — §5.1.1 seal, normative `del` | 151,552 | 148,004 | 147,848 | 0 | PASS |
+| probe2 | `phase2_seal_no_del` — BANNED retain-the-chunk | 151,552 | 5,656,528 | — | — | FAILS (intended) |
+| probe3 | `phase3_decode` — §5.1.2 decode pass | 11,202,224 | 11,188,520 | 11,186,544 | 0 | PASS |
+| probe4 | `phase3_decode_fresh` — real `readline` buffer | 11,202,224 | 11,188,600 | — | — | PASS |
+| probe7 | `phase3_structure` — §5.1.2 structure pass | 11,202,224 | 11,188,520 | — | — | PASS |
+| probe5 | `byte_equality` — §5.1.1 vs `record_to_json` | — | — | — | — | PASS (8,511,232 B, 1,020 records) |
+| probe6 | `native_headroom` — request region, SUM of both channels | 262,144 | — | 195,184 | 16,384 | PASS (211,568) |
+
+The mmap column is the v1.9 channel (A.5.7): it is 0 B in every phase, because those regions do not map, and 16,384 B in
+the native request region, where the gate requires the SUM to stay inside `HTTP_HEADROOM`.
 
 The v1.7 campaign figures (produced by probes outside the repository, over a slightly wider measured region that
 included the header dict and record metadata) were 8,462,496 / 148,113 / 11,188,261 / 11,188,197 / 5,656,645 B. The
@@ -1931,25 +2089,31 @@ safe direction: the BOUNDS are untouched and the margin is what §6.5 states.
 | banned — `json.loads(bytes)` with the buffer held | 11,202,224 | 16,781,149 | BANNED (v1.7 campaign) |
 | banned — whole-file `_read` + `_jsonl` (50 MiB session) | 12,582,912 | ≥ 139,810,133 | BANNED (v1.7 campaign) |
 
-**A.3.2 Interposer (malloc-level peak, every arena and thread), deterministic.**
+**A.3.2 Interposer (malloc-level peak across every malloc arena and thread; direct-`mmap` peak in a separate column),
+deterministic.** The second channel is what V18-03 added: a malloc-only figure is not a bound for a process whose object
+allocator maps its own arenas (A.5.7.1).
 
-| Region | Bound (B) | Measured (B) | Slack (B) |
-|---|---|---|---|
-| phase 1 — request path | 8,781,824 | 8,396,848 | 384,976 |
-| phase 2 — seal | 151,552 | 147,848 | 3,704 |
-| phase 3 — decode pass | 11,202,224 | 11,186,544 | 15,680 |
-| request region (TLS handshake + 64 KiB body) vs `HTTP_HEADROOM` | 262,144 | 227,128 | 35,016 |
+| Region | Bound (B) | Measured malloc `peak` (B) | Measured `map_peak` (B) | Slack (B) |
+|---|---|---|---|---|
+| phase 1 — request path | 8,781,824 | 8,400,920 | 0 | 380,904 |
+| phase 2 — seal | 151,552 | 147,848 | 0 | 3,704 |
+| phase 3 — decode pass | 11,202,224 | 11,186,544 | 0 | 15,680 |
+| request region — malloc channel | 262,144 (on the sum) | 195,184 | — | 66,960 |
+| request region — direct `mmap` channel | 262,144 (on the sum) | — | 16,384 | — |
+| request region — SUM vs `HTTP_HEADROOM` | 262,144 | 211,568 | | 50,576 |
 
-`interposed ≥ native`, because every native allocation in the process goes through the malloc family, so the
-request-region figure UPPER-BOUNDS the native share of that region; it also contains the region's small Python
-objects, which is why it is compared with `HTTP_HEADROOM` as a whole and never decomposed.
+`peak` alone was already ≥ the native MALLOC share (every malloc allocation in the region, plus its small Python
+objects); `map_peak` adds the share that never touches `malloc`. The two are compared with `HTTP_HEADROOM` as a SUM and
+are never decomposed into a per-consumer attribution, because the instruments cannot attribute. The phase rows take no
+sum: a phase's `map_peak` would double-count Python objects already inside `tracemalloc`'s figure (A.5.7.3), which is
+why 0 B there is reported and the phase bounds are unmoved.
 
 **A.3.3 `mallinfo2` samples (reported, never gated).** Six sample points around the request, values relative to the
-first: `0 → 1,776 B`, `1 → 111,136–113,520 B`, `2 → 112,912–115,664 B`, `3 → 115,328–159,360 B`, `4 → 100,672–112,016 B`,
-`5 → 73,888–85,312 B`; the end-to-end difference is 84,640–87,088 B. Two facts matter and both are the reason this
-instrument is not the design's evidence: the sample MAXIMA (115,664–159,360 B) and the END DELTA (84,640–87,088 B)
-differ by up to 46 %, i.e. a before/after difference under-reads this very fixture; and the figures move run to run
-because they are arena state, not a measurement (A.5.3).
+first. This revision's run: `0 → 1,856 B`, `1 → 110,128 B`, `2 → 112,272 B`, `3 → 111,712 B`, `4 → 97,056 B`,
+`5 → 70,496 B`, end-to-end difference `72,272 B`. Across runs of this revision: sample maxima 112,272–159,360 B, end
+deltas 72,272–87,088 B. Two facts matter and both are the reason this instrument is not the design's evidence: the
+sample MAXIMA and the END DELTA differ by up to 47 %, i.e. a before/after difference under-reads this very fixture; and
+the figures move run to run because they are arena state, not a measurement (A.5.3).
 
 **A.3.4 Reconciliation.** `budget = max(8,781,824; 151,552; 11,202,224) = 11,202,224 ≤ TRANSIENT_BUDGET_BYTES =
 12,582,912` (margin 1,380,688 B, 12.3 %); the largest measured phase is 11,196,712 B including the file buffer, and
@@ -1970,14 +2134,14 @@ snapshot (≤ `RECEIPT_MAX_BYTES + CHUNK_BYTES` = 196,608 B) is charged to Domai
 7. Building the probe's worst-case INPUT inside the measured region — it attributes the fixture to the phase and
    silently invalidates the bound (A.1).
 
-### A.5 Native instrumentation — what `mallinfo2()` can and cannot bound (v1.8, V17-04)
+### A.5 Native instrumentation — what `mallinfo2()` can and cannot bound (v1.9: V17-04; direct-`mmap` fence V18-03)
 
 **A.5.1 What `mallinfo2` reports.** It describes the CALLING thread's glibc main arena (plus any arena it owns) at that
 instant: `uordblks` = in-use bytes of the non-mmapped arena, `hblkhd` = in-use bytes of mmapped blocks, `arena`/
 `fordblks` = capacity/free. Probe6 samples `uordblks + hblkhd` at six points and reports the maximum and the
 end-to-end difference.
 
-**A.5.2 Seven reasons a difference of two samples is not a peak.** Each one is visible in this revision's own numbers:
+**A.5.2 Eight reasons a difference of two samples is not a peak.** Each one is visible in this revision's own numbers:
 
 | Blind spot | Why it bites | Evidence here |
 |---|---|---|
@@ -1988,6 +2152,7 @@ end-to-end difference.
 | Allocator reuse | a freed block satisfies the next request, so the counter may not move at all | repeated requests under-report churn relative to a single worst case |
 | Fragmentation | free space inside the arena is not in-use space | `arena` growth is invisible to any in-use counter |
 | Non-malloc memory | kernel socket buffers (`sk_buff`), page cache, library-owned mappings | outside the counter and outside Domain B (A.5.6) |
+| Direct `mmap` by the program | `uordblks`/`hblkhd` describe the heap glibc manages; a mapping the program makes itself is in neither field — CPython's `obmalloc` arenas are exactly that | the interposer now measures the channel separately: 16,384 B in the request region, 0 B per phase (A.5.7.2) |
 
 **A.5.3 Retraction.** v1.7 argued that "the ceiling does not depend on rounding the headroom term down" after
 substituting a raw 277,120 B Δ`uordblks` for the 262,144 B constant. That inference is RETRACTED: a difference sample
@@ -1995,11 +2160,27 @@ is a LOWER BOUND on the native transient peak (A.5.2), so 8,739,616 B was a lowe
 now is absolute: **`Δuordblks` (or `Δ(uordblks + hblkhd)`) may never be used as an upper bound**, and no gate compares
 it to a recorded value. It is retained in the appendix only as evidence of its own limitations.
 
-**A.5.4 The instrument that IS a peak.** `alloc_peak.c` (A.7.9) interposes `malloc`/`calloc`/`realloc`/`free` and tracks
-live bytes with atomics, exposing `alloc_peak_reset()` (baseline) and `alloc_peak_peak()`. It sees every arena and every
-thread and catches microsecond-lived allocations, which is precisely what A.5.2 lists as invisible to `mallinfo2`. The
-probe runs the phase (or the request region) in a child with `LD_PRELOAD=alloc_peak.so`, resets immediately before the
-region and reads the peak immediately after.
+**A.5.4 The instrument that IS a peak — and the exact list of what it intercepts (V17-04; fenced by V18-03).**
+`alloc_peak.c` (A.7.9) tracks live bytes with atomics and exposes three entry points: `alloc_peak_reset()` (baseline for
+both channels), `alloc_peak_peak()` (malloc channel) and `alloc_peak_map_peak()` (direct-`mmap` channel, added by v1.9).
+v1.8 wrote that it "sees every arena and every thread"; that is true only of MALLOC arenas and is withdrawn, because a
+malloc-only instrument cannot see a direct `mmap` (A.5.7.1). The inventory is normative for how the figures may be read:
+
+| Symbol or path | Intercepted? | Accounting, and why |
+|---|---|---|
+| `malloc`, `calloc`, `realloc`, `free` | YES | live bytes via `malloc_usable_size`, so block headers and alignment are INSIDE the figure (conservative) |
+| glibc blocks served by its internal `mmap` (≥ `MMAP_THRESHOLD`) | YES, once | they arrive through `malloc`; glibc's internal `__mmap` is not the interposed symbol, so the block is counted in `peak` and NOT again in `map_peak` |
+| `mmap`, `mmap64`, `munmap` with `MAP_ANONYMOUS` and `MAP_PRIVATE` | YES (v1.9) | live mapped bytes and their high-water since the reset, reported as `map_peak`; never added to `peak` |
+| `posix_memalign`, `aligned_alloc`, `memalign`, `valloc`, `pvalloc` | NO | glibc serves them from the same arena on the measured paths, but a direct call would be invisible — hence A.5.7.4's allocator-independence argument, which does not rely on them |
+| `brk`/`sbrk`, `alloca`, thread stacks, static/BSS | NO | out of Domain B (A.5.6) |
+| file-backed and shared mappings | EXCLUDED by design | page cache and code sharing, not runner transient (A.5.6) |
+| kernel socket buffers, page cache, driver-pinned memory | NO | outside every userspace instrument (A.5.6, A.5.7.5) |
+
+It catches microsecond-lived allocations, which is precisely what A.5.2 lists as invisible to `mallinfo2`. The probe runs
+the phase (or the request region) in a child with `LD_PRELOAD=alloc_peak.so`, resets immediately before the region and
+reads both peaks immediately after. Bit-exact reproducibility is not claimed: `peak` agrees within 0.05 % across runs and
+`map_peak` moves in 4 KiB page units, which is why the gate uses a recorded value plus up to 20 % tolerance for the native
+region and a hard bound for every phase.
 
 **A.5.5 The analytic headroom term.** The constant is still derived, not measured — measurement only CHECKS it:
 
@@ -2012,16 +2193,80 @@ region and reads the peak immediately after.
 | **Sum of enumerated terms** | **131,072** | |
 | **`HTTP_HEADROOM` (design constant)** | **262,144** | the table × 2, covering unenumerated consumers: stdlib `_ssl` C objects, `getaddrinfo`/resolver scratch, codec/locale state |
 
-Checked, not assumed: the request region's interposed peak is **227,128 B** across runs (224,800–227,168 B), ≤ 262,144 B
-with 35,016 B of slack; the four enumerated terms still sum to ≤ 131,072 B. Phase 1's absolute slack over its
-tracemalloc peak is 8,781,824 − 8,396,983 = **384,841 B**, and the interposed phase-1 peak (8,396,848 B) is inside the
-same bound, so the phase bound holds with the native term measured rather than modelled.
+Checked, not assumed — and since v1.9 checked on BOTH interposed channels (A.5.7.2): the request region's malloc peak is
+**195,184 B** and its direct-`mmap` peak is **16,384 B**, so the SUM the gate compares is **211,568 B ≤ 262,144 B** with
+**50,576 B of slack** over the design constant (and 64,112 B over the four enumerated terms plus page rounding, A.5.7.4).
+The four enumerated terms still sum to ≤ 131,072 B. Phase 1's absolute slack over its tracemalloc peak is
+8,781,824 − 8,396,983 = **384,841 B**, and both interposed phase-1 figures (8,400,920 B malloc, 0 B mmap) are inside the
+same bound, so the phase bound holds with the native term measured rather than modelled. Across runs the region's malloc
+peak ranges 180,000–230,000 B and `map_peak` is 16,384 B whenever a TLS write buffer crosses one page boundary; the
+tolerance in `expected.json` is set for the former, which is a certificate-chain-size effect, not a leak.
 
 **A.5.6 Out of the domain, stated rather than hidden.** Kernel socket buffers and page cache are outside `mallinfo2`,
 outside `tracemalloc`, outside the interposer and outside Domain B: Domain B is the runner's own transient ALLOCATION
 budget, not its RSS. A container memory limit therefore observes more than this budget. This is a scope statement, not
 a mitigation: if a deployment caps RSS, the cap must be `TRANSIENT_BUDGET_BYTES + HARNESS_FIXED_BUDGET_BYTES +
 SESSION_BODY_BUDGET_BYTES` plus interpreter and kernel overhead, and that total is explicitly NOT claimed here.
+
+**A.5.7 Direct `mmap`: the acknowledged blind spot, measured, and why the four-term buffer bounds it (V18-03).**
+
+**A.5.7.1 The acknowledgment.** A malloc-only interposer is not a peak bound for a process that also maps memory directly,
+and CPython does exactly that: `obmalloc` obtains its 1 MiB arenas with a direct `mmap`, so the arenas that hold small
+Python objects never pass through `malloc`. The effect is not marginal — under this shim a workload of 200,000 short
+strings reports a malloc `peak` of 1,626,096 B against a `map_peak` of 9,437,184 B, i.e. the malloc channel alone would have
+missed 85 % of the address space that workload reserved. v1.8's claim that the shim "sees every arena and every thread" is
+therefore WITHDRAWN as stated (it sees every MALLOC arena and thread), and v1.9 interposes the `mmap` family so the region's
+direct mappings are MEASURED instead of assumed (A.5.4).
+
+**A.5.7.2 What the second channel measures, and what it does not.** `mmap`/`mmap64`/`munmap` are interposed for
+`MAP_ANONYMOUS\|MAP_PRIVATE` only, tracked in a fixed table, reported as `map_peak` (live mapped bytes since the reset,
+high-water) and NEVER added to `peak`. Measured for this revision:
+
+| Region | malloc `peak` (B) | direct `map_peak` (B) | Reading |
+|---|---|---|---|
+| phase 1 — request path | 8,400,920 | 0 | the 4 MiB body and its copy are `malloc`-served at that size; no mapping occurs inside the measured region |
+| phase 2 — seal | 147,848 | 0 | 48 KiB slices; no mapping |
+| phase 3 — decode/structure | 11,186,544 | 0 | one `MAX_LINE` line; no mapping |
+| request region (TLS + 64 KiB body) | 195,184 | 16,384 | four pages of anonymous mapping — the channel v1.8 could not see |
+| **request region, SUM vs `HTTP_HEADROOM`** | **211,568** | (bound 262,144) | **PASS, 50,576 B of slack** |
+
+File-backed and shared mappings are excluded on purpose (page cache is not runner transient, A.5.6), and mappings that
+glibc's allocator makes internally for large blocks are counted once, in `peak`, because they arrive through `malloc`
+(`malloc_usable_size` reports the block; glibc calls its internal `__mmap`, not the interposed symbol).
+
+**A.5.7.3 Why an arena reservation is not a live byte.** An obmalloc arena is 1 MiB of ADDRESS SPACE; only the pools the
+workload touches are resident, and the objects inside those pools are already counted by `tracemalloc`, which attributes
+Python object sizes regardless of which allocator served them. Adding `map_peak` to a `tracemalloc` figure would count the
+same objects twice at two granularities, so the fence is applied only where the two channels describe DISJOINT consumers —
+the native request region, where `tracemalloc` sees almost nothing. Domain B is live transient ALLOCATION (§6.2/§6.4), not
+RSS; A.5.6 already states that a container's memory limit observes more than this budget. What the second channel buys is
+therefore precision about the NATIVE region, not a new term in the phase bounds.
+
+**A.5.7.4 The four-term constant is allocator-independent (the bound V18-03 asked for).** Let the request region's consumers
+be `c = 1..4` with the concurrent bounds `b_c` of the A.5.5 table (32,768; 65,536; 20,480; 12,288). Any allocation strategy
+— `malloc`, a direct `mmap`, or a static buffer — that serves `c` holds at most `b_c` bytes for `c` at any instant, plus at
+most one 4,096 B page of granularity if `c` acquires a mapping of its own. The bound on `b_c` comes from the protocol's own
+sizes (one 16,384 B TLS record in and one out; one connection's OpenSSL state; three fixed-size `http.client` staging
+buffers; ≤ 256 live blocks with ≤ 16 B of header each), not from an allocator's behaviour, so it is invariant under the choice
+of allocator; rounding is the only allocator-dependent term. Hence
+
+```
+Σ(b_c + 4,096) = 131,072 + 16,384 = 147,456 B  ≤  HTTP_HEADROOM = 262,144 B
+remaining slack = 114,688 B  → unenumerated consumers of the same bounded kind (stdlib `_ssl` C objects,
+                               resolver scratch, codec/locale state)
+```
+
+The constant therefore bounds the region even if EVERY term were served by a direct `mmap` and every term needed its own
+page-rounded mapping — the worst case a malloc-only instrument could hide. The corollary is the useful half: the bound can
+only fail if a consumer's live bytes exceed its table term, which means the protocol's own sizes changed (a bigger TLS
+record, more whitelisted headers, a second connection) — exactly the change D34/D42 require to re-run this whole protocol.
+
+**A.5.7.5 What is still not measured (stated, not hidden).** Non-anonymous and shared mappings (page cache, `SSL_CTX` code
+segments), kernel socket buffers, pinned/DMA buffers owned by a driver, and any library that allocates through its own
+private allocator or `brk` directly. None of them is reachable from the request path measured here, and all of them are out
+of Domain B by A.5.6's scope statement. G-V18-03 fails if the mmap channel is absent (a build that dropped it), if the sum
+`peak + map_peak` exceeds `HTTP_HEADROOM`, or if a phase's `map_peak` exceeds the constant — so a future change that starts
+mapping inside a measured region is caught as a review item rather than absorbed silently.
 
 ### A.6 Budget reconciliation (normative §6.5 restated with the measured evidence)
 
@@ -2030,14 +2275,13 @@ peak, never the sum: 11,202,224 B ≤ `TRANSIENT_BUDGET_BYTES = 12,582,912 B`, l
 to `MAX_BODY_BYTES`, the writer, the reader or the receipt schema re-runs this whole protocol (D34/D42) before the
 budget may change — and now literally re-runs it, since the protocol is `python -m tools.obs.probes.run_all --check`.
 
-### A.7 Complete probe blueprints (V17-04)
+### A.7 The complete suite, file by file (V17-04; generated from the delivered files by V18-02)
 
-Each file below is normative in structure: the measurement sequence, the bound and the emitted JSON shape are fixed;
-comments and helper naming may vary, byte-level inputs may not. The listing is the code that was executed to produce
-A.2/A.3, and `run_all.py --check` exits 0 on it.
+Every listing below is the exact content of the file named in its heading (trailing newline omitted), generated from the repository copy rather than transcribed. A.0's digest is the authority for identity; these listings exist so the suite can be reviewed without leaving the document.
 
+#### A.7.1 `tools/obs/probes/probe_common.py`
 
-#### A.7.1 `probe_common.py`
+§12 constants, deterministic worst-case fixtures, `measure()`, the shim's two getters
 
 ```python
 """Shared harness for the Appendix A memory protocol. Deterministic, stdlib only, no network."""
@@ -2118,6 +2362,24 @@ def line_at(content_bytes: int) -> bytes:
     return line
 
 
+def shim():
+    """ctypes handle on alloc_peak.so's getters; the caller must have LD_PRELOADed the shim (A.5.4/A.5.7)."""
+    import ctypes
+
+    lib = ctypes.CDLL(None)
+    lib.alloc_peak_reset.restype = None
+    lib.alloc_peak_peak.restype = ctypes.c_size_t
+    lib.alloc_peak_map_peak.restype = ctypes.c_size_t
+    return lib
+
+
+def interposed_pair(lib, fn) -> dict[str, int]:
+    """Reset the shim, run ONE measured region, and report both channels: malloc bytes and direct anon mmap bytes."""
+    lib.alloc_peak_reset()
+    fn()
+    return {"peak": int(lib.alloc_peak_peak()), "map_peak": int(lib.alloc_peak_map_peak())}
+
+
 def measure(name: str, fn, **detail) -> dict:
     """Run `fn` under tracemalloc; report the peak. INPUTS MUST BE BUILT OUTSIDE `fn` (A.1)."""
     tracemalloc.start()
@@ -2136,7 +2398,9 @@ def measure(name: str, fn, **detail) -> dict:
     }
 ```
 
-#### A.7.2 `probe1_phase1.py`
+#### A.7.2 `tools/obs/probes/probe1_phase1.py`
+
+phase 1 — the §6.4 request path (chunked scratch + `bytes(scratch)`)
 
 ```python
 """Phase 1 - request path (section 6.4): chunked scratch accumulation then `bytes(scratch)`.
@@ -2168,23 +2432,23 @@ def main() -> list[dict]:
                       max_body_bytes=C.MAX_BODY_BYTES, chunk_bytes=C.CHUNK_BYTES)]
 
 
-def interposed() -> int:
-    """Peak malloc-level bytes for this phase with alloc_peak.so preloaded (A.5.4/A.7.9)."""
-    import ctypes
-
-    lib = ctypes.CDLL(None)
-    lib.alloc_peak_peak.restype = ctypes.c_size_t
+def interposed_pair() -> dict[str, int]:
+    """Both interposed channels for this phase: malloc bytes and direct anonymous mmap bytes (A.5.4/A.5.7)."""
     payload = C.body()
-    lib.alloc_peak_reset()
-    sequence(payload)
-    return int(lib.alloc_peak_peak())
+    return C.interposed_pair(C.shim(), lambda: sequence(payload))
+
+
+def interposed() -> int:
+    return interposed_pair()["peak"]
 
 
 if __name__ == "__main__":
     print(C.canonical(main()))
 ```
 
-#### A.7.3 `probe2_seal.py`
+#### A.7.3 `tools/obs/probes/probe2_seal.py`
+
+phase 2 — §5.1.1 seal fragments, plus the banned retain-the-chunk variant
 
 ```python
 """Phase 2 - the section 5.1.1 seal: one 48 KiB slice -> b64encode -> write, `del` before the next slice.
@@ -2241,24 +2505,24 @@ def _record_meta() -> dict:
             "error": None, "group_name": None, "group_kind": None, "boundary_ms": None, "headers": []}
 
 
-def interposed() -> int:
-    """Peak malloc-level bytes for this phase with alloc_peak.so preloaded (A.5.4/A.7.9)."""
-    import ctypes
-
-    lib = ctypes.CDLL(None)
-    lib.alloc_peak_peak.restype = ctypes.c_size_t
+def interposed_pair() -> dict[str, int]:
+    """Both interposed channels for this phase: malloc bytes and direct anonymous mmap bytes (A.5.4/A.5.7)."""
     payload = C.body()
     tail = b'"' + b"," + C.canonical(_record_meta())[1:].encode() + b"\n"
-    lib.alloc_peak_reset()
-    sequence(payload, tail, False)
-    return int(lib.alloc_peak_peak())
+    return C.interposed_pair(C.shim(), lambda: sequence(payload, tail, False))
+
+
+def interposed() -> int:
+    return interposed_pair()["peak"]
 
 
 if __name__ == "__main__":
     print(C.canonical(main()))
 ```
 
-#### A.7.4 `probe3_decode.py`
+#### A.7.4 `tools/obs/probes/probe3_decode.py`
+
+phase 3 — §5.1.2 `decode_pass` release order on a `MAX_LINE` line
 
 ```python
 """Phase 3 - the section 5.1.2 `decode_pass` order on ONE line at MAX_LINE.
@@ -2294,23 +2558,23 @@ def main() -> list[dict]:
     return [C.measure("phase3_decode", lambda: decode_one(line), line_bytes=len(line))]
 
 
-def interposed() -> int:
-    """Peak malloc-level bytes for this phase with alloc_peak.so preloaded (A.5.4/A.7.9)."""
-    import ctypes
-
-    lib = ctypes.CDLL(None)
-    lib.alloc_peak_peak.restype = ctypes.c_size_t
+def interposed_pair() -> dict[str, int]:
+    """Both interposed channels for this phase: malloc bytes and direct anonymous mmap bytes (A.5.4/A.5.7)."""
     line = C.line_at(C.MAX_LINE)
-    lib.alloc_peak_reset()
-    decode_one(line)
-    return int(lib.alloc_peak_peak())
+    return C.interposed_pair(C.shim(), lambda: decode_one(line))
+
+
+def interposed() -> int:
+    return interposed_pair()["peak"]
 
 
 if __name__ == "__main__":
     print(C.canonical(main()))
 ```
 
-#### A.7.5 `probe4_decode_fresh.py`
+#### A.7.5 `tools/obs/probes/probe4_decode_fresh.py`
+
+phase 3 — the same order fed by a real `readline(MAX_LINE + 2)` buffer
 
 ```python
 """Phase 3 - the same release order fed from a real buffered reader (`readline(MAX_LINE + 2)`), as `decode_pass` does.
@@ -2343,7 +2607,9 @@ if __name__ == "__main__":
     print(C.canonical(main()))
 ```
 
-#### A.7.6 `probe5_byte_equality.py`
+#### A.7.6 `tools/obs/probes/probe5_byte_equality.py`
+
+§5.1.1 writer vs `_lines([record_to_json…])` (G-V14-02)
 
 ```python
 """Probe 5 - byte equality: the section 5.1.1 streaming writer vs `_lines([record_to_json(r) ...])` (G-V14-02).
@@ -2405,25 +2671,35 @@ if __name__ == "__main__":
     print(C.canonical(main()))
 ```
 
-#### A.7.7 `probe6_native.py`
+#### A.7.7 `tools/obs/probes/probe6_native.py`
+
+native term: `mallinfo2` samples + BOTH interposed channels (malloc, direct mmap)
 
 ```python
-"""Probe 6 - native memory around ONE local-TLS request (Appendix A.5).
+"""Probe 6 - native memory around ONE local-TLS request (Appendix A.5; direct-mmap fence A.5.7, V18-03).
 
-Two instruments, both reported, neither interchangeable:
+Three instruments, all reported, none interchangeable:
   * mallinfo2 at six sample points -> max(uordblks + hblkhd) since the first sample. A LOWER BOUND (A.5.2/A.5.3):
     it is a net difference, blind to allocations that live and die inside the window, blind to other threads'
     arenas, and (for uordblks alone) blind to mmapped blocks - so hblkhd is added.
-  * alloc_peak.so via LD_PRELOAD -> the true peak live-minus-baseline in the child that actually performs the
-    request, across all arenas and threads (A.5.4). This is the instrument the gate trusts when it is available.
+  * alloc_peak.so via LD_PRELOAD -> the true peak live-minus-baseline MALLOC bytes in the child that actually
+    performs the request, across all malloc arenas and threads (A.5.4).
+  * the same shim's direct-mmap counter -> the peak live anonymous-private MAPPING bytes since the same reset
+    (A.5.7): the channel a malloc-only interposer cannot see, because Python's object allocator mmaps its arenas.
 The gate NEVER treats the mallinfo2 delta as an upper bound.
+
+The TLS fixture is the repository's `tests/fixtures/tls/localhost.pem` when present; otherwise an ephemeral
+self-signed certificate is generated with `openssl` in a temporary directory, so a clean clone can run the gate
+without committing key material (A.1, probes/README.md).
 """
 from __future__ import annotations
 
+import atexit
 import ctypes
 import http.server
 import json
 import os
+import shutil
 import socket
 import ssl
 import subprocess
@@ -2434,9 +2710,36 @@ import threading
 from tools.obs.probes import probe_common as C
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CERT = os.path.abspath(os.path.join(HERE, "..", "..", "..", "tests", "fixtures", "tls", "localhost.pem"))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+FIXTURE = os.path.join(ROOT, "tests", "fixtures", "tls", "localhost.pem")
 SHIM = os.path.join(HERE, "alloc_peak.so")
 PAYLOAD = C.body(64 * 1024)          # a modest body: the native term is per-connection, not per-byte
+
+_MATERIAL: tuple[str, str] | None = None
+
+
+def material() -> tuple[str, str]:
+    """(certificate, private key) for the loopback server: the committed fixture, else an ephemeral one."""
+    global _MATERIAL
+    if _MATERIAL is not None:
+        return _MATERIAL
+    if os.path.exists(FIXTURE):
+        _MATERIAL = (FIXTURE, FIXTURE)          # combined PEM: the same file carries cert and key
+        return _MATERIAL
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        raise SystemExit(f"missing TLS fixture {FIXTURE} and no `openssl` to generate one (see probes/README.md)")
+    temporary = tempfile.mkdtemp(prefix="obs-probe6-")
+    atexit.register(shutil.rmtree, temporary, True)
+    cert, key = os.path.join(temporary, "cert.pem"), os.path.join(temporary, "key.pem")
+    done = subprocess.run([openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                           "-keyout", key, "-out", cert, "-subj", "/CN=localhost",
+                           "-addext", "subjectAltName=DNS:localhost"],
+                          capture_output=True, timeout=120)
+    if done.returncode != 0:
+        raise SystemExit(f"openssl could not create the TLS fixture: {done.stderr.decode()[-400:]}")
+    _MATERIAL = (cert, key)
+    return _MATERIAL
 
 
 class _Mi(ctypes.Structure):
@@ -2472,8 +2775,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
 
 def _serve() -> http.server.ThreadingHTTPServer:
+    cert, key = material()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(CERT)
+    context.load_cert_chain(cert, key)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     server.socket = context.wrap_socket(server.socket, server_side=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -2502,15 +2806,14 @@ def request_once(port: int, client: ssl.SSLContext) -> tuple[int, dict[int, int]
 
 
 def interposed_peak() -> dict[str, object] | None:
-    """Re-run the same request in a child with alloc_peak.so; the child reports its own peak."""
+    """Re-run the same request in a child with alloc_peak.so; the child reports its own two peaks."""
     if not os.path.exists(SHIM):
         return None
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as handle:
         report = handle.name
-    env = dict(os.environ, LD_PRELOAD=SHIM, ALLOC_PEAK_FILE=report,
-               PYTHONPATH=os.path.dirname(os.path.dirname(os.path.dirname(HERE))))
+    env = dict(os.environ, LD_PRELOAD=SHIM, ALLOC_PEAK_FILE=report, PYTHONPATH=ROOT)
     done = subprocess.run([sys.executable, "-m", "tools.obs.probes.probe6_native", "--child"],
-                          env=env, capture_output=True, timeout=300, cwd=os.path.dirname(HERE))
+                          env=env, capture_output=True, timeout=300, cwd=ROOT)
     if done.returncode != 0:
         return {"error": done.stderr.decode()[-400:]}
     data = json.loads(done.stdout.decode() or "{}")
@@ -2525,23 +2828,25 @@ def child() -> int:
     """Child entry: build the fixture FIRST, reset the shim, then measure only the request region."""
     lib = ctypes.CDLL(None)
     lib.alloc_peak_peak.restype = ctypes.c_size_t
-    client = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=CERT)
+    lib.alloc_peak_map_peak.restype = ctypes.c_size_t
+    cert, _ = material()
+    client = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=cert)
     server = _serve()
     try:
         lib.alloc_peak_reset()                       # baseline AFTER the SSL context and the listener exist
         received, _ = request_once(server.server_address[1], client)
         peak = int(lib.alloc_peak_peak())
+        map_peak = int(lib.alloc_peak_map_peak())
     finally:
         server.shutdown()
         server.server_close()
-    print(json.dumps({"peak": peak, "bytes_received": received}))
+    print(json.dumps({"peak": peak, "map_peak": map_peak, "bytes_received": received}))
     return 0
 
 
 def main() -> list[dict]:
-    if not os.path.exists(CERT):
-        raise SystemExit(f"missing TLS fixture {CERT} (see probes/README.md)")
-    client = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=CERT)
+    cert, _ = material()
+    client = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=cert)
     server = _serve()
     try:
         before = sample()
@@ -2571,7 +2876,9 @@ if __name__ == "__main__":
     print(C.canonical(main()))
 ```
 
-#### A.7.8 `probe7_structure.py`
+#### A.7.8 `tools/obs/probes/probe7_structure.py`
+
+phase 3 — §5.1.2 `scan_structure` (parse + key check + discard)
 
 ```python
 """Phase 3 - the section 5.1.2 `scan_structure` pass: parse + key check + DISCARD, no body decode.
@@ -2604,21 +2911,42 @@ if __name__ == "__main__":
     print(C.canonical(main()))
 ```
 
-#### A.7.9 `alloc_peak.c`
+#### A.7.9 `tools/obs/probes/alloc_peak.c`
+
+`LD_PRELOAD` dual-channel peak shim: malloc family AND direct anonymous `mmap` (A.5.7)
 
 ```c
-// alloc_peak.c - LD_PRELOAD peak allocator for Appendix A.5 (V17-04).
+// alloc_peak.c - LD_PRELOAD peak allocator for Appendix A.5 (V17-04; direct-mmap fence added by V18-03).
 //
-// Counts LIVE malloc-family bytes across every arena and thread (atomic) and tracks the PEAK delta since the last
-// alloc_peak_reset(). This is what mallinfo2 cannot give: a difference of two samples misses allocations that live and
-// die between them, mallinfo2 sees only the calling thread's arena(s), and uordblks alone excludes mmapped blocks.
+// TWO counters, because one allocator family is not the whole story:
 //
-//   void   alloc_peak_reset(void): baseline := live, peak := 0 (call right before the measured region)
-//   size_t alloc_peak_peak(void):  peak live-minus-baseline since the reset, in bytes
+//   1. MALLOC FAMILY (malloc/calloc/realloc/free): live bytes across every malloc arena and thread, atomically, with
+//      the PEAK delta since the last reset. This is what mallinfo2 cannot give: a difference of two samples misses
+//      allocations that live and die between them, mallinfo2 sees only the calling thread's arena(s), and uordblks
+//      alone excludes mmapped blocks.
 //
-// On exit it also writes {"peak":N} to $ALLOC_PEAK_FILE when set (fallback for processes that cannot call the getter).
+//   2. DIRECT mmap (mmap/mmap64/munmap, MAP_ANONYMOUS|MAP_PRIVATE only): live mapped bytes and their peak since the
+//      last reset. Python's own object allocator does NOT go through malloc for its 1 MiB arenas, so a malloc-only
+//      interposer is blind to them (A.5.7). Blocks that malloc itself serves with mmap are NOT double counted here:
+//      glibc calls __mmap internally, not the interposable symbol, and they are already counted by malloc_usable_size.
+//
+// Public symbols:
+//   void   alloc_peak_reset(void):    baseline := live, peak := 0, and the same for the mmap counter
+//   size_t alloc_peak_peak(void):     peak live-minus-baseline malloc bytes since the reset
+//   size_t alloc_peak_map_peak(void): peak live anonymous-private mmap bytes since the reset (A.5.7)
+//
+// On exit it also writes {"peak":N,"map_peak":M} to $ALLOC_PEAK_FILE when set (fallback for processes that cannot
+// call the getters).
+//
 // Build: cc -shared -fPIC -O2 -o alloc_peak.so alloc_peak.c
-// Limits: malloc family only - direct mmap by a library and kernel socket buffers are not counted (A.5.2).
+//
+// FENCED LIMITS (A.5.4/A.5.7 - stated, not hidden):
+//   * not intercepted: posix_memalign/aligned_alloc/memalign/valloc/pvalloc (glibc serves them through malloc on the
+//     measured paths, but a direct call would be invisible), brk/sbrk, alloca, thread stacks, static/BSS, and any
+//     library that calls its own private allocator;
+//   * file-backed and shared mappings are excluded on purpose (page cache is out of Domain B, A.5.6);
+//   * the mmap table is a single-writer structure: concurrent mappers are counted in the totals, but a munmap racing
+//     the snapshot may leave one entry stale. The measured regions are single-threaded (A.5.7).
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <malloc.h>
@@ -2626,6 +2954,9 @@ if __name__ == "__main__":
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 static _Atomic size_t live = 0;
 static _Atomic size_t base = 0;
@@ -2637,21 +2968,61 @@ static void *(*real_realloc)(void *, size_t);
 
 static size_t usable(void *p) { return p ? malloc_usable_size(p) : 0; }
 
+static void observe_peak(_Atomic size_t *baseline, size_t now, _Atomic size_t *high_water) {
+    size_t b = atomic_load(baseline);
+    size_t rel = now > b ? now - b : 0;
+    size_t seen = atomic_load(high_water);
+    while (rel > seen && !atomic_compare_exchange_weak(high_water, &seen, rel)) { }
+}
+
 static void track(long delta) {
     size_t now = delta >= 0 ? atomic_fetch_add(&live, (size_t)delta) + (size_t)delta
                             : atomic_fetch_sub(&live, (size_t)-delta) - (size_t)-delta;
-    size_t b = atomic_load(&base);
-    size_t rel = now > b ? now - b : 0;
-    size_t seen = atomic_load(&peak);
-    while (rel > seen && !atomic_compare_exchange_weak(&peak, &seen, rel)) { }
+    observe_peak(&base, now, &peak);
+}
+
+/* ---- direct anonymous-private mappings (A.5.7) ---------------------------------------------------------------- */
+
+#define MAP_SLOTS 512
+static _Atomic size_t map_state[3];          /* 0: live, 1: baseline, 2: peak */
+static struct { void *addr; size_t len; } map_tab[MAP_SLOTS];
+static size_t map_used = 0;
+
+static void map_tracked(void *addr, size_t len) {
+    size_t now = atomic_fetch_add(&map_state[0], len) + len;
+    if (map_used < MAP_SLOTS) {
+        map_tab[map_used].addr = addr;
+        map_tab[map_used].len = len;
+        map_used += 1;
+    }
+    observe_peak(&map_state[1], now, &map_state[2]);
+}
+
+static void map_untracked(void *addr, size_t len) {
+    for (size_t i = 0; i < map_used; i++) {
+        if (map_tab[i].addr != addr) continue;
+        size_t held = map_tab[i].len;
+        size_t drop = len < held ? len : held;
+        size_t now = atomic_load(&map_state[0]);
+        atomic_store(&map_state[0], now > drop ? now - drop : 0);
+        map_used -= 1;
+        map_tab[i] = map_tab[map_used];
+        return;
+    }
 }
 
 void alloc_peak_reset(void) {
     atomic_store(&base, atomic_load(&live));
     atomic_store(&peak, 0);
+    atomic_store(&map_state[1], atomic_load(&map_state[0]));
+    atomic_store(&map_state[2], 0);
 }
 
 size_t alloc_peak_peak(void) { return atomic_load(&peak); }
+
+size_t alloc_peak_map_peak(void) { return atomic_load(&map_state[2]); }
+
+/* ---- malloc family --------------------------------------------------------------------------------------------- */
 
 void *malloc(size_t size) {
     if (!real_malloc) real_malloc = dlsym(RTLD_NEXT, "malloc");
@@ -2662,7 +3033,8 @@ void *malloc(size_t size) {
 
 void free(void *p) {
     if (!real_free) real_free = dlsym(RTLD_NEXT, "free");
-    track(-(long)usable(p));
+    long was = (long)usable(p);
+    track(-was);
     real_free(p);
 }
 
@@ -2681,31 +3053,57 @@ void *realloc(void *old, size_t size) {
     return p;
 }
 
+/* ---- direct mmap family ---------------------------------------------------------------------------------------- */
+
+#if defined(SYS_mmap) && defined(SYS_munmap)
+void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    void *p = (void *)syscall(SYS_mmap, addr, len, prot, flags, fd, off);
+    if (p != MAP_FAILED && (flags & MAP_ANONYMOUS) && (flags & MAP_PRIVATE)) map_tracked(p, len);
+    return p;
+}
+
+void *mmap64(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    return mmap(addr, len, prot, flags, fd, off);
+}
+
+int munmap(void *addr, size_t len) {
+    int rc = (int)syscall(SYS_munmap, addr, len);
+    if (rc == 0) map_untracked(addr, len);
+    return rc;
+}
+#endif
+
 __attribute__((destructor)) static void report(void) {
     const char *path = getenv("ALLOC_PEAK_FILE");
     if (!path || !*path) return;
     FILE *f = fopen(path, "w");
     if (!f) return;
-    fprintf(f, "{\"peak\":%zu}\n", atomic_load(&peak));
+    fprintf(f, "{\"peak\":%zu,\"map_peak\":%zu}\n", atomic_load(&peak), atomic_load(&map_state[2]));
     fclose(f);
 }
 ```
 
-#### A.7.10 `run_all.py`
+#### A.7.10 `tools/obs/probes/run_all.py`
+
+driver: `--check` / `--record` / `--manifest` / `--interpose`
 
 ```python
-"""Driver for the Appendix A probe suite (V17-04).
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03).
 
-  python -m tools.obs.probes.run_all --check     # CI gate: exit 0 pass / 1 mismatch / 2 environment refused
-  python -m tools.obs.probes.run_all --record    # print a new expected.json body for a REVIEWED revision
+  python -m tools.obs.probes.run_all --check      # CI gate: exit 0 pass / 1 mismatch / 2 environment refused
+  python -m tools.obs.probes.run_all --record     # print a new expected.json body for a REVIEWED revision
+  python -m tools.obs.probes.run_all --manifest   # print {path: sha256} for every file of this suite (A.0)
   python -m tools.obs.probes.run_all --interpose <probe>   # internal: one phase under alloc_peak.so (A.7.9)
 
-Two instruments are checked per phase: `tracemalloc` (Python-object attribution) and, when `alloc_peak.so` builds,
-the interposer (malloc-level, all arenas and threads, including allocations that live and die inside the region).
-mallinfo2 figures are REPORTED only: they are lower bounds (A.5.3) and are never gated.
+Instruments per phase: `tracemalloc` (Python-object attribution), the interposer's malloc counter (every malloc arena
+and thread, including allocations that live and die inside the region) and, when the request region is measured, the
+interposer's direct-mmap counter (anonymous private mappings, the channel a malloc-only interposer cannot see).
+mallinfo2 figures are REPORTED only: they are lower bounds (A.5.3) and are never gated. Arena-scale mmap reservations
+are reported and fenced, not added to a tracemalloc figure (A.5.7 states why they are not the same quantity).
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import os
@@ -2722,6 +3120,9 @@ PINNED_PYTHON = "3.12.3"          # A.1: another interpreter invalidates every r
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 SHIM = os.path.join(HERE, "alloc_peak.so")
+SUITE = ("__init__.py", "alloc_peak.c", "expected.json", "probe_common.py", "probe1_phase1.py", "probe2_seal.py",
+         "probe3_decode.py", "probe4_decode_fresh.py", "probe5_byte_equality.py", "probe6_native.py",
+         "probe7_structure.py", "README.md", "run_all.py")
 
 
 def collect() -> list[dict]:
@@ -2732,7 +3133,7 @@ def collect() -> list[dict]:
     return results
 
 
-def interposed(measurement: str) -> int | None:
+def interposed(measurement: str) -> dict[str, int] | None:
     """Re-run one phase in a child with alloc_peak.so preloaded; None when the shim cannot be used."""
     module = BY_MEASUREMENT.get(measurement)
     if module is None or not os.path.exists(SHIM):
@@ -2742,7 +3143,20 @@ def interposed(measurement: str) -> int | None:
                           capture_output=True, timeout=300, cwd=ROOT)
     if done.returncode != 0:
         return None
-    return int(json.loads(done.stdout.decode() or "{}")["peak"])
+    data = json.loads(done.stdout.decode() or "{}")
+    return {"peak": int(data["peak"]), "map_peak": int(data.get("map_peak", 0))}
+
+
+def manifest() -> dict[str, str]:
+    """sha256 of every suite file: the A.0 table a reviewer (and CI) can diff against the repository."""
+    out = {}
+    for name in SUITE:
+        path = os.path.join(HERE, name)
+        if not os.path.exists(path):
+            out[name] = "MISSING"
+            continue
+        out[name] = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    return out
 
 
 def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]:
@@ -2764,32 +3178,57 @@ def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]
             if abs(got["peak"] - want["peak"]) > want["peak"] * tolerance:
                 failures.append(f"{name}: peak {got['peak']} != recorded {want['peak']} (tolerance {tolerance:.0%})")
         if want.get("interposed") is not None and name != "native_headroom":
-            peak = probe_interposed(name)
-            if peak is None:
-                failures.append(f"{name}: interposer unavailable — build alloc_peak.so (A.7.8)")
-            elif want.get("bound") is not None and peak > want["bound"]:
+            instrument = probe_interposed(name)
+            if instrument is None:
+                failures.append(f"{name}: interposer unavailable — build alloc_peak.so (A.7.9)")
+                continue
+            peak = instrument["peak"]
+            if want.get("bound") is not None and peak > want["bound"]:
                 failures.append(f"{name}: interposed peak {peak} exceeds the bound {want['bound']}")
             elif abs(peak - want["interposed"]) > want["interposed"] * tolerance:
                 failures.append(f"{name}: interposed {peak} != recorded {want['interposed']}")
+            # the direct-mmap channel is bounded by the headroom constant for phases too (A.5.7): arena reservations
+            # are not live Domain B bytes, so no sum is taken, but a measurement-region mapping larger than the
+            # constant would mean the malloc figure is under-reporting and must be reviewed before it is trusted.
+            if want.get("interposed_map_peak") is not None and instrument["map_peak"] > C.HTTP_HEADROOM:
+                failures.append(f"{name}: direct-mmap channel {instrument['map_peak']} > HTTP_HEADROOM "
+                                f"{C.HTTP_HEADROOM} (A.5.7: the malloc figure is no longer a usable bound)")
         if name == "native_headroom":
             detail = got.get("detail") or {}
-            peak = (detail.get("interposed") or {}).get("peak")
-            if peak is None:
+            instrument = detail.get("interposed") or {}
+            peak, map_peak = instrument.get("peak"), instrument.get("map_peak")
+            if peak is None or map_peak is None:
                 failures.append("native_headroom: interposer unavailable (the analytic term cannot be checked)")
-            elif peak > C.HTTP_HEADROOM:
+                continue
+            if peak > C.HTTP_HEADROOM:
                 failures.append(f"native_headroom: request-region malloc peak {peak} > HTTP_HEADROOM {C.HTTP_HEADROOM}")
+            # V18-03 fence: the direct-mmap channel is added to the malloc channel, so the SUM must fit the constant.
+            if peak + map_peak > C.HTTP_HEADROOM:
+                failures.append(f"native_headroom: malloc {peak} + direct mmap {map_peak} > "
+                                f"HTTP_HEADROOM {C.HTTP_HEADROOM} (A.5.7 fence)")
             # the mallinfo2 figure is a LOWER BOUND and is deliberately NOT compared to a recorded value
     return failures
 
 
 def main(argv: list[str]) -> int:
     mode = argv[1] if len(argv) > 1 else "--check"
+    if mode == "--manifest":
+        print(json.dumps(manifest(), indent=2, sort_keys=True))
+        return 0
     if mode == "--interpose":
         module = importlib.import_module(f"tools.obs.probes.{argv[2]}")
-        print(json.dumps({"peak": int(module.interposed())}))
+        if hasattr(module, "interposed_pair"):
+            pair = module.interposed_pair()
+        else:
+            pair = {"peak": int(module.interposed()), "map_peak": 0}
+        print(json.dumps({"peak": int(pair["peak"]), "map_peak": int(pair.get("map_peak", 0))}))
         return 0
     if sys.version.split()[0] != PINNED_PYTHON:
         print(f"refused: interpreter {sys.version.split()[0]} != {PINNED_PYTHON} (A.1)", file=sys.stderr)
+        return 2
+    missing = [name for name in SUITE if not os.path.exists(os.path.join(HERE, name))]
+    if missing:
+        print(f"refused: suite is incomplete, missing {missing} (A.0)", file=sys.stderr)
         return 2
     measured = collect()
     if mode == "--record":
@@ -2809,69 +3248,141 @@ if __name__ == "__main__":
 
 #### A.7.11 `tools/obs/probes/README.md`
 
-```markdown
-# Appendix A probes (V17-04)
+run instructions, TLS fixture policy, instrument limits, what needs a doc revision
 
-    python -m tools.obs.probes.run_all --check     # CI gate; exit 0 pass, 1 mismatch, 2 environment refused
-    python -m tools.obs.probes.run_all --record    # print a new expected.json body for a REVIEWED revision
+````md
+# Appendix A probe suite (`tools/obs/probes/`)
 
-## Environment pin
+Physical, runnable form of the memory protocol in *OBS-01/02 Session Runner and Evidence Writer — Architectural
+Blueprint* (Appendix A). The document's A.7 listings and this directory are the SAME bytes: A.0 records a SHA-256 for
+every file, and `--manifest` prints the table to diff against it. If a listing and a file ever disagree, the file is
+what runs and the document is wrong (G-V18-02).
 
-CPython 3.12.3 with OpenSSL 3.0.13, Linux x86-64, glibc `mallinfo2`, `cc` for the interposer. Any other interpreter is
-refused (exit 2): the recorded byte counts are interpreter-specific (Appendix A.1).
+These probes measure the runner's three transient phases (§6.5), the runner's seal byte-equality (§5.1.1) and the
+native cost of one loopback TLS request (§6.6/A.5). They do NOT contact any exchange, use any network beyond
+`127.0.0.1`, or import anything outside the standard library.
+
+## Run
+
+```sh
+cd <repository root>
+cc -shared -fPIC -O2 -o tools/obs/probes/alloc_peak.so tools/obs/probes/alloc_peak.c   # once per machine
+PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check
+```
+
+Exit status: `0` every recorded value reproduced and every bound held; `1` a mismatch (printed on stderr); `2`
+environment refused (interpreter is not the pinned CPython 3.12.3, the suite is incomplete, or `openssl` is missing).
+
+Other modes:
+
+```sh
+PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --record     # new expected.json body (REVIEWED revisions only)
+PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --manifest   # {path: sha256} for every suite file (A.0)
+```
+
+## Files
+
+| File | Role |
+|---|---|
+| `probe_common.py` | constants (mirroring §12) and the deterministic worst-case fixtures; the shim's two getters |
+| `probe1_phase1.py` | phase 1 — request path: 64 KiB chunked scratch accumulation, then `bytes(scratch)` |
+| `probe2_seal.py` | phase 2 — §5.1.1 seal order, plus the BANNED retain-the-chunk variant (must fail its bound) |
+| `probe3_decode.py` | phase 3 — the §5.1.2 `decode_pass` release order on ONE line at `MAX_LINE` |
+| `probe4_decode_fresh.py` | phase 3 — the same order fed from a real `readline(MAX_LINE + 2)` buffer |
+| `probe5_byte_equality.py` | §5.1.1 streaming writer byte-equality over the full session budget |
+| `probe6_native.py` | native memory around one loopback TLS request: `mallinfo2` samples + the interposer's two channels |
+| `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
+| `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and direct anonymous-`mmap` peak |
+| `run_all.py` | driver: `--check`, `--record`, `--manifest`, `--interpose` |
+| `expected.json` | the recorded values, their bounds and tolerances (A.2/A.3) |
+| `README.md` | this file |
+
+## Instruments, and what each one cannot see
+
+Three instruments, none interchangeable; the document's A.5 fences each one explicitly.
+
+* **`tracemalloc`** — Python-object bytes by allocation site. Blind to C-level and allocator-internal memory.
+* **`alloc_peak.c` malloc counter** — live `malloc`/`calloc`/`realloc`/`free` bytes across every malloc arena and
+  thread, peak since `alloc_peak_reset()`. Counts blocks that glibc serves with `mmap` (they arrive through
+  `malloc`), and counts allocations that live and die inside the region. Blind to memory obtained by calling `mmap`
+  DIRECTLY — which is exactly how CPython's own object allocator obtains its 1 MiB arenas.
+* **`alloc_peak.c` mmap counter** — live `MAP_ANONYMOUS|MAP_PRIVATE` mapping bytes, same reset/peak discipline. This
+  closes the channel above for the native region: `probe6` reports it and the gate requires
+  `malloc peak + mmap peak <= HTTP_HEADROOM`.
+* **`mallinfo2()` samples** — REPORTED ONLY, never gated. A difference of two samples is a LOWER BOUND (A.5.2/A.5.3):
+  it misses buffers that live and die between samples, sees only the calling thread's arena(s), and `uordblks` alone
+  excludes mmapped blocks.
+
+Arena-scale `mmap` reservations are not added to a `tracemalloc` figure for the phases (§A.5.7): a reservation is
+address space, and the Python objects inside a touched pool are already counted by `tracemalloc`. Adding both would
+double-count. The fence is applied where the two channels describe disjoint consumers: the native request region.
 
 ## TLS fixture (probe6)
 
-    mkdir -p tests/fixtures/tls && cd tests/fixtures/tls
-    openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 1 \
-        -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost"
-    cat cert.pem key.pem > localhost.pem
+`probe6` uses `tests/fixtures/tls/localhost.pem` when it exists (a combined certificate + key PEM; that is what the
+repository's transport tests use). When it is absent — a clean clone — the probe generates an ephemeral self-signed
+certificate with `openssl` in a temporary directory and deletes it on exit, so no key material is committed and the
+gate still runs. To pin the exact recorded values, commit the fixture:
 
-`localhost.pem` (certificate first, then key) is what `probe6_native.py` loads for both ends.
-
-## Interposer
-
-    cc -shared -fPIC -O2 -o tools/obs/probes/alloc_peak.so tools/obs/probes/alloc_peak.c
-
-`alloc_peak.so` is a build artifact: never commit it. Without it, `--check` fails both phase interposition and
-`native_headroom`, because the analytic headroom term must be checked, not inferred (A.5.5).
-
-## Discipline
-
-* Inputs are built OUTSIDE the measured region (`probe_common.measure`).
-* `mallinfo2` figures are LOWER BOUNDS (A.5.2/A.5.3): never compare them to a bound, never lower `HTTP_HEADROOM`
-  because a sample came out small.
-* Changing a measurement sequence, a bound, an input size or an expected value requires a reviewed revision of the
-  design document's Appendix A (G-V17-04); `--record` output is a proposal, not a new baseline.
-* `tests/fixtures/tls/` is test-only material; the private key there is a throwaway generated by the command above.
-
+```sh
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=localhost \
+  -addext subjectAltName=DNS:localhost -keyout key.pem -out cert.pem
+cat cert.pem key.pem > localhost.pem
 ```
+
+An ephemeral certificate changes the handshake's certificate chain size, which moves the request-region peak by a few
+kilobytes; `expected.json` records a 20 % tolerance for that reason, and the analytic constant has 50 KiB+ of slack.
+
+## What the gate asserts
+
+1. every recorded `tracemalloc` peak, within its tolerance, and every phase bound;
+2. the banned retain-the-chunk variant FAILS its bound (a mutation that must be killed);
+3. the interposed malloc peak for each phase, within its tolerance, and inside the same bound;
+4. byte equality of the streaming seal over the full session budget;
+5. the native request region: malloc peak and direct-`mmap` peak each measured, and their SUM inside
+   `HTTP_HEADROOM = 262,144 B`;
+6. interpreter identity (`3.12.3`) and a complete file set — a partially copied suite refuses to run rather than
+   silently narrowing the protocol.
+
+A new interpreter, a new `MAX_BODY_BYTES`, a changed writer/reader or a new receipt schema invalidates every recorded
+value: re-run `--record` inside a REVIEWED revision and record the numbers in A.2/A.3 in the same commit (D34/D42).
+````
+
 #### A.7.12 `tools/obs/probes/expected.json`
+
+the recorded values, bounds and tolerances (§6.5, A.2/A.3)
 
 ```json
 {
-  "env": {"python": "3.12.3", "openssl": "3.0.13", "platform": "Linux x86-64", "updated": "v1.8"},
+  "env": {"python": "3.12.3", "openssl": "3.0.13", "platform": "Linux x86-64", "updated": "v1.9"},
   "measurements": [
     {"probe": "phase1_request", "peak": 8396983, "bound": 8781824, "tolerance": 0.02,
-     "instrument": "tracemalloc", "interposed": 8396848, "v17_campaign": 8462496},
+     "instrument": "tracemalloc", "interposed": 8400920, "interposed_map_peak": 0, "v17_campaign": 8462496},
     {"probe": "phase2_seal", "peak": 148004, "bound": 151552, "tolerance": 0.02,
-     "instrument": "tracemalloc", "interposed": 147848, "v17_campaign": 148113},
+     "instrument": "tracemalloc", "interposed": 147848, "interposed_map_peak": 0, "v17_campaign": 148113},
     {"probe": "phase2_seal_no_del", "peak": 5656528, "bound": 151552, "tolerance": 0.02,
      "instrument": "tracemalloc", "expected_fail": true, "v17_campaign": 5656645},
     {"probe": "phase3_decode", "peak": 11188520, "bound": 11202224, "tolerance": 0.02,
-     "instrument": "tracemalloc", "interposed": 11186544, "v17_campaign": 11188261},
+     "instrument": "tracemalloc", "interposed": 11186544, "interposed_map_peak": 0, "v17_campaign": 11188261},
     {"probe": "phase3_decode_fresh", "peak": 11188600, "bound": 11202224, "tolerance": 0.02,
      "instrument": "tracemalloc", "v17_campaign": 11188197},
     {"probe": "phase3_structure", "peak": 11188520, "bound": 11202224, "tolerance": 0.02,
      "instrument": "tracemalloc", "v17_campaign": 11188197},
     {"probe": "byte_equality", "peak": 0, "bound": null, "bytes": 8511232, "records": 1020},
-    {"probe": "native_headroom", "peak": 159360, "bound": 262144, "tolerance": 0.20,
-     "instrument": "mallinfo2 sample max (LOWER BOUND)", "interposed": 227128, "end_delta": 87088}
+    {"probe": "native_headroom", "peak": 112272, "bound": 262144, "tolerance": 0.20,
+     "instrument": "mallinfo2 sample max (LOWER BOUND)", "interposed": 195184, "interposed_map_peak": 16384,
+     "end_delta": 72272}
   ]
 }
 ```
 
-`peak` for `native_headroom` is the sample maximum of the recording run; it is reported, never gated (A.5.3).
+#### A.7.13 `tools/obs/probes/__init__.py`
 
-End of v1.8. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
+package marker (empty file; `touch tools/obs/probes/__init__.py`)
+
+```python
+
+```
+
+End of v1.9. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
 document, not an implementation choice.
