@@ -60,9 +60,9 @@
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 8970,
+        "bytes": 9676,
         "path": "tools/obs/probes/README.md",
-        "sha256": "4e7e6e80484b815021496cd42ab62645b04f6a11d80dd6617d46680df3eaa8dd"
+        "sha256": "9afd8996efcffdd191011a16a5de45203e5ac18e191460945be037dc2fbaf501"
       },
       {
         "bytes": 0,
@@ -70,9 +70,9 @@
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       {
-        "bytes": 16816,
+        "bytes": 17933,
         "path": "tools/obs/probes/alloc_peak.c",
-        "sha256": "4765757008287d97c96ce2966c47d79804bbd4888fbd5df707043b7f043d52b8"
+        "sha256": "4e15e8a8bd66f368a39fb28027e378ca6873617914067248d7e43129bb1417d6"
       },
       {
         "bytes": 1358,
@@ -110,9 +110,9 @@
         "sha256": "d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4"
       },
       {
-        "bytes": 10465,
+        "bytes": 17934,
         "path": "tools/obs/probes/probe8_mmap_threads.py",
-        "sha256": "42fe25c453f14728e640826ecd463e7ae2e5c99c4f23afd79d30546fe4ee593d"
+        "sha256": "ffb160e5b6559e5cc6e644b7383f75df6dd5f85bc4786e3fea58fa0a58b13081"
       },
       {
         "bytes": 4044,
