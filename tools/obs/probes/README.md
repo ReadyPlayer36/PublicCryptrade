@@ -35,6 +35,9 @@ PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check --report artifacts/p
 ## The manifest is the gate (V19-05)
 
 `expected.json` carries a `manifest` block listing every other file in this directory with its byte size and SHA-256.
+The block is validated as DATA before it is trusted (V20-14): canonical `tools/obs/probes/<name>` paths only, no duplicate
+paths or basenames, `bytes` a non-negative integer, `sha256` 64 lowercase hex, no unknown fields, no row for
+`expected.json` itself and none for the `alloc_peak.so` build artifact — a malformed entry is a refusal to run.
 `--check` verifies it BEFORE measuring anything and refuses (exit 2) on a modification, an addition or a deletion, so
 the code that produces a number is exactly the code that was reviewed. `expected.json` cannot contain its own digest;
 A.0 pins it against the document instead, and `--manifest` prints its digest too.
@@ -51,7 +54,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe3_decode.py` | phase 3 — the §5.1.2 `decode_pass` release order on ONE line at `MAX_LINE` |
 | `probe4_decode_fresh.py` | phase 3 — the same order fed from a real `readline(MAX_LINE + 2)` buffer |
 | `probe5_byte_equality.py` | §5.1.1 streaming writer byte-equality over the full session budget |
-| `probe6_native.py` | native memory around one loopback TLS request: `mallinfo2` samples, both interposed channels, and the five-stage / cold-vs-warm inventory (A.5.8) |
+| `probe6_native.py` | native memory around one loopback TLS request: `mallinfo2` samples, both interposed channels, the five-stage / cold-vs-warm inventory (A.5.8), and the GATED `realloc`-failure regression (`--realloc`, A.5.4 V20-11/V20-12) |
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
@@ -72,8 +75,9 @@ Three instruments, none interchangeable; the document's A.5 fences each one expl
   (`realloc(p, 0)` is a free); subtracting the old size on failure would under-count a live block forever.
 * **`alloc_peak.c` mmap counter** — live `MAP_ANONYMOUS|MAP_PRIVATE` mapping bytes, same reset/peak discipline, with a
   locked range table: partial unmaps subtract only the overlap, `mremap` is remove+add, adjacent ranges coalesce, and a
-  table overflow ABORTS rather than dropping an entry (an under-count is the one failure this instrument exists to
-  prevent). `probe8` proves all four properties — and its overflow check is deliberately not "a child with capacity 1
+  table overflow ABORTS rather than dropping an entry, and so does a subtraction larger than the tracked total
+  (`map_fail_underflow`, V20-13): clamping at zero would preserve a small, plausible, permanent under-count, which is the
+  one failure this instrument exists to prevent (V19-01). `probe8` proves all four properties — and its overflow check is deliberately not "a child with capacity 1
   must abort": the interpreter's own startup mappings fill such a table first, so an abort proves nothing. It requires
   the EXACT diagnostic line with the numbers the child itself printed, flushed `MAPPED` lines showing the abort followed
   the intended mapping, the table filled to exactly its capacity, and a NEGATIVE CONTROL that reaches `SURVIVED` with the
