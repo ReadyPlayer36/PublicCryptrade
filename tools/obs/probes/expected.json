@@ -3,7 +3,7 @@
     "openssl": "3.0.13",
     "platform": "Linux x86-64",
     "python": "3.12.3",
-    "updated": "v2.0"
+    "updated": "v2.1"
   },
   "inventory": {
     "items": [
@@ -60,9 +60,9 @@
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 9676,
+        "bytes": 10404,
         "path": "tools/obs/probes/README.md",
-        "sha256": "9afd8996efcffdd191011a16a5de45203e5ac18e191460945be037dc2fbaf501"
+        "sha256": "229cf6f05951990ce9bbd770a54c1fc6b47b5ccff20dec301b68162826aa2c2c"
       },
       {
         "bytes": 0,
@@ -70,9 +70,9 @@
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       {
-        "bytes": 17933,
+        "bytes": 19327,
         "path": "tools/obs/probes/alloc_peak.c",
-        "sha256": "4e15e8a8bd66f368a39fb28027e378ca6873617914067248d7e43129bb1417d6"
+        "sha256": "19064773bb13436d9386ac896fa9ab3021f01afe0e5bf05a03b1bfdca210efa3"
       },
       {
         "bytes": 1358,
@@ -100,9 +100,9 @@
         "sha256": "61278c289c1ab2cb10ed7305e3e572e63debed8f1a9b6997a2a440b5c0572a47"
       },
       {
-        "bytes": 15462,
+        "bytes": 21295,
         "path": "tools/obs/probes/probe6_native.py",
-        "sha256": "f98854229e0c02f2b5781b2fb4daaabce8fc283b89fe2a494473a1ce148929bc"
+        "sha256": "0c052217fccbdc86a602692c0bbc42f09e8db17a1060b72738e10bcce1ccb752"
       },
       {
         "bytes": 780,
@@ -120,9 +120,9 @@
         "sha256": "c1662be01889bddbdba6426e566cd3da9b2bb7e50a955000c35670b9f7e5cca4"
       },
       {
-        "bytes": 15668,
+        "bytes": 20851,
         "path": "tools/obs/probes/run_all.py",
-        "sha256": "badb272cdf46a55696270c382d8484fa16f92c5d4f071b51dbf2b511ceebb59f"
+        "sha256": "16ca92b8cba0b076d6693913d7db90bb6ef80de84032ee8d77531e96ed96e135"
       }
     ]
   },
@@ -206,6 +206,13 @@
       "peak": 8519680,
       "probe": "mmap_accounting",
       "threads": 8
+    },
+    {
+      "bound": 12582912,
+      "instrument": "alloc_peak.so malloc channel, one child: 4 MiB, a failed realloc(p, SIZE_MAX), a second 4 MiB (A.5.4, V20-11/V20-12)",
+      "peak": 8398608,
+      "probe": "realloc_accounting",
+      "tolerance": 0.02
     }
   ],
   "schema": "obs-probes/2"
