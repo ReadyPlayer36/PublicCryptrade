@@ -13,16 +13,34 @@ argued:
      live at the same instant; the recorded peak must be at least the sum (a lost update makes it smaller) and the
      phase must END at exactly the baseline, with the range table back to its starting size (an entry leaked per
      iteration would grow the table, and the shim aborts rather than drop one).
-  D. CAPACITY EXHAUSTION fails closed: a child with ALLOC_PEAK_MAP_SLOTS=1 that needs two ranges must die with
-     SIGABRT and a diagnostic - never continue with an untracked mapping, which would silently under-count.
+  D. CAPACITY EXHAUSTION fails closed, and is proven to happen WHERE INTENDED. The interpreter itself maps anonymous
+     memory before any probe code runs (its arenas are part of the tracked table), so a fixed `ALLOC_PEAK_MAP_SLOTS=1`
+     aborts during startup - the v2.0 form of this check passed for exactly that reason, having never reached its own
+     mapping. This probe therefore measures the child's own baseline first, sets the capacity relative to it
+     (PRESSURE_SLOTS, comfortably above startup), and requires all four of:
+       D1. the child prints a flushed MAPPED line before dying, so the abort is known to have happened AFTER the
+           explicit test mapping - and that line must report tracked == capacity and live == baseline + the bytes the
+           child itself mapped;
+       D2. the child fills the table EXACTLY (capacity - baseline regions successful mappings, no more, no fewer);
+       D3. the child dies with SIGABRT, not an exit code, and its stderr carries the exact diagnostic string with the
+           exact tracked/capacity/live numbers the same child just printed - one line, byte for byte, not a substring;
+       D4. a NEGATIVE CONTROL - the identical program, identical preload, capacity left at the compiled default and only
+           a handful of explicit mappings - completes, prints SURVIVED, exits 0, and emits no diagnostic. Without it,
+           an abort caused by anything else (a bad argument, a preload failure) would look like a pass.
+
+     Mapping addresses are MAP_FIXED_NOREPLACE and 1 GiB apart so no two explicit mappings can coalesce, which would
+     otherwise make the table fill later than capacity predicts.
 
 The probe runs its measurements in a child process with `alloc_peak.so` preloaded. Exits 0 when every property holds.
 """
 from __future__ import annotations
 
 import ctypes
+import itertools
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import threading
@@ -33,12 +51,65 @@ SHIM = os.path.join(HERE, "alloc_peak.so")
 
 PROT_READ_WRITE = 0x1 | 0x2
 MAP_PRIVATE_ANON = 0x02 | 0x20
+MAP_FIXED_NOREPLACE = 0x10 | 0x100000
 MREMAP_MAYMOVE = 1
+
+# Every mapping this probe makes is placed explicitly and 1 GiB from its neighbour. A kernel-chosen address can land
+# flush against an existing tracked range; the shim coalesces adjacent ranges (correctly, to keep the table bounded), and
+# the region-count assertions of property A would then depend on where the kernel happened to put the mapping. Fixed,
+# isolated addresses remove that degree of freedom, so "+1 range per mapping, +2 after a hole" is a property of the
+# bookkeeping rather than of the address layout.
+ISOLATION_BASE = 0x300000000000
+ISOLATION_STRIDE = 0x40000000
 THREADS = 8
 ITERATIONS = 64
 THREAD_MAPPING = 1024 * 1024
 
 PAGE = 4096
+ISOLATION_SLOT = itertools.count()   # process-wide: unique isolated address per explicit mapping
+
+CONTROL_MAPPINGS = 4          # negative control: a handful of explicit mappings, capacity left at its default
+PRESSURE_SLOTS = 64           # abort run: capacity well above the interpreter's own startup table
+FILL_MAPPINGS = 4096          # "map until the table refuses" - the loop never reaches this number
+DIAGNOSTIC_PREFIX = "alloc_peak: FATAL:"
+
+STAGE = re.compile(r"^(BASELINE|MAPPED|SURVIVED) live=(\d+) regions=(\d+)$")
+CAPACITY = re.compile(r"^CAPACITY (\d+)$")
+
+# The probed program. Its stdout is the evidence: every line is flushed BEFORE the next mapping is attempted, so a
+# MAPPED line on stdout proves the interposer recorded that mapping while the process was still alive.
+CHILD_PROGRAM = """\
+import ctypes, sys
+
+lib = ctypes.CDLL(None)
+mmap = lib.mmap
+mmap.restype = ctypes.c_void_p
+mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+for name in ("alloc_peak_map_live", "alloc_peak_map_regions", "alloc_peak_map_capacity"):
+    getattr(lib, name).restype = ctypes.c_size_t
+
+PAGE = 4096
+STRIDE = 0x40000000                     # 1 GiB apart: two explicit mappings can never be coalesced into one range
+BASE_ADDRESS = 0x200000000000
+MAP_FIXED_NOREPLACE = 0x10 | 0x100000
+
+
+def state(label):
+    print("%s live=%d regions=%d" % (label, lib.alloc_peak_map_live(), lib.alloc_peak_map_regions()), flush=True)
+
+
+state("BASELINE")
+print("CAPACITY %d" % lib.alloc_peak_map_capacity(), flush=True)
+
+for index in range(int(sys.argv[1])):
+    address = BASE_ADDRESS + index * STRIDE
+    p = mmap(ctypes.c_void_p(address), PAGE, 3, 0x02 | 0x20 | MAP_FIXED_NOREPLACE, -1, 0)
+    if p in (None, ctypes.c_void_p(-1).value):
+        raise SystemExit("MAP_FIXED_NOREPLACE rejected at %#x" % address)
+    state("MAPPED")
+
+state("SURVIVED")
+"""
 
 
 def api():
@@ -58,10 +129,15 @@ def api():
 
 
 def mapped(lib, size: int) -> int:
-    address = lib.mmap(None, size, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0)
-    if address in (None, ctypes.c_void_p(-1).value):
-        raise SystemExit(f"mmap({size}) failed")
-    return int(address)
+    """Map `size` bytes at an isolated address: address `SLOT.next()` × 1 GiB from its neighbours, so no two explicit
+    mappings can ever be coalesced into one tracked range (the shim would coalesce adjacent ones, correctly)."""
+    address = ISOLATION_BASE + next(ISOLATION_SLOT) * ISOLATION_STRIDE
+    p = lib.mmap(ctypes.c_void_p(address), size, PROT_READ_WRITE, MAP_PRIVATE_ANON | MAP_FIXED_NOREPLACE, -1, 0)
+    if p in (None, ctypes.c_void_p(-1).value):
+        raise SystemExit(f"mmap at {address:#x} ({size} B) failed: the isolated slot is occupied")
+    if int(p) != address:
+        raise SystemExit(f"mmap at {address:#x} returned {int(p):#x}: MAP_FIXED_NOREPLACE not honoured")
+    return address
 
 
 def unmap(lib, address: int, size: int) -> None:
@@ -156,25 +232,75 @@ def concurrency(lib) -> dict[str, int | bool]:
     }
 
 
-def fail_closed() -> dict[str, object]:
-    """Property D: the table cannot grow past its capacity, so the shim must abort instead of under-counting."""
-    program = (
-        "import ctypes\n"
-        "lib = ctypes.CDLL(None)\n"
-        "lib.mmap.restype = ctypes.c_void_p\n"
-        "lib.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]\n"
-        "for size in (4096, 4096):\n"
-        "    p = lib.mmap(None, size, 3, 0x22, -1, 0)\n"
-        "    assert p not in (None, ctypes.c_void_p(-1).value), 'mmap failed'\n"
-        "print('SURVIVED')\n"
-    )
-    env = dict(os.environ, LD_PRELOAD=SHIM, ALLOC_PEAK_MAP_SLOTS="1", PYTHONPATH=ROOT)
-    done = subprocess.run([sys.executable, "-c", program], env=env, capture_output=True, timeout=120, cwd=ROOT)
+def _run_stages(slots: int | None, mappings: int) -> dict[str, object]:
+    """Run the probed program once and return what it printed: its own baseline, its mappings, and how it died."""
+    env = {key: value for key, value in os.environ.items() if key != "ALLOC_PEAK_MAP_SLOTS"}
+    env.update(LD_PRELOAD=SHIM, PYTHONPATH=ROOT)
+    if slots is not None:
+        env["ALLOC_PEAK_MAP_SLOTS"] = str(slots)
+    done = subprocess.run([sys.executable, "-c", CHILD_PROGRAM, str(mappings)],
+                          env=env, capture_output=True, timeout=180, cwd=ROOT)
+    stdout = done.stdout.decode("utf-8", "replace")
     stderr = done.stderr.decode("utf-8", "replace")
-    aborted = done.returncode < 0 and -done.returncode == 6          # SIGABRT
-    return {"returncode": done.returncode, "aborted": aborted, "diagnostic": "capacity exhausted" in stderr,
-            "survived": "SURVIVED" in done.stdout.decode("utf-8", "replace"),
-            "ok": aborted and not ("SURVIVED" in done.stdout.decode("utf-8", "replace"))}
+    stages = [(match.group(1), int(match.group(2)), int(match.group(3)))
+              for line in stdout.splitlines() if (match := STAGE.match(line))]
+    capacity = next((int(match.group(1)) for line in stdout.splitlines()
+                     if (match := CAPACITY.match(line))), None)
+    return {
+        "returncode": done.returncode,
+        "baseline": next(((live, regions) for label, live, regions in stages if label == "BASELINE"), None),
+        "capacity": capacity,
+        "mapped": [(live, regions) for label, live, regions in stages if label == "MAPPED"],
+        "survived": any(label == "SURVIVED" for label, _, _ in stages),
+        "fatal": [line for line in stderr.splitlines() if line.startswith(DIAGNOSTIC_PREFIX)],
+        "stderr_tail": stderr[-400:],
+    }
+
+
+def fail_closed() -> dict[str, object]:
+    """Property D: the table cannot grow past its capacity, so the shim must abort - where the test intends, with the
+    exact diagnostic, and not at all when the capacity is not exceeded."""
+    control = _run_stages(None, CONTROL_MAPPINGS)
+    control_baseline = control["baseline"] or (0, 0)
+    control_ok = (
+        control["returncode"] == 0
+        and control["baseline"] is not None and control["capacity"] is not None
+        and control["mapped"] == [(control_baseline[0] + PAGE * (step + 1), control_baseline[1] + (step + 1))
+                                 for step in range(CONTROL_MAPPINGS)]
+        and control["survived"] and not control["fatal"]
+    )
+
+    pressure = _run_stages(PRESSURE_SLOTS, FILL_MAPPINGS)
+    base_live, base_regions = pressure["baseline"] or (0, 0)
+    capacity = int(pressure["capacity"] or 0)
+    slots_left = capacity - base_regions
+    last = pressure["mapped"][-1] if pressure["mapped"] else None
+    aborted = pressure["returncode"] < 0 and -pressure["returncode"] == signal.SIGABRT
+    expected_diagnostic = (
+        f"{DIAGNOSTIC_PREFIX} range table capacity exhausted "
+        f"(tracked {capacity}, capacity {capacity}, live {base_live + PAGE * slots_left}): "
+        f"refusing to under-report")
+    reached_mapping = (slots_left >= 1 and len(pressure["mapped"]) == slots_left
+                       and last == (base_live + PAGE * slots_left, capacity))
+    return {
+        "control": {
+            "mappings": CONTROL_MAPPINGS, "baseline": {"live": control_baseline[0], "regions": control_baseline[1]},
+            "capacity": control["capacity"], "filled": len(control["mapped"]), "survived": control["survived"],
+            "returncode": control["returncode"], "fatal": control["fatal"],
+            "stderr_tail": control["stderr_tail"], "ok": control_ok,
+        },
+        "pressure": {
+            "baseline": {"live": base_live, "regions": base_regions}, "capacity": capacity, "filled": len(pressure["mapped"]),
+            "last": {"live": last[0], "regions": last[1]} if last else None,
+            "aborted_by_sigabrt": aborted, "returncode": pressure["returncode"], "reached_mapping": reached_mapping,
+            "diagnostic": pressure["fatal"][0] if pressure["fatal"] else None,
+            "diagnostic_expected": expected_diagnostic,
+            "diagnostic_exact": pressure["fatal"] == [expected_diagnostic],
+            "survived": pressure["survived"], "stderr_tail": pressure["stderr_tail"],
+        },
+        "ok": bool(control_ok and aborted and reached_mapping and pressure["fatal"] == [expected_diagnostic]
+                   and not pressure["survived"]),
+    }
 
 
 def child() -> int:
@@ -185,7 +311,7 @@ def child() -> int:
         "fail_closed": fail_closed(),
         "capacity": int(lib.alloc_peak_map_capacity()),
     }
-    result["ok"] = all(result[key]["ok"] for key in ("partial_mremap", "concurrency"))
+    result["ok"] = all(result[key]["ok"] for key in ("partial_mremap", "concurrency", "fail_closed"))
     print(json.dumps(result, sort_keys=True))
     return 0
 
