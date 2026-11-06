@@ -172,6 +172,21 @@ static void map_fail_closed(const char *why) {        /* called with the lock he
     abort();
 }
 
+/* Underflow of the live total: reported with both numbers (never a clamp), then aborted. Kept separate from
+   map_fail_closed() so the two invariants are distinguishable in stderr and in a test. */
+static void map_fail_underflow(size_t wanted, size_t tracked) {   /* called with the lock held; never returns */
+    char buf[256];
+    int n = snprintf(buf, sizeof buf,
+                     "alloc_peak: FATAL: mmap accounting underflow: %zu B to subtract, %zu B tracked "
+                     "(regions %zu): refusing to clamp to zero\n",
+                     wanted, tracked, map_used);
+    if (n > 0) {
+        ssize_t written = write(STDERR_FILENO, buf, (size_t)(n < (int)sizeof buf ? n : (int)sizeof buf));
+        (void)written;
+    }
+    abort();
+}
+
 static void map_reserve(size_t extra) {
     if (map_cap == 0) map_capacity();
     if (map_used + extra <= map_cap) return;
@@ -191,11 +206,17 @@ static void map_live_add(size_t n) {
     atomic_fetch_add_explicit(&map_live, n, memory_order_relaxed);
 }
 
+/* Subtract n from the live total. The old form clamped at zero (`cur > n ? cur - n : 0`), which silently turns a lost
+   range into a plausible-looking number: a total that is too small is exactly the under-count this instrument exists to
+   prevent, and clamping makes it permanent and invisible. Removing more bytes than are tracked therefore means the range
+   table and the total have disagreed - a bug in the shim, not a property of the workload - so it is FATAL: a diagnostic
+   with both figures, then abort(), before any sample can report the corrupted total (V20-13). */
 static void map_live_sub(size_t n) {
     size_t cur = atomic_load_explicit(&map_live, memory_order_relaxed);
     for (;;) {
-        size_t next = cur > n ? cur - n : 0;
-        if (atomic_compare_exchange_weak_explicit(&map_live, &cur, next, memory_order_relaxed, memory_order_relaxed)) {
+        if (cur < n) map_fail_underflow(n, cur);
+        if (atomic_compare_exchange_weak_explicit(&map_live, &cur, cur - n,
+                                                 memory_order_relaxed, memory_order_relaxed)) {
             return;
         }
     }
