@@ -3,7 +3,7 @@
     "openssl": "3.0.13",
     "platform": "Linux x86-64",
     "python": "3.12.3",
-    "updated": "v2.1"
+    "updated": "v2.2"
   },
   "inventory": {
     "items": [
@@ -60,9 +60,9 @@
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 10404,
+        "bytes": 11556,
         "path": "tools/obs/probes/README.md",
-        "sha256": "229cf6f05951990ce9bbd770a54c1fc6b47b5ccff20dec301b68162826aa2c2c"
+        "sha256": "062a18c1edd0d71ff22bde01ad1cad01c74eb3d945bcbb57823f78e8a856587f"
       },
       {
         "bytes": 0,
@@ -120,9 +120,9 @@
         "sha256": "c1662be01889bddbdba6426e566cd3da9b2bb7e50a955000c35670b9f7e5cca4"
       },
       {
-        "bytes": 20851,
+        "bytes": 38246,
         "path": "tools/obs/probes/run_all.py",
-        "sha256": "16ca92b8cba0b076d6693913d7db90bb6ef80de84032ee8d77531e96ed96e135"
+        "sha256": "d85d7ce5c2d24e2b6b1f8dea92c3ab7431c8050b22ee315dda785a02f5d24ddb"
       }
     ]
   },
