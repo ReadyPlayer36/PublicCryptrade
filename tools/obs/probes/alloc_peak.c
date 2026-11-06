@@ -31,6 +31,11 @@
 // failure mode this instrument exists to prevent. ALLOC_PEAK_MAP_SLOTS may only REDUCE the capacity (test use: it is how
 // probe8 proves the abort path); production runs use the compiled default.
 //
+// REALLOC FAILURE (V19 follow-up). `realloc(p, n)` with n != 0 that returns NULL leaves p valid and owned by the caller,
+// so the shim returns NULL and moves NOTHING: subtracting usable(p) there would erase a live block from the total and
+// every later sample would be an under-count. `realloc(p, 0)` is different - glibc frees p and returns NULL - and is
+// accounted as a free.
+//
 // Public symbols:
 //   void   alloc_peak_reset(void):        baseline := live, peak := 0, and the same for the mmap counter
 //   size_t alloc_peak_peak(void):         peak live-minus-baseline malloc bytes since the reset
@@ -245,7 +250,6 @@ static void map_record(uintptr_t s, size_t len) {      /* called with the lock h
     if (len == 0) return;
     uintptr_t e = s + len;
     (void)map_forget(s, e);                            /* MAP_FIXED installs over the old bytes */
-    map_live_add(len);                                 /* the NEW bytes, not the coalesced extent */
     size_t i = 0;
     while (i < map_used) {
         uintptr_t rs = map_tab[i].start;
@@ -255,7 +259,8 @@ static void map_record(uintptr_t s, size_t len) {      /* called with the lock h
         if (re > e) e = re;
         map_tab[i] = map_tab[--map_used];
     }
-    map_reserve(1);
+    map_reserve(1);                                    /* before the total moves: a refused range must not be counted */
+    map_live_add(len);                                 /* the NEW bytes, not the coalesced extent */
     map_tab[map_used].start = s;
     map_tab[map_used].len = (size_t)(e - s);
     map_used++;
@@ -317,9 +322,15 @@ void *calloc(size_t n, size_t size) {
     return p;
 }
 
+/* realloc(p, n) with n != 0 either returns a NEW block (p is gone) or fails and leaves p intact. On failure the
+   original allocation is still live and still counted, so the tracking state must not move at all: usable(NULL) is 0,
+   and subtracting the old size there would erase a block that the caller still owns - an under-count, which is the
+   one error this instrument must never make. realloc(p, 0) is the other case: glibc frees p and returns NULL, so the
+   subtraction IS correct and is kept below. */
 void *realloc(void *old, size_t size) {
     size_t was = usable(old);
     void *p = real_realloc ? real_realloc(old, size) : __libc_realloc(old, size);
+    if (p == NULL && size != 0) return NULL;             /* failure: old block untouched, tracking untouched too */
     size_t now = usable(p);
     if (now >= was) track_add(now - was); else track_sub(was - now);
     return p;
