@@ -169,6 +169,12 @@ jobs:
         run: |
           set -euo pipefail
           PYTHONPATH=$PWD python -m tools.obs.probes.run_all --manifest | tee artifacts/probes/manifest.json
+      - name: "Prove the integrity refusals (negative cases: links, devices, substitutions)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=$PWD python -m tools.obs.probes.run_all --self-test 2>&1 | tee artifacts/probes/self-test.log
+
       - name: Run the probe gate (fails on any mismatch, modified file, addition or deletion)
         id: gate
         shell: bash
@@ -193,6 +199,7 @@ jobs:
             artifacts/probes/gate.log
             artifacts/probes/manifest.json
             artifacts/probes/report.json
+            artifacts/probes/self-test.log
             artifacts/probes/build.log
           if-no-files-found: error
       - name: Upload the built interposer alongside the evidence
