@@ -1,21 +1,212 @@
 {
-  "env": {"python": "3.12.3", "openssl": "3.0.13", "platform": "Linux x86-64", "updated": "v1.9"},
+  "env": {
+    "openssl": "3.0.13",
+    "platform": "Linux x86-64",
+    "python": "3.12.3",
+    "updated": "v2.0"
+  },
+  "inventory": {
+    "items": [
+      {
+        "bound": 196608,
+        "derivation": "12 x 16,384 B: first getaddrinfo loads the NSS modules and their symbol tables; charged to HARNESS_FIXED_BUDGET_BYTES, not per request",
+        "from": "cold_connect",
+        "minus": "warm_connect",
+        "name": "one_time_loading"
+      },
+      {
+        "bound": 98304,
+        "derivation": "6 x 16,384 B: TLS read buffer, write buffer, handshake reassembly, X509 chain + verify, SSL/SSL3_STATE/SESSION/cipher base, Python _ssl + SSLSocket + SocketIO",
+        "from": "warm_handshake",
+        "minus": "warm_connect",
+        "name": "tls_session"
+      },
+      {
+        "bound": 86016,
+        "derivation": "4,096 request line/headers + 4,096 response status/headers/parsed dict + 8,192 socket.makefile reader + 65,536 first recv chunk (CHUNK_BYTES) + 4,096 socket/http object overhead = 86,016 B",
+        "from": "warm_empty",
+        "minus": "warm_handshake",
+        "name": "http_staging"
+      },
+      {
+        "bound": 65536,
+        "derivation": "1 x 65,536 B: one recv chunk, transient per chunk (CHUNK_BYTES)",
+        "from": "warm_full",
+        "minus": "warm_empty",
+        "name": "body_staging",
+        "tolerance": 4096
+      },
+      {
+        "bound": 65536,
+        "derivation": "a 1 MiB body must not add more than ONE chunk: any accumulation would breach this",
+        "from": "warm_big",
+        "minus": "warm_full",
+        "name": "scaling_control",
+        "tolerance": 4096
+      }
+    ],
+    "per_request_bound": 258048,
+    "stages": [
+      "cold_connect",
+      "cold_full",
+      "warm_connect",
+      "warm_handshake",
+      "warm_empty",
+      "warm_full",
+      "warm_big"
+    ]
+  },
+  "manifest": {
+    "algorithm": "sha256",
+    "files": [
+      {
+        "bytes": 8970,
+        "path": "tools/obs/probes/README.md",
+        "sha256": "4e7e6e80484b815021496cd42ab62645b04f6a11d80dd6617d46680df3eaa8dd"
+      },
+      {
+        "bytes": 0,
+        "path": "tools/obs/probes/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "bytes": 16816,
+        "path": "tools/obs/probes/alloc_peak.c",
+        "sha256": "4765757008287d97c96ce2966c47d79804bbd4888fbd5df707043b7f043d52b8"
+      },
+      {
+        "bytes": 1358,
+        "path": "tools/obs/probes/probe1_phase1.py",
+        "sha256": "1f63e461fb71836d78c718d0f0ac98c64c46f4c64e99852c0afaf9e83fab38d2"
+      },
+      {
+        "bytes": 2326,
+        "path": "tools/obs/probes/probe2_seal.py",
+        "sha256": "455ef7b384c0057ea50a1e6ed711538bfa5ca6e904e22590a576be4bf4c7a20f"
+      },
+      {
+        "bytes": 1699,
+        "path": "tools/obs/probes/probe3_decode.py",
+        "sha256": "4320fbe9044b7bd4d9b70238d8d5731832e6348d28a710fe8f92368f1ae66066"
+      },
+      {
+        "bytes": 815,
+        "path": "tools/obs/probes/probe4_decode_fresh.py",
+        "sha256": "e72afb89e85274c90db48ec32d03435b32dae6ffa1577adc0f83d0b68e4129eb"
+      },
+      {
+        "bytes": 2647,
+        "path": "tools/obs/probes/probe5_byte_equality.py",
+        "sha256": "61278c289c1ab2cb10ed7305e3e572e63debed8f1a9b6997a2a440b5c0572a47"
+      },
+      {
+        "bytes": 15462,
+        "path": "tools/obs/probes/probe6_native.py",
+        "sha256": "f98854229e0c02f2b5781b2fb4daaabce8fc283b89fe2a494473a1ce148929bc"
+      },
+      {
+        "bytes": 780,
+        "path": "tools/obs/probes/probe7_structure.py",
+        "sha256": "d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4"
+      },
+      {
+        "bytes": 10465,
+        "path": "tools/obs/probes/probe8_mmap_threads.py",
+        "sha256": "42fe25c453f14728e640826ecd463e7ae2e5c99c4f23afd79d30546fe4ee593d"
+      },
+      {
+        "bytes": 4044,
+        "path": "tools/obs/probes/probe_common.py",
+        "sha256": "c1662be01889bddbdba6426e566cd3da9b2bb7e50a955000c35670b9f7e5cca4"
+      },
+      {
+        "bytes": 15668,
+        "path": "tools/obs/probes/run_all.py",
+        "sha256": "badb272cdf46a55696270c382d8484fa16f92c5d4f071b51dbf2b511ceebb59f"
+      }
+    ]
+  },
   "measurements": [
-    {"probe": "phase1_request", "peak": 8396983, "bound": 8781824, "tolerance": 0.02,
-     "instrument": "tracemalloc", "interposed": 8400920, "interposed_map_peak": 0, "v17_campaign": 8462496},
-    {"probe": "phase2_seal", "peak": 148004, "bound": 151552, "tolerance": 0.02,
-     "instrument": "tracemalloc", "interposed": 147848, "interposed_map_peak": 0, "v17_campaign": 148113},
-    {"probe": "phase2_seal_no_del", "peak": 5656528, "bound": 151552, "tolerance": 0.02,
-     "instrument": "tracemalloc", "expected_fail": true, "v17_campaign": 5656645},
-    {"probe": "phase3_decode", "peak": 11188520, "bound": 11202224, "tolerance": 0.02,
-     "instrument": "tracemalloc", "interposed": 11186544, "interposed_map_peak": 0, "v17_campaign": 11188261},
-    {"probe": "phase3_decode_fresh", "peak": 11188600, "bound": 11202224, "tolerance": 0.02,
-     "instrument": "tracemalloc", "v17_campaign": 11188197},
-    {"probe": "phase3_structure", "peak": 11188520, "bound": 11202224, "tolerance": 0.02,
-     "instrument": "tracemalloc", "v17_campaign": 11188197},
-    {"probe": "byte_equality", "peak": 0, "bound": null, "bytes": 8511232, "records": 1020},
-    {"probe": "native_headroom", "peak": 112272, "bound": 262144, "tolerance": 0.20,
-     "instrument": "mallinfo2 sample max (LOWER BOUND)", "interposed": 195184, "interposed_map_peak": 16384,
-     "end_delta": 72272}
-  ]
+    {
+      "bound": 8781824,
+      "instrument": "tracemalloc",
+      "interposed": 8400920,
+      "interposed_map_peak": 0,
+      "peak": 8396983,
+      "probe": "phase1_request",
+      "tolerance": 0.02,
+      "v17_campaign": 8462496
+    },
+    {
+      "bound": 151552,
+      "instrument": "tracemalloc",
+      "interposed": 147848,
+      "interposed_map_peak": 0,
+      "peak": 148004,
+      "probe": "phase2_seal",
+      "tolerance": 0.02,
+      "v17_campaign": 148113
+    },
+    {
+      "bound": 151552,
+      "expected_fail": true,
+      "instrument": "tracemalloc",
+      "peak": 5656528,
+      "probe": "phase2_seal_no_del",
+      "tolerance": 0.02,
+      "v17_campaign": 5656645
+    },
+    {
+      "bound": 11202224,
+      "instrument": "tracemalloc",
+      "interposed": 11186544,
+      "interposed_map_peak": 0,
+      "peak": 11188520,
+      "probe": "phase3_decode",
+      "tolerance": 0.02,
+      "v17_campaign": 11188261
+    },
+    {
+      "bound": 11202224,
+      "instrument": "tracemalloc",
+      "peak": 11188600,
+      "probe": "phase3_decode_fresh",
+      "tolerance": 0.02,
+      "v17_campaign": 11188197
+    },
+    {
+      "bound": 11202224,
+      "instrument": "tracemalloc",
+      "peak": 11188520,
+      "probe": "phase3_structure",
+      "tolerance": 0.02,
+      "v17_campaign": 11188197
+    },
+    {
+      "bound": null,
+      "bytes": 8511232,
+      "peak": 0,
+      "probe": "byte_equality",
+      "records": 1020
+    },
+    {
+      "bound": 262144,
+      "end_delta": 52192,
+      "instrument": "mallinfo2 sample max (LOWER BOUND); the gate uses the interposed client-only region",
+      "interposed": 214120,
+      "interposed_map_peak": 0,
+      "peak": 105072,
+      "probe": "native_headroom",
+      "tolerance": 0.2
+    },
+    {
+      "bound": null,
+      "instrument": "alloc_peak.so direct-mmap channel under concurrency, partial unmap and mremap (A.5.9)",
+      "iterations": 64,
+      "peak": 8519680,
+      "probe": "mmap_accounting",
+      "threads": 8
+    }
+  ],
+  "schema": "obs-probes/2"
 }
