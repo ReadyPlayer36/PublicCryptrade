@@ -1,4 +1,4 @@
-# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v2.0 (NORMATIVE)
+# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v2.1 (NORMATIVE)
 
 Status: design only. No live request is authorized by this document. Milestone 1 remains **BLOCKED** until the reviewer
 accepts the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.9**: it resolves
@@ -12,6 +12,14 @@ with its raw outputs archived as an artifact (G-V19-04); and `expected.json` is 
 added or deleted file refuses the run before any number is produced (A.0, G-V19-05). Where v1.9 and this document
 disagree, this document governs, and sections not restated here remain normative as written in v1.9. The
 v1.8/v1.7/v1.6/v1.5/v1.4/v1.3 maps are retained unchanged as §1.1–§1.6.
+
+**v2.1 status (this revision).** v2.1 supersedes v2.0 and closes the five findings of the v2.0 review (V20-11…V20-15,
+§1.0b). It re-opens nothing that v1.9 resolved: the protocol, §6.5's constants, the allocation inventory and every budget
+stand exactly as reviewed. What changes is the EVIDENCE CHAIN, in four places and one honesty rule: the `realloc`-failure
+case of A.5.4 is now a gated measurement instead of a documented anecdote (V20-11/V20-12); the map live total aborts on
+underflow instead of clamping at zero (V20-13); the manifest is validated as DATA — canonical paths, no duplicates,
+typed fields — before any byte of it is trusted (V20-14); and this document no longer claims a passing run at a tree
+where the gate did not pass (V20-15).
 
 Anchor: repository `ReadyPlayer36/PublicCryptrade`, branch `main`, commit
 `109a0d3178c9fe74671a5c3bea4912978ae00f27` (this revision's anchor; v1.9 as delivered). Its predecessor
@@ -33,9 +41,17 @@ the body), 221–244 (`write_run`: path opens, no fsync), 246–250 (`_read`), 2
 are measurements over the exact normative sequences on CPython 3.12.3 (`tracemalloc`, worst-case inputs); methodology, raw
 values, the native-instrumentation boundaries, the allocation inventory and the probe sources are Appendix A. Those probes
 ARE repository code at `tools/obs/probes/` (fourteen files; A.0 records size and SHA-256 for each, `expected.json` pins
-every other file, and v2.0's CI job compiles the interposer and runs the gate — G-V19-04/G-V19-05), and they were executed
-from the repository root for this revision: `PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check` exits 0, on the
-pinned interpreter, with the manifest verified before the first measurement.
+every other file, and the CI job compiles the interposer and runs the gate — G-V19-04/G-V19-05/V20-14).
+
+**What v2.1 claims, and what it does not (V20-15).** v2.0 asserted that `run_all --check` "exits 0" for that revision.
+The CI `probe-suite` job on `58bccc1852d652893e6562d44a8db3ddc10dc774` did not pass: it failed inside manifest validation,
+which is precisely the class of failure V20-14 hardens. This revision therefore makes no claim about any commit. It
+reports the gate result for the WORKING TREE whose bytes are the ones A.0 pins —
+`PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check` prints
+`PASS: 10 measurements, 14 files pinned by expected.json` and exits 0 on the pinned interpreter, with the manifest
+verified before the first measurement — and it states plainly that the same command has NOT been demonstrated on a
+COMMIT of these files. A green line here is a claim about a specific tree; until that tree is a commit, the line says
+which tree it is. The reviewer's pipeline is what turns it into a claim about a SHA.
 
 Imperative key words MUST, MUST NOT, SHALL, SHOULD, SHOULD NOT are normative. "§n" refers to a section of this document;
 "protocol §n" refers to `docs/obs-protocol.md` v0.5. Code identifiers in `monospace` refer to real symbols in `tools/obs/`
@@ -106,6 +122,20 @@ cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pi
 | V19-03 | A.5's headroom was a four-row table of ASSERTED bounds ("TLS record buffers 32,768", "OpenSSL per-connection state 65,536") with no derivation, no per-consumer measurement, and the unenumerated remainder left as "× 2, covering unenumerated consumers" — a factor, not a bound | §A.5.8 (new: allocation inventory), §A.5.5 (restated), §A.2/A.3 (measured), §11 (G-V19-03), D48 | The request path is decomposed into an INVENTORY: five stages measured in separate children (the loopback server moved into its own process, so the region is the client path only), cold vs warm to separate the one-time dynamic loading from the per-request cost, and each consumer bounded as `unit × count` from a protocol constant (16,384 B TLS record, 16,384 B handshake/server state, 8,192 B `socket.makefile` buffer, 65,536 B `CHUNK_BYTES`, 8,192 B of allocator headers) and CHECKED against its stage by the gate. Measured: TLS session 77,864 B ≤ 98,304; HTTP staging 69,992 B ≤ 86,016; body staging 0 B ≤ 65,536; scaling control 0 B for a 1 MiB body; per-request bounds sum to 258,048 B ≤ 262,144 B; the one-time loading is 168,048 B and is charged to `HARNESS_FIXED_BUDGET_BYTES` rather than to a request |
 | V19-04 | Nothing in CI compiled the interposer or ran the probe gate: the numbers in A.2/A.3 could drift, or the .so could fail to build on the runner, without any workflow failing — the suites' claims were reviewable but not enforced | §11 (G-V19-04), `.github/workflows/ci.yml` (`probe-suite` job), §A.1, D49 | A dedicated job pins CPython 3.12.3, asserts `cc`/`openssl`, compiles `alloc_peak.c` with `-Wall -Wextra -Werror`, runs `python3 -m tools.obs.probes.run_all --check --report artifacts/probes/report.json`, and uploads `gate.log`, `manifest.json`, `report.json`, `build.log` and the built shim as `probe-suite-evidence`/`alloc-peak-so` on EVERY outcome; the step preserves the gate's exit status through the pipe (`PIPESTATUS`) and mirrors the outcome into the job summary |
 | V19-05 | A.0 pinned thirteen digests in the DOCUMENT, but the driver only checked that files EXISTED: a modified probe, an added file or a deleted one could still run, so the digest table was advisory and a reviewer's diff was the only enforcement | §A.0 (manifest chain), §A.7.12 (`expected.json`), `run_all.py` (`check_manifest`), §11 (G-V19-05), D50 | `expected.json` now carries a machine-readable `manifest` block (path, bytes, SHA-256) for every other file in the directory, and `--check` verifies it BEFORE measuring: a modification (size or digest), an ADDITION (a file not in the manifest) and a DELETION (a manifest entry with no file) each exit 2 with a per-file diagnostic. `expected.json` cannot hash itself, so A.0 pins IT against the document, `--manifest` prints its digest, and `--update-manifest` is the only writer — a reviewed-revision tool |
+
+### 1.0b V20 findings resolved in v2.1 (this revision)
+
+v2.1 exists because the v2.0 review found the evidence chain unsound in three places, the instrument silently lossy in a
+fourth, and the manifest gate red in CI. Every row is closed by a mechanism a reviewer can RUN; the numbers below are
+measurements from the working tree A.0 pins.
+
+| Finding | Defect as reviewed | Where it is closed | Mechanism |
+|---|---|---|---|
+| V20-11 | The `realloc`-failure rule of A.5.4 existed only as PROSE and a hand measurement (8,396,768 B vs the pre-fix 4,198,384 B). No probe asserted it, so a regression in `alloc_peak.c` would have changed no gate: the rule was reviewable, not enforced — the same defect class as V19-05 | §A.5.4 (realloc paragraph), §A.5.8 (the suite's measurements), §A.7.11 (`probe6_native.py`), §11 (G-V20-01), D52 | `probe6_native.py` gains a `--realloc` child and a GATED `realloc_accounting` measurement: 4 MiB with a known pattern, `realloc(p, SIZE_MAX)` must return NULL with `errno == ENOMEM`, the block must be byte-identical (SHA-256 taken through the buffer protocol) and still writable, a second 4 MiB block must be allocated, and the interposed peak must show BOTH blocks. Floor 8,388,608 B, ceiling 12,582,912 B. Measured on the v2.1 shim: **8,398,608 B**; with the A.5.4 guard REMOVED, the same child reports **4,200,608 B** and the gate fails. The 4 MiB blocks are allocated through `CDLL(None)`, i.e. the PRELOADED wrapper, because a handle on `libc.so.6` dlsyms glibc's `malloc` directly and would bypass the counter under test |
+| V20-12 | The regression above needs a measurement that survives being re-run, and a manifest entry that closes: v2.0's `probe6_native.py` and `expected.json` were recorded for a file set that the same commit did not contain | §A.0 (size + SHA-256 rows), §A.7.11, `expected.json` manifest, D52 | `realloc_accounting` is a first-class row of `expected.json` (`bound` = the ceiling, `tolerance` 0.02 against the recorded peak) so a drifting figure fails `--check` instead of passing silently; `probe6_native.py` is re-pinned in A.0 and A.7 at its final size and digest, and A.0/A.7 are generated from the files rather than typed. The instrument's own symbol lookup is documented as a measurement hazard (previous row) |
+| V20-13 | `map_live_sub()` clamped a subtraction larger than the tracked total (`cur > n ? cur - n : 0`). A clamped total is an under-count: it is small, plausible, permanent, and no later sample can reveal it — the one error the instrument exists to prevent (V19-01's silent drop, restored through arithmetic) | §A.5.4 (accounting contract), §11 (G-V20-03), D53 | The live total is never clamped: an underflow means the range table and the total disagree, so `map_fail_underflow()` writes `alloc_peak: FATAL: mmap accounting underflow: %zu B to subtract, %zu B tracked (regions %zu): refusing to clamp to zero` and calls `abort()`, under the same lock discipline as the capacity refusal. Demonstrated with a fault-injected build (one 4 MiB range silently lost from the table: `SIGABRT`, `4202496 B to subtract, 2121728 B tracked (regions 3)`), while the shipped build is unaffected. The path is NOT reachable from a correct shim, so it is verified once by fault injection rather than shipped as a test hook |
+| V20-14 | `check_manifest()` indexed rows by BASENAME (`os.path.basename(row["path"])` into a dict), so two rows could share a name with one silently overwriting the other, a row naming `probe3_decode.py` or `/etc/x` still bound to the file in this directory, `bytes`/`sha256` of the wrong type were trusted until compared, and rows for `expected.json` or `alloc_peak.so` surfaced as a DELETION instead of the malformed entry they are. That is how a manifest can be green in review and red — or wrong — in CI | §A.0 (manifest chain), §A.7.12 (`expected.json`), `run_all.py` (`check_manifest`), §11 (G-V20-02), D54 | The manifest is validated as DATA before it is trusted: `manifest` must be an object with only `algorithm`/`files`, `algorithm` must be `sha256`, `files` must be a non-empty array of objects whose ONLY fields are `path`/`bytes`/`sha256`; `path` must be the canonical `tools/obs/probes/<name>`, duplicate PATHS and duplicate BASENAMES are refused, `bytes` must be a non-negative `int` (booleans excluded), `sha256` must be 64 lowercase hex; a row for `expected.json` (it cannot pin itself) and a row for the build artifact are refused BY NAME; unknown fields fail closed at row and block level. Twenty-three malformed manifests (duplicate path, duplicate basename under another directory, bare basename, absolute path, `"1234"`, `-1`, `true`, short/uppercase/missing digest, unknown field, non-object row, self-pin, artifact pin, `md5`, stray block field, `files` not a list, empty `files`, wrong size, wrong digest, deleted row, missing or invalid block) each produced exit-2 with a per-entry diagnostic, and the real manifest still validates — G-V20-02 exercises exactly that |
+| V20-15 | The document claimed a passing run at the v2.0 revision ("`run_all --check` exits 0") that CI did not reproduce, and A.0/A.7 lagged the files they described — a review-lineage defect, not a code defect: a claim with no tree behind it | §1.0b (this table), the anchor paragraph of the preamble, §A.0 (regenerated), §A.7 (regenerated), §11 (G-V20-02), D55 | Every gate claim in this revision names its TREE: the working tree that produced A.0's digests, on the pinned interpreter, `PASS: 10 measurements, 14 files pinned`. The v2.0 claim is WITHDRAWN in place (not deleted) with what CI actually reported, and A.0/A.7 are regenerated from the files by script at review time (not by CI — G-V18-02 b), so this revision's appendix matches its tree. A claim about a commit is left to the pipeline that can make one |
 
 ### 1.1 V18 findings resolved in v1.9 (retained)
 
@@ -1852,7 +1882,7 @@ frozen under `obs-run-manifest/1`).
 | G-V17-02 | creation-identity binding + CP3e (V17-02) | spy substitutes `.<run_id>.receipt.tmp` with a foreign file BETWEEN the step-3 `stat` and the `renameat2` call → step 5 compares `st_dst` to `fstat(tmp_fd)` → `PublishIdentityMismatch`, impostor quarantined, NO `receipt_pin` printed, `observe()` ∈ {T3, T4}, never T6; the SAME fixture with step 5 anchored on `st_src` (v1.7's rule) PUBLISHES the impostor — re-introducing that anchor MUST kill the gate; CP3e fixture: rewrite the published receipt in place before step 8 → `snap.sha256 ≠ receipt_sha_written` → CP3 fails, no pin printed; AST/grep gate: every `publish_file` call site passes a non-None `expect` and `identity_source = CREATION`, and `publish_quarantine_of` is the only `OBSERVED` caller; `st_nlink == 1` and `S_ISREG(st_tmp.st_mode)` asserted at step 4 |
 | G-V17-03 | descriptor-relative receipt snapshotting (V17-03) | runtime spy: for every observation, exactly ONE `os.open` per artifact name through `pfd` and ZERO path-based reads/presence calls (`Path.read_bytes`, `open(path)`, `os.path.exists`, `os.lstat`, path `os.stat`); substitution matrix — replace the receipt with (i) absent, (ii) a symlink, (iii) a FIFO, (iv) a directory, (v) a `RECEIPT_MAX_BYTES + 1` file, (vi) foreign bytes, (vii) a swap immediately after the snapshot, (viii) a swap between the audit and the outcome branch — each yields exactly one T-row, (ii)–(v) → T3 via FAULT, (vii)/(viii) → the classification of the FROZEN snapshot (unchanged by the swap); orphan-receipt fixture (receipt, no final) → T3; peak memory of `snapshot` ≤ `RECEIPT_MAX_BYTES + CHUNK_BYTES`; mutation: reintroduce a second presence check or a path read → killer fails |
 | G-V18-01 | explicit rejection policy for over-cap artifacts (V18-01) | (a) REACHABILITY, in this order: the hash-pinned `/1` oracle ACCEPTED fixtures D-21/D-22/D-23 — each is a valid 12-key record whose line content is 6,990,684 / 6,291,630 / > `MAX_LINE` B — and `/2` rejected each with `records.jsonl line {n} exceeds the maximum line length` at the right line number; the test FAILS if `/1` rejects a fixture (the reachability claim became vacuous) or if `/2` accepts one; (b) D-23 additionally asserts NONE of the bodies was decoded (P-6 precedes P-8: the cap is a file-level pre-parse fact); (c) AST/behaviour gate: no truncation, split, skip, retry-with-`/1`, tolerance flag, environment variable or keyword argument can change the verdict for an over-cap file — a mutation adding any of them MUST fail; (d) doc gate: §5.1.2.6 exists and contains the strings `REJECTION POLICY`, `CONFORMING`, `LEGACY-ADMITTED` and the 6,852 B / 697,196 B margin figures, and neither "impossible under the frozen schema" nor "proved unreachable" appears anywhere except inside an explicit retraction quotation (§5.1.2.1, §5.1.2.6 P7 — a grep gate) |
-| G-V18-02 | the probe suite is delivered code, not prose (V18-02) | (a) `python -m tools.obs.probes.run_all --manifest` reproduces A.0's fourteen path/size/SHA-256 rows byte for byte, and `--check` exits 0 on the pinned interpreter; (b) every A.7 listing is byte-identical to the file it names (CI regenerates the appendix from `tools/obs/probes/` and fails on any diff, so a listing cannot drift); (c) the driver REFUSES to run (exit 2) when any of the fourteen files is missing — a partially copied suite cannot silently narrow the protocol — and, since v2.0, when any file's size or SHA-256 differs from `expected.json`'s manifest (V19-05); (d) `alloc_peak.so` is absent from the committed tree and the gate FAILS, not skips, when `cc` cannot build it; (e) README.md documents the run line, the TLS-fixture policy (committed fixture preferred, ephemeral `openssl` fallback otherwise) and the instrument limits — deleting any of the three fails |
+| G-V18-02 | the probe suite is delivered code, not prose (V18-02) | (a) `python -m tools.obs.probes.run_all --manifest` reproduces A.0's fourteen path/size/SHA-256 rows byte for byte, and `--check` exits 0 on the pinned interpreter; (b) every A.7 listing is byte-identical to the file it names IN THIS REVISION and A.0's rows are `--manifest`'s output, both GENERATED from `tools/obs/probes/` by script; the generation is a REVIEW-TIME step — the script is not part of the suite and CI does not diff the appendix — so a later drift of the DOCUMENT is caught by review, while `--check` catches drift of the FILES; stated as a residual, not claimed as automation (V20-15); (c) the driver REFUSES to run (exit 2) when any of the fourteen files is missing — a partially copied suite cannot silently narrow the protocol — and, since v2.0, when any file's size or SHA-256 differs from `expected.json`'s manifest (V19-05); (d) `alloc_peak.so` is absent from the committed tree and the gate FAILS, not skips, when `cc` cannot build it; (e) README.md documents the run line, the TLS-fixture policy (committed fixture preferred, ephemeral `openssl` fallback otherwise) and the instrument limits — deleting any of the three fails |
 | G-V18-03 | direct-`mmap` fence around the native term (V18-03) | (a) `alloc_peak.c` exports `alloc_peak_map_peak()` and its symbol table contains `mmap`, `mmap64` and `munmap` (build gate: `nm -D`); (b) `probe6` reports a `map_peak` for the request region and `run_all` compares the SUM `peak + map_peak` against `HTTP_HEADROOM`, failing when the interposer is unavailable instead of skipping; (c) the phases report their `map_peak` (0 B measured) and a phase whose channel exceeds `HTTP_HEADROOM` fails with the A.5.7 note that the malloc figure is no longer a usable bound; (d) a mutation that removes the mmap interposition MUST fail (a) and (b); a mutation that compares only the malloc channel MUST fail (b); (e) doc gate: A.5.4 contains the interception inventory (including `posix_memalign`/`aligned_alloc`/`brk` as NOT intercepted) and A.5.7 contains the acknowledgment, the measured channel table and the page-rounding lemma — deleting any of them fails |
 
 | G-V17-04 | native instrumentation + repository probes (V17-04; channels extended by V18-03) | CI runs `python -m tools.obs.probes.run_all --check` (exit 0 required) on the pinned interpreter, asserting for every phase BOTH instruments: `tracemalloc` peaks (8,396,983 / 148,004 / 11,188,520 / 11,188,600 / 11,188,520 B) and interposed malloc peaks (8,400,920 / 147,848 / 11,186,544 B) within their §6.5 bounds, the banned `no_del` variant still FAILING its bound (5,656,528 B), byte equality at 8,511,232 B, and `native_headroom`'s client-only request region on BOTH channels — malloc 214,120 B plus direct `mmap` 0 B, SUM 214,120 B ≤ `HTTP_HEADROOM = 262,144 B` — plus the five A.5.8 inventory items, each inside its derived bound (77,864 ≤ 98,304 / 69,992 ≤ 86,016 / 0 ≤ 65,536 / 0 ≤ 65,536 / 168,048 ≤ 196,608); probe6's `mallinfo2` sample max is reported and NEVER compared (it is a lower bound — 105,072 B this revision against a 52,192 B end delta, the under-read A.5.3 documents); `HTTP_HEADROOM == 262,144` and the A.5.8 per-request item bounds sum to 253,952 ≤ it, while the four coarse A.5.7.4 terms plus one page of rounding each sum to ≤ 147,456 B; a probe file whose sha256 differs from A.0's manifest without a doc revision fails; doc gate: A.5 must contain the `uordblks`/`hblkhd`/`MMAP_THRESHOLD`/per-thread-arena/kernel-buffer clauses, the retraction sentence, the interception inventory (A.5.4) and the arena-granularity caveat — deleting any of them fails |
@@ -1862,6 +1892,9 @@ frozen under `obs-run-manifest/1`).
 | G-V19-03 | native allocation inventory, derived and gated (V19-03) | (a) `expected.json` carries the five-item inventory (unit × count derivation and a bound per item) and `run_all.compare_inventory` computes each item from the measured stages and FAILS when it exceeds its bound, when a stage is missing, or when it falls below the one-page negative tolerance the two ~0 B items carry (allocator block reuse makes a few dozen bytes of peak-difference noise, and a stage that measured LESS by more than a page would mean the difference is not the consumer it claims to be); (b) `per_request_bound` (258,048 B) is asserted ≤ `HTTP_HEADROOM`; (c) the client-only region is the gated figure — the loopback server runs in its own process, so a probe that ever measured the server again would raise every stage and breach the bounds; (d) doc gate: A.5.8 contains the derivation column, the cold/warm split and the unenumerated-remainder arithmetic; deleting any of them fails |
 | G-V19-04 | CI enforces the probe gate (V19-04) | (a) `.github/workflows/ci.yml` has a `probe-suite` job that pins CPython 3.12.3, compiles `tools/obs/probes/alloc_peak.c` with `-Wall -Wextra -Werror`, and runs `python3 -m tools.obs.probes.run_all --check --report artifacts/probes/report.json`; (b) the gate step's exit status survives the pipe (`PIPESTATUS`) and the job fails when the gate fails; (c) `probe-suite-evidence` (gate.log, manifest.json, report.json, build.log) and `alloc-peak-so` are uploaded with `if: always()`, so a red run still yields its raw output; (d) mutation: drop the build step, the gate step or the artifact upload → the workflow no longer proves anything and the gate fails on the missing artifact |
 | G-V19-05 | machine-enforced suite manifest (V19-05) | (a) `expected.json` has `schema: obs-probes/2` and a `manifest.files` array with path, bytes and SHA-256 for every OTHER file; (b) `--check` refuses (exit 2) on a MODIFIED file (size or digest), an ADDED file and a DELETED file — all three demonstrated, each with a per-file diagnostic; (c) the refusal happens BEFORE any measurement, so a tampered suite cannot produce a passing report; (d) `--update-manifest` is the only writer and `--manifest` prints `expected.json`'s own digest, which A.0 pins; (e) mutation: replace `check_manifest` with an existence check → (b) fails |
+| G-V20-01 | the `realloc`-failure regression is a GATED measurement (V20-11/V20-12) | (a) `probe6_native --realloc` exists and is exercised by `run_all --check` through the `realloc_accounting` row; (b) the row's clauses are conjunctive: child exit 0, `NULL` return, `errno == ENOMEM`, block byte-identical, block still writable, second block allocated, peak ≥ 8,388,608 B and ≤ 12,582,912 B; (c) demonstrated twice: 8,398,608 B on the shipped shim (all eight clauses true) and 4,200,608 B with the A.5.4 guard removed (the peak clause fails, so the gate fails); (d) the recorded peak is re-measured every run with `tolerance` 0.02, so a drift fails rather than passing on a stale figure; (e) mutation: delete the `if (p == NULL && size != 0) return NULL;` line → (c) fails |
+| G-V20-02 | the manifest is validated as DATA, not matched by name (V20-14) | (a) every row must be an object with exactly `path`/`bytes`/`sha256`; `path` must be the canonical `tools/obs/probes/<name>`; duplicate paths and duplicate basenames are refused; `bytes` is a non-negative `int`, `sha256` is 64 lowercase hex; `expected.json` and `alloc_peak.so` may not be pinned; the block itself admits only `algorithm` (which must be `sha256`) and a non-empty `files` array; (b) demonstrated: twenty-three malformed manifests each produce exit 2 with a per-entry diagnostic while the real manifest validates — duplicate path, duplicate basename under another directory, bare basename, absolute path, `bytes` as `"1234"`/`-1`/`true`, short/uppercase/missing digest, unknown row field, non-object row, self-pin, artifact pin, `algorithm: md5`, stray block field, `files` not a list, empty `files`, wrong size, wrong digest, deleted row, and a missing or non-object block; (c) since v2.1, A.0 and A.7 are regenerated from the files by script, so this revision's appendix cannot claim a digest the file does not have (review-time: CI verifies the manifest, not the appendix — G-V18-02 b); (d) mutation: restore v2.0's basename indexing → the duplicate-path and basename cases are ACCEPTED (one row silently overwrites the other) and (b) fails |
+| G-V20-03 | the map live total cannot be clamped (V20-13) | (a) source gate: `map_live_sub` contains no clamp (`cur > n ? ... : 0` is gone) and calls `map_fail_underflow(n, cur)`, which writes one diagnostic line with both figures and `abort()`s; (b) demonstrated with a FAULT-INJECTED build (one 4 MiB range silently removed from the table): `SIGABRT` (−6) and the byte-exact line `alloc_peak: FATAL: mmap accounting underflow: 4202496 B to subtract, 2121728 B tracked (regions 3): refusing to clamp to zero`, while the shipped build runs the same child to `SURVIVED` with `live` back at its baseline; (c) the path is NOT reachable from a correct shim, so it is verified by fault injection in review rather than shipped as a test hook — stated as a limit, not hidden: CI cannot provoke a lost range without a deliberate bug in the instrument; (d) mutation: restore the clamp → the injected build exits 0 with a silently reduced total instead of aborting |
 
 Decisions (new): **D11** dynamic target supplied as `target_fn` evaluated per admission read (static path retained);
 **D12** on budget breach, discard the whole body (`b""` + `error=INCIDENT-MEMORY`) rather than persisting a partial one;
@@ -1981,6 +2014,26 @@ returns `NULL` and changes nothing (subtracting there would under-count a live b
 capacity refusal runs BEFORE the live total is advanced, so an aborted mapping is never half-counted. Both rules are
 enforced by measurement, not by reading: the 4 MiB + 4 MiB `realloc`-failure case (A.5.4) and probe8's property (D).
 
+**D52** a documented regression is not a gate: the `realloc`-failure rule had a prose paragraph and two hand-measured
+numbers (A.5.4), which is exactly the shape V19-05 rejected for the manifest — reviewable, unenforced. It is now the
+`realloc_accounting` row of the suite, so the next `alloc_peak.c` change that erases a live block turns `--check` red
+instead of passing review on a paragraph (G-V20-01).
+
+**D53** an under-count is fatal, never clamped: subtracting more bytes than the live total means the range table and the
+total disagree. Clamping would preserve a wrong-but-plausible number, which is the failure the instrument exists to
+prevent (V19-01 dropped an entry for the same reason). `map_live_sub` therefore aborts with both figures (G-V20-03), and
+the capacity refusal's rule — refuse before advancing the total (D51) — is the same rule read forwards.
+
+**D54** the manifest is DATA before it is a claim: `check_manifest` validates shape (canonical path, no duplicate paths or
+basenames, typed `bytes`, 64-hex `sha256`, no self-pin, no artifact pin, no unknown fields) BEFORE it compares digests,
+because v2.0's basename index made two rows indistinguishable and let a non-canonical path bind to this directory's file.
+A malformed manifest is a refusal to run, not a warning (G-V20-02).
+
+**D55** a claim names its tree: this document may only report a gate result for a specific, identified tree, and when that
+tree is a working tree rather than a commit it must say so in the same sentence. v2.0's "`--check` exits 0" outlived the
+tree it described and was false at the commit CI tested; v2.1 withdraws it in place, reports the working-tree result with
+its command and its numbers, and leaves the pinned-SHA claim to the pipeline that can make one (V20-15).
+
 ## 12. Normative constants (single table; source of truth `tools/obs/params.py` + runner additions)
 
 | Constant | Value | Source / section |
@@ -2017,13 +2070,16 @@ revision — the budget may change only with a re-derived §6.5 under the Append
 
 This appendix is the reproducibility record for every §6.5 number: how it is measured, with which instrument, on what,
 with which raw values — the boundaries of the native instrument (A.5.4, A.5.7), the ALLOCATION INVENTORY behind the native
-term (A.5.8) and the concurrency contract of the second channel (A.5.9) — and the complete source of the probe programs,
+term (A.5.8), the concurrency contract of the second channel (A.5.9) and the `realloc`-failure regression of A.5.4) — and
+the complete source of the probe programs,
 generated from the repository copies (A.7). The bounds of §6.5 are UNCHANGED by this revision. What v2.0 adds is that the
 suite is not merely described and not merely present: it is PINNED (A.0 records fourteen digests, `expected.json` pins every
 other file, and the driver refuses to run when anything was modified, added or deleted — V19-05), it is GATED IN CI on a
 freshly compiled interposer with its raw outputs archived (G-V19-04), and its native figure is decomposed into derived
-consumers rather than asserted (A.5.8). Every number below was produced by running those exact files:
-`PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check` exits 0 on the pinned interpreter.
+consumers rather than asserted (A.5.8). Every number below was produced by running those exact files — the working tree
+whose digests A.0 records — with `PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check` on the pinned interpreter,
+which printed `PASS: 10 measurements, 14 files pinned by expected.json` and exited 0. That is a statement about THIS tree,
+not about a commit (V20-15, D55); the pinned-SHA claim belongs to the pipeline that runs on the commit.
 
 ### A.0 The probe suite IS repository code, delivered, pinned and machine-enforced (V17-04; V18-02; V19-05)
 
@@ -2044,15 +2100,15 @@ PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check      # exit 0 pass /
 | `tools/obs/probes/probe3_decode.py` | phase 3 — §5.1.2 `decode_pass` release order on a `MAX_LINE` line | 1,699 | `4320fbe9044b7bd4d9b70238d8d5731832e6348d28a710fe8f92368f1ae66066` |
 | `tools/obs/probes/probe4_decode_fresh.py` | phase 3 — the same order fed by a real `readline(MAX_LINE + 2)` buffer | 815 | `e72afb89e85274c90db48ec32d03435b32dae6ffa1577adc0f83d0b68e4129eb` |
 | `tools/obs/probes/probe5_byte_equality.py` | §5.1.1 writer vs `_lines([record_to_json…])` (G-V14-02) | 2,647 | `61278c289c1ab2cb10ed7305e3e572e63debed8f1a9b6997a2a440b5c0572a47` |
-| `tools/obs/probes/probe6_native.py` | native term: `mallinfo2` samples, both interposed channels, and the A.5.8 stage inventory (server in its own process) | 15,462 | `f98854229e0c02f2b5781b2fb4daaabce8fc283b89fe2a494473a1ce148929bc` |
+| `tools/obs/probes/probe6_native.py` | native term: `mallinfo2` samples, both interposed channels, and the A.5.8 stage inventory (server in its own process) | 21,295 | `0c052217fccbdc86a602692c0bbc42f09e8db17a1060b72738e10bcce1ccb752` |
 | `tools/obs/probes/probe7_structure.py` | phase 3 — §5.1.2 `scan_structure` (parse + key check + discard) | 780 | `d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4` |
-| `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` dual-channel peak shim: malloc family AND a locked, range-aware direct anonymous `mmap` (A.5.4/A.5.7) | 17,933 | `4e15e8a8bd66f368a39fb28027e378ca6873617914067248d7e43129bb1417d6` |
-| `tools/obs/probes/run_all.py` | driver: `--check` / `--record` / `--manifest` / `--update-manifest` / `--report` / `--interpose`, and the `expected.json` manifest enforcement | 15,668 | `badb272cdf46a55696270c382d8484fa16f92c5d4f071b51dbf2b511ceebb59f` |
-| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 9,676 | `9afd8996efcffdd191011a16a5de45203e5ac18e191460945be037dc2fbaf501` |
-| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 6,285 | `a58a306d43029d1b8d8b85b245da888e5b05fe3ea2baebd83da8b858dc62b5c6` |
+| `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` dual-channel peak shim: malloc family AND a locked, range-aware direct anonymous `mmap` (A.5.4/A.5.7) | 19,327 | `19064773bb13436d9386ac896fa9ab3021f01afe0e5bf05a03b1bfdca210efa3` |
+| `tools/obs/probes/run_all.py` | driver: `--check` / `--record` / `--manifest` / `--update-manifest` / `--report` / `--interpose`, and the `expected.json` manifest enforcement | 20,851 | `16ca92b8cba0b076d6693913d7db90bb6ef80de84032ee8d77531e96ed96e135` |
+| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 10,404 | `229cf6f05951990ce9bbd770a54c1fc6b47b5ccff20dec301b68162826aa2c2c` |
+| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 6,548 | `e071a061d86f6c441b230b9aff38f189a54fe54c42ff8d3846b290525fbd02d6` |
 | `tools/obs/probes/__init__.py` | package marker (empty file; `touch tools/obs/probes/__init__.py`) | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 | `tools/obs/probes/probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort | 17,934 | `ffb160e5b6559e5cc6e644b7383f75df6dd5f85bc4786e3fea58fa0a58b13081` |
-| **14 files** | **total** | **96,627** | `python -m tools.obs.probes.run_all --manifest` prints this table |
+| **14 files** | **total** | **110,028** | `python -m tools.obs.probes.run_all --manifest` prints this table |
 
 **The pin has two links, and the second one is CODE (V19-05).** This table is the OUTER link: it names `expected.json`'s
 own byte size and SHA-256, which a file cannot hold about itself. The INNER link is `expected.json`'s `manifest` block — path,
@@ -2268,13 +2324,26 @@ be read:
 case: `usable(NULL)` is 0, so subtracting `usable(p)` there would erase a live block from the total, and every later sample
 would under-count — the single error this instrument exists to prevent. `realloc(p, 0)` is the opposite case (glibc frees
 `p` and returns `NULL`) and is accounted as a free. The regression is one measurement wide: allocate 4 MiB, `realloc` it to
-`SIZE_MAX` (returns `NULL`, block intact and byte-identical), allocate another 4 MiB; the peak must be **8,396,768 B** (both
-blocks counted) and the pre-fix shim reported **4,198,384 B**.
+`SIZE_MAX` (returns `NULL`, block intact and byte-identical), allocate another 4 MiB; the peak must count BOTH blocks and
+the pre-fix shim counted one.
+
+**That regression is GATED (V20-11/V20-12).** `probe6_native.py --realloc` runs it in one child under `alloc_peak.so` and
+`run_all --check` requires the row `realloc_accounting`, whose clauses are all mandatory: the child exits 0; `realloc`
+returned `NULL`; `errno` is `ENOMEM`; the first block is byte-identical (its SHA-256 is taken through the buffer protocol,
+so verifying 4 MiB does not allocate 4 MiB inside the region under test) and still WRITABLE, which is what ownership
+means; the second block exists; the peak is at least the two-block floor **8,388,608 B** and at most the ceiling
+**12,582,912 B** (floor + one block of slack for interpreter and allocator overhead). Measured on this revision's shim:
+**8,398,608 B**; with the guard above REMOVED, the identical child reports **4,200,608 B** and reports
+`first_block_byte_identical: true` — the content check alone cannot see the bug, which is why the peak is part of the
+gate. The blocks are allocated through `CDLL(None)` (the global scope, i.e. the PRELOADED wrapper): a handle on
+`libc.so.6` dlsyms glibc's `malloc` and would bypass the counter the measurement is about.
 
 **Concurrency contract (V19-01).** The measured regions contain worker threads and a `ThreadingHTTPServer`, so the range
 table is a shared structure and is treated as one: every mutation of `map_tab`/`map_used` and of the map live total happens
 between `map_lock()` and `map_unlock()` (a spinlock that yields); the totals move by TRUE atomic read-modify-write
-(`atomic_fetch_add`, and a compare-exchange loop for subtraction — v1.9's `load`+`store` pair lost updates); the peak is
+(`atomic_fetch_add`, and a compare-exchange loop for subtraction — v1.9's `load`+`store` pair lost updates); a subtraction
+LARGER than the tracked total ABORTS (`map_fail_underflow`, V20-13) instead of clamping at zero, because a clamped total
+is an under-count that no later sample can reveal; the peak is
 published by compare-exchange on the current live value, so two threads crossing the high-water mark at once cannot leave
 the lower value behind; and the symbol resolution that used to happen lazily on the first allocation now happens in a
 constructor, so no wrapper calls `dlsym` on a live thread (the `__libc_*` fallbacks cover the constructor's own recursion).
@@ -2914,7 +2983,12 @@ region, so the total decomposes by subtraction instead of assertion:
   full       TLS + one request, 64 KiB body                - adds body staging (the §6.4 recv chunk)
   big        TLS + one request, 1 MiB body                 - SCALING control: only the body term may grow
 
-`full` is the gated region. The inventory rows of A.5.8 are derived from constants and CHECKED against these stages:
+`full` is the gated region. A sixth measurement, `realloc_accounting` (V20-11/V20-12), runs the A.5.4 realloc-failure
+regression in its own child under the interposer: 4 MiB live, `realloc(p, SIZE_MAX)` returns NULL with the block intact
+and still owned, a second 4 MiB block, and the peak must show BOTH blocks (> 8,388,608 B). The pre-fix shim reported
+4,198,384 B, so this is a gated regression, not a documented anecdote.
+
+The inventory rows of A.5.8 are derived from constants and CHECKED against these stages:
 `handshake` covers TLS-consumer bounds, `empty - handshake` the HTTP-staging bounds, `full - empty` the body term,
 and `big - full` must track the extra body bytes (a consumer that scaled with anything else would surface here).
 
@@ -2926,6 +3000,8 @@ from __future__ import annotations
 
 import atexit
 import ctypes
+import errno as errno_module
+import hashlib
 import http.server
 import json
 import os
@@ -2951,6 +3027,14 @@ KINDS = ("connect", "handshake", "empty", "full", "big")
 # cold_* = the FIRST such request in a fresh process (the worst case, and what a one-request session pays);
 # warm_* = the same request after one throwaway run, i.e. the steady-state per-request cost (A.5.8).
 STAGES = ("cold_connect", "cold_full", "warm_connect", "warm_handshake", "warm_empty", "warm_full", "warm_big")
+# A.5.4's realloc-failure regression (V20-11/V20-12): 4 MiB live, a realloc that FAILS (NULL, block intact), then a
+# second 4 MiB. The peak must count both blocks, so the floor is exactly 2 x 4 MiB and the pre-fix shim's 4,198,384 B
+# (one block: the failed realloc erased the first) cannot reach it. The ceiling is the floor plus one block of slack for
+# interpreter and allocator overhead; anything above it would mean more than the two blocks survived.
+REALLOC_BLOCK = 4 * 1024 * 1024
+REALLOC_FLOOR = 2 * REALLOC_BLOCK
+REALLOC_CEILING = REALLOC_FLOOR + REALLOC_BLOCK
+REALLOC_PATTERN = 0x5A
 
 _MATERIAL: tuple[str, str] | None = None
 _PAYLOAD = PAYLOAD
@@ -3147,6 +3231,94 @@ def run_stage(kind: str, port: int, client: ssl.SSLContext | None) -> int:
     return request_once(port, client)[0]
 
 
+def realloc_child() -> int:
+    """`--realloc`: the A.5.4 failure regression, measured in ONE child under alloc_peak.so (V20-11/V20-12).
+
+    Two 4 MiB blocks are allocated with a KNOWN pattern. Between them the first is reallocated to `SIZE_MAX`, which glibc
+    refuses: the call returns NULL, `errno` is ENOMEM, and the block is still the caller's - readable, byte-identical and
+    writable. A shim that moves accounting on the failed call erases 4 MiB from the total, so the recorded peak shows
+    one block instead of two; A.5.4 requires both. The digest is taken through the buffer protocol, so verifying 4 MiB
+    does not allocate 4 MiB inside the measured region and inflate the figure being checked.
+    """
+    # CDLL(None) resolves through the GLOBAL scope, so these are the PRELOADED wrapper's symbols - a handle on
+    # libc.so.6 would dlsym glibc's malloc directly and bypass the very counter this measurement is about.
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.malloc.restype = ctypes.c_void_p
+    libc.malloc.argtypes = [ctypes.c_size_t]
+    libc.realloc.restype = ctypes.c_void_p
+    libc.realloc.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+    libc.free.argtypes = [ctypes.c_void_p]
+    lib = ctypes.CDLL(None)
+    lib.alloc_peak_peak.restype = ctypes.c_size_t
+    lib.alloc_peak_reset()
+    first = libc.malloc(REALLOC_BLOCK)
+    if not first:
+        print(json.dumps({"stage": "realloc", "error": "malloc returned NULL"}))
+        return 2
+    ctypes.memset(first, REALLOC_PATTERN, REALLOC_BLOCK)
+    view = (ctypes.c_char * REALLOC_BLOCK).from_address(first)
+    before = hashlib.sha256(view).hexdigest()
+    ctypes.set_errno(0)
+    moved = libc.realloc(first, ctypes.c_size_t(-1))          # SIZE_MAX: cannot be satisfied
+    failure_errno = ctypes.get_errno()
+    returned_null = not moved
+    intact = returned_null and hashlib.sha256(view).hexdigest() == before
+    writable = False
+    if intact:                                               # ownership: the caller may still write the block
+        ctypes.memset(first, REALLOC_PATTERN ^ 0xFF, 1)
+        writable = ctypes.string_at(first, 1) == bytes([REALLOC_PATTERN ^ 0xFF])
+        ctypes.memset(first, REALLOC_PATTERN, 1)
+    second = libc.malloc(REALLOC_BLOCK)
+    if second:
+        ctypes.memset(second, REALLOC_PATTERN ^ 0xFF, REALLOC_BLOCK)
+    peak = int(lib.alloc_peak_peak())
+    libc.free(first)
+    if second:
+        libc.free(second)
+    print(json.dumps({
+        "stage": "realloc", "peak": peak, "block_bytes": REALLOC_BLOCK, "floor": REALLOC_FLOOR,
+        "ceiling": REALLOC_CEILING, "returned_null": returned_null, "errno": failure_errno,
+        "errno_name": errno_module.errorcode.get(failure_errno, ""), "content_intact": intact,
+        "writable_after_failure": writable, "second_block": bool(second),
+    }))
+    return 0
+
+
+def realloc_regression() -> dict:
+    """Run the regression child and turn its report into a GATED row: every clause is required (V20-11/V20-12)."""
+    row: dict = {"probe": "realloc_accounting", "bound": REALLOC_CEILING, "peak": 0,
+                 "detail": {"instrument": "alloc_peak.so malloc channel, one child (A.5.4)",
+                            "block_bytes": REALLOC_BLOCK, "two_block_floor": REALLOC_FLOOR}}
+    if not os.path.exists(SHIM):
+        row["pass"] = False
+        row["detail"]["error"] = "alloc_peak.so is not built: the regression cannot be measured (A.7.9, V19-04)"
+        return row
+    done = subprocess.run([sys.executable, "-m", "tools.obs.probes.probe6_native", "--realloc"],
+                          env=dict(os.environ, LD_PRELOAD=SHIM, PYTHONPATH=ROOT),
+                          capture_output=True, timeout=300, cwd=ROOT)
+    stdout = done.stdout.decode()
+    try:
+        data = json.loads(stdout.splitlines()[-1] if stdout.strip() else "{}")
+    except json.JSONDecodeError:
+        data = {}
+    peak = int(data.get("peak") or 0)
+    checks = {
+        "child_exit_ok": done.returncode == 0,
+        "realloc_returned_null": data.get("returned_null") is True,
+        "errno_enomem": data.get("errno") == errno_module.ENOMEM,
+        "first_block_byte_identical": data.get("content_intact") is True,
+        "first_block_still_writable": data.get("writable_after_failure") is True,
+        "second_block_allocated": data.get("second_block") is True,
+        "peak_counts_both_blocks": peak >= REALLOC_FLOOR,
+        "peak_within_ceiling": peak <= REALLOC_CEILING,
+    }
+    row["peak"] = peak
+    row["pass"] = all(checks.values())
+    row["detail"].update({"checks": checks, "child": data, "returncode": done.returncode,
+                          "stderr_tail": done.stderr.decode()[-400:]})
+    return row
+
+
 def child(stage: str) -> int:
     """Child entry: build the fixture and the client context FIRST, then measure ONLY the stage's region."""
     if stage not in STAGES:
@@ -3219,7 +3391,7 @@ def main() -> list[dict]:
             "interposed": {"peak": full["peak"], "map_peak": full["map_peak"]},
             "inventory": rows,
         },
-    }]
+    }, realloc_regression()]
 
 
 if __name__ == "__main__":
@@ -3234,6 +3406,8 @@ if __name__ == "__main__":
     if "--child" in args:
         index = args.index("--child")
         raise SystemExit(child(args[index + 1] if len(args) > index + 1 else "full"))
+    if "--realloc" in args:
+        raise SystemExit(realloc_child())
     print(C.canonical(main()))
 ```
 
@@ -3447,6 +3621,21 @@ static void map_fail_closed(const char *why) {        /* called with the lock he
     abort();
 }
 
+/* Underflow of the live total: reported with both numbers (never a clamp), then aborted. Kept separate from
+   map_fail_closed() so the two invariants are distinguishable in stderr and in a test. */
+static void map_fail_underflow(size_t wanted, size_t tracked) {   /* called with the lock held; never returns */
+    char buf[256];
+    int n = snprintf(buf, sizeof buf,
+                     "alloc_peak: FATAL: mmap accounting underflow: %zu B to subtract, %zu B tracked "
+                     "(regions %zu): refusing to clamp to zero\n",
+                     wanted, tracked, map_used);
+    if (n > 0) {
+        ssize_t written = write(STDERR_FILENO, buf, (size_t)(n < (int)sizeof buf ? n : (int)sizeof buf));
+        (void)written;
+    }
+    abort();
+}
+
 static void map_reserve(size_t extra) {
     if (map_cap == 0) map_capacity();
     if (map_used + extra <= map_cap) return;
@@ -3466,11 +3655,17 @@ static void map_live_add(size_t n) {
     atomic_fetch_add_explicit(&map_live, n, memory_order_relaxed);
 }
 
+/* Subtract n from the live total. The old form clamped at zero (`cur > n ? cur - n : 0`), which silently turns a lost
+   range into a plausible-looking number: a total that is too small is exactly the under-count this instrument exists to
+   prevent, and clamping makes it permanent and invisible. Removing more bytes than are tracked therefore means the range
+   table and the total have disagreed - a bug in the shim, not a property of the workload - so it is FATAL: a diagnostic
+   with both figures, then abort(), before any sample can report the corrupted total (V20-13). */
 static void map_live_sub(size_t n) {
     size_t cur = atomic_load_explicit(&map_live, memory_order_relaxed);
     for (;;) {
-        size_t next = cur > n ? cur - n : 0;
-        if (atomic_compare_exchange_weak_explicit(&map_live, &cur, next, memory_order_relaxed, memory_order_relaxed)) {
+        if (cur < n) map_fail_underflow(n, cur);
+        if (atomic_compare_exchange_weak_explicit(&map_live, &cur, cur - n,
+                                                 memory_order_relaxed, memory_order_relaxed)) {
             return;
         }
     }
@@ -3713,6 +3908,7 @@ import importlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 
@@ -3729,6 +3925,10 @@ SELF = "expected.json"
 BUILD_ARTIFACTS = {"alloc_peak.so"}
 IGNORED_DIRS = {"__pycache__"}
 SCHEMA = "obs-probes/2"
+CANONICAL_PREFIX = "tools/obs/probes/"     # A.0 paths are repository-relative and complete (V20-14)
+ROW_FIELDS = {"path", "bytes", "sha256"}
+BLOCK_FIELDS = {"algorithm", "files"}
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
 def sha256(path: str) -> str:
@@ -3763,27 +3963,90 @@ def manifest(include_self: bool = True) -> dict:
 
 
 def check_manifest(expected: dict) -> list[str]:
-    """V19-05: a modification, an addition or a deletion is a refusal, never a warning."""
+    """V19-05/V20-14: the manifest is the reviewed code, so it is checked as DATA before it is trusted, and a
+    modification, an addition or a deletion is a refusal, never a warning.
+
+    v2.0 matched its rows by BASENAME (`os.path.basename(row["path"])`) after indexing them into a dict, which made
+    every structural question about the manifest unanswerable: two rows could share a basename with one silently
+    overwriting the other, a row could name `probe3_decode.py` (or `/etc/whatever`) and still bind to the file in this
+    directory, `bytes`/`sha256` of the wrong type were trusted until they were compared, and a row for `expected.json`
+    itself or for the build artifact was reported as a DELETION rather than as the malformed entry it is. Each row is
+    now validated on its own and a malformed entry fails closed - a refusal to run, before a single measurement.
+    """
     failures: list[str] = []
-    declared = expected.get("manifest") or {}
-    rows = declared.get("files") or []
-    if not rows:
-        return ["manifest: expected.json has no manifest block (V19-05)"]
-    listed = {os.path.basename(row["path"]): row for row in rows}
+    declared = expected.get("manifest")
+    if not isinstance(declared, dict):
+        return ["manifest: expected.json has no manifest object (V19-05)"]
+    unknown_block = sorted(set(declared) - BLOCK_FIELDS)
+    if unknown_block:
+        failures.append(f"manifest: unknown field(s) {unknown_block} in the manifest block (V20-14)")
+    if declared.get("algorithm") != "sha256":
+        failures.append(f"manifest: algorithm {declared.get('algorithm')!r} != 'sha256' (V20-14)")
+    rows = declared.get("files")
+    if not isinstance(rows, list) or not rows:
+        return failures + ["manifest: 'files' must be a non-empty list (V19-05)"]
+    listed: dict[str, dict] = {}              # canonical path -> validated row
+    by_name: dict[str, str] = {}              # basename -> canonical path already seen
+    for index, row in enumerate(rows):
+        where = f"manifest: files[{index}]"
+        if not isinstance(row, dict):
+            failures.append(f"{where}: entry is {type(row).__name__}, not an object (V20-14)")
+            continue
+        unknown = sorted(set(row) - ROW_FIELDS)
+        if unknown:
+            failures.append(f"{where}: unknown field(s) {unknown} (V20-14)")
+        path, size, digest = row.get("path"), row.get("bytes"), row.get("sha256")
+        valid = True
+        if not isinstance(path, str) or not path:
+            failures.append(f"{where}: 'path' must be a non-empty string (V20-14)")
+            valid = False
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            failures.append(f"{where} {path!r}: 'bytes' must be a non-negative integer (V20-14)")
+            valid = False
+        if not isinstance(digest, str) or SHA256_HEX.fullmatch(digest) is None:
+            failures.append(f"{where} {path!r}: 'sha256' must be 64 lowercase hex characters (V20-14)")
+            valid = False
+        if not valid:
+            continue
+        name = os.path.basename(path)
+        if path != CANONICAL_PREFIX + name:
+            failures.append(f"{where}: {path!r} is not the canonical path {CANONICAL_PREFIX + name!r} (V20-14)")
+            continue                          # a non-canonical path never resolves to a file here
+        if name.startswith(".") or name in (".", ".."):
+            failures.append(f"{where}: {path!r} is not a suite file name (V20-14)")
+            continue
+        if name == SELF:
+            failures.append(f"{where}: {SELF} cannot pin itself; A.0 pins it against the document (V20-14)")
+            continue
+        if name in BUILD_ARTIFACTS:
+            failures.append(f"{where}: {name} is a build artifact and is never pinned (G-V18-02 d, V20-14)")
+            continue
+        if path in listed:
+            failures.append(f"{where}: duplicate path {path} (V20-14)")
+            continue
+        if name in by_name:
+            failures.append(f"{where}: {path} repeats the basename of {by_name[name]} (V20-14)")
+            continue
+        by_name[name] = path
+        listed[path] = row
     present = set(suite_files()) - {SELF}
-    for name in sorted(present - set(listed)):
+    for name in sorted(present - set(by_name)):
         failures.append(f"manifest: {name} exists but is not in the manifest (added file)")
-    for name in sorted(set(listed) - present):
+    for name in sorted(set(by_name) - present):
         failures.append(f"manifest: {name} is listed but missing on disk (deleted file)")
-    for name in sorted(present & set(listed)):
+    for name in sorted(present & set(by_name)):
+        row = listed[CANONICAL_PREFIX + name]
         path = os.path.join(HERE, name)
+        if not os.path.isfile(path):
+            failures.append(f"manifest: {name} is not a regular file (V20-14)")
+            continue
         size = os.path.getsize(path)
-        if size != listed[name]["bytes"]:
-            failures.append(f"manifest: {name} is {size} B, manifest says {listed[name]['bytes']} B (modified)")
+        if size != row["bytes"]:
+            failures.append(f"manifest: {name} is {size} B, manifest says {row['bytes']} B (modified)")
             continue
         digest = sha256(path)
-        if digest != listed[name]["sha256"]:
-            failures.append(f"manifest: {name} sha256 {digest[:16]}… != {listed[name]['sha256'][:16]}… (modified)")
+        if digest != row["sha256"]:
+            failures.append(f"manifest: {name} sha256 {digest[:16]}… != {row['sha256'][:16]}… (modified)")
     return failures
 
 
@@ -3852,7 +4115,13 @@ def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]
             if got.get("pass") is not False:
                 failures.append(f"{name}: banned pattern PASSED its bound (it must fail)")
         elif got.get("pass") is False:
-            failures.append(f"{name}: peak {got['peak']} exceeds its bound {got['bound']}")
+            if name == "realloc_accounting":
+                detail = got.get("detail") or {}
+                failed = sorted(key for key, held in (detail.get("checks") or {}).items() if not held) or ["child"]
+                failures.append(f"{name}: the realloc-failure regression did not hold: {failed} (peak {got['peak']} B, "
+                                f"two-block floor {detail.get('two_block_floor')} B; A.5.4/V20-11)")
+            else:
+                failures.append(f"{name}: peak {got['peak']} exceeds its bound {got['bound']}")
         if want.get("peak") and name not in ("native_headroom", "mmap_accounting"):
             if abs(got["peak"] - want["peak"]) > want["peak"] * tolerance:
                 failures.append(f"{name}: peak {got['peak']} != recorded {want['peak']} (tolerance {tolerance:.0%})")
@@ -3887,6 +4156,17 @@ def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]
                                 f"HTTP_HEADROOM {C.HTTP_HEADROOM} (A.5.7 fence)")
             failures.extend(compare_inventory(expected, detail))
             # the mallinfo2 figure is a LOWER BOUND and is deliberately NOT compared to a recorded value
+        if name == "realloc_accounting":
+            detail = got.get("detail") or {}
+            checks = detail.get("checks") or {}
+            if not checks:
+                failures.append("realloc_accounting: the regression reported no clause results (A.5.4/V20-11)")
+            for clause in sorted(checks):
+                if checks[clause] is not True:
+                    failures.append(f"realloc_accounting: clause {clause!r} did not hold (A.5.4/V20-11)")
+            if int(got.get("peak") or 0) < int(detail.get("two_block_floor") or 1):
+                failures.append(f"realloc_accounting: peak {got.get('peak')} B does not cover both 4 MiB blocks "
+                                f"(floor {detail.get('two_block_floor')} B): a failed realloc erased a live block")
         if name == "mmap_accounting":
             detail = got.get("detail") or {}
             concurrency = detail.get("concurrency") or {}
@@ -4022,6 +4302,9 @@ PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check --report artifacts/p
 ## The manifest is the gate (V19-05)
 
 `expected.json` carries a `manifest` block listing every other file in this directory with its byte size and SHA-256.
+The block is validated as DATA before it is trusted (V20-14): canonical `tools/obs/probes/<name>` paths only, no duplicate
+paths or basenames, `bytes` a non-negative integer, `sha256` 64 lowercase hex, no unknown fields, no row for
+`expected.json` itself and none for the `alloc_peak.so` build artifact — a malformed entry is a refusal to run.
 `--check` verifies it BEFORE measuring anything and refuses (exit 2) on a modification, an addition or a deletion, so
 the code that produces a number is exactly the code that was reviewed. `expected.json` cannot contain its own digest;
 A.0 pins it against the document instead, and `--manifest` prints its digest too.
@@ -4038,7 +4321,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe3_decode.py` | phase 3 — the §5.1.2 `decode_pass` release order on ONE line at `MAX_LINE` |
 | `probe4_decode_fresh.py` | phase 3 — the same order fed from a real `readline(MAX_LINE + 2)` buffer |
 | `probe5_byte_equality.py` | §5.1.1 streaming writer byte-equality over the full session budget |
-| `probe6_native.py` | native memory around one loopback TLS request: `mallinfo2` samples, both interposed channels, and the five-stage / cold-vs-warm inventory (A.5.8) |
+| `probe6_native.py` | native memory around one loopback TLS request: `mallinfo2` samples, both interposed channels, the five-stage / cold-vs-warm inventory (A.5.8), and the GATED `realloc`-failure regression (`--realloc`, A.5.4 V20-11/V20-12) |
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
@@ -4059,8 +4342,9 @@ Three instruments, none interchangeable; the document's A.5 fences each one expl
   (`realloc(p, 0)` is a free); subtracting the old size on failure would under-count a live block forever.
 * **`alloc_peak.c` mmap counter** — live `MAP_ANONYMOUS|MAP_PRIVATE` mapping bytes, same reset/peak discipline, with a
   locked range table: partial unmaps subtract only the overlap, `mremap` is remove+add, adjacent ranges coalesce, and a
-  table overflow ABORTS rather than dropping an entry (an under-count is the one failure this instrument exists to
-  prevent). `probe8` proves all four properties — and its overflow check is deliberately not "a child with capacity 1
+  table overflow ABORTS rather than dropping an entry, and so does a subtraction larger than the tracked total
+  (`map_fail_underflow`, V20-13): clamping at zero would preserve a small, plausible, permanent under-count, which is the
+  one failure this instrument exists to prevent (V19-01). `probe8` proves all four properties — and its overflow check is deliberately not "a child with capacity 1
   must abort": the interpreter's own startup mappings fill such a table first, so an abort proves nothing. It requires
   the EXACT diagnostic line with the numbers the child itself printed, flushed `MAPPED` lines showing the abort followed
   the intended mapping, the table filled to exactly its capacity, and a NEGATIVE CONTROL that reaches `SURVIVED` with the
@@ -4134,7 +4418,7 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
     "openssl": "3.0.13",
     "platform": "Linux x86-64",
     "python": "3.12.3",
-    "updated": "v2.0"
+    "updated": "v2.1"
   },
   "inventory": {
     "items": [
@@ -4191,9 +4475,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 9676,
+        "bytes": 10404,
         "path": "tools/obs/probes/README.md",
-        "sha256": "9afd8996efcffdd191011a16a5de45203e5ac18e191460945be037dc2fbaf501"
+        "sha256": "229cf6f05951990ce9bbd770a54c1fc6b47b5ccff20dec301b68162826aa2c2c"
       },
       {
         "bytes": 0,
@@ -4201,9 +4485,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       {
-        "bytes": 17933,
+        "bytes": 19327,
         "path": "tools/obs/probes/alloc_peak.c",
-        "sha256": "4e15e8a8bd66f368a39fb28027e378ca6873617914067248d7e43129bb1417d6"
+        "sha256": "19064773bb13436d9386ac896fa9ab3021f01afe0e5bf05a03b1bfdca210efa3"
       },
       {
         "bytes": 1358,
@@ -4231,9 +4515,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
         "sha256": "61278c289c1ab2cb10ed7305e3e572e63debed8f1a9b6997a2a440b5c0572a47"
       },
       {
-        "bytes": 15462,
+        "bytes": 21295,
         "path": "tools/obs/probes/probe6_native.py",
-        "sha256": "f98854229e0c02f2b5781b2fb4daaabce8fc283b89fe2a494473a1ce148929bc"
+        "sha256": "0c052217fccbdc86a602692c0bbc42f09e8db17a1060b72738e10bcce1ccb752"
       },
       {
         "bytes": 780,
@@ -4251,9 +4535,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
         "sha256": "c1662be01889bddbdba6426e566cd3da9b2bb7e50a955000c35670b9f7e5cca4"
       },
       {
-        "bytes": 15668,
+        "bytes": 20851,
         "path": "tools/obs/probes/run_all.py",
-        "sha256": "badb272cdf46a55696270c382d8484fa16f92c5d4f071b51dbf2b511ceebb59f"
+        "sha256": "16ca92b8cba0b076d6693913d7db90bb6ef80de84032ee8d77531e96ed96e135"
       }
     ]
   },
@@ -4337,6 +4621,13 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
       "peak": 8519680,
       "probe": "mmap_accounting",
       "threads": 8
+    },
+    {
+      "bound": 12582912,
+      "instrument": "alloc_peak.so malloc channel, one child: 4 MiB, a failed realloc(p, SIZE_MAX), a second 4 MiB (A.5.4, V20-11/V20-12)",
+      "peak": 8398608,
+      "probe": "realloc_accounting",
+      "tolerance": 0.02
     }
   ],
   "schema": "obs-probes/2"
@@ -4702,5 +4993,5 @@ if __name__ == "__main__":
     print(json.dumps(main()))
 ```
 
-End of v2.0. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
+End of v2.1. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
 document, not an implementation choice.
