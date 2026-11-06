@@ -1857,7 +1857,7 @@ frozen under `obs-run-manifest/1`).
 
 | G-V17-04 | native instrumentation + repository probes (V17-04; channels extended by V18-03) | CI runs `python -m tools.obs.probes.run_all --check` (exit 0 required) on the pinned interpreter, asserting for every phase BOTH instruments: `tracemalloc` peaks (8,396,983 / 148,004 / 11,188,520 / 11,188,600 / 11,188,520 B) and interposed malloc peaks (8,400,920 / 147,848 / 11,186,544 B) within their §6.5 bounds, the banned `no_del` variant still FAILING its bound (5,656,528 B), byte equality at 8,511,232 B, and `native_headroom`'s client-only request region on BOTH channels — malloc 214,120 B plus direct `mmap` 0 B, SUM 214,120 B ≤ `HTTP_HEADROOM = 262,144 B` — plus the five A.5.8 inventory items, each inside its derived bound (77,864 ≤ 98,304 / 69,992 ≤ 86,016 / 0 ≤ 65,536 / 0 ≤ 65,536 / 168,048 ≤ 196,608); probe6's `mallinfo2` sample max is reported and NEVER compared (it is a lower bound — 105,072 B this revision against a 52,192 B end delta, the under-read A.5.3 documents); `HTTP_HEADROOM == 262,144` and the A.5.8 per-request item bounds sum to 253,952 ≤ it, while the four coarse A.5.7.4 terms plus one page of rounding each sum to ≤ 147,456 B; a probe file whose sha256 differs from A.0's manifest without a doc revision fails; doc gate: A.5 must contain the `uordblks`/`hblkhd`/`MMAP_THRESHOLD`/per-thread-arena/kernel-buffer clauses, the retraction sentence, the interception inventory (A.5.4) and the arena-granularity caveat — deleting any of them fails |
 
-| G-V19-01 | thread-safe, fail-closed mmap accounting (V19-01) | (a) source gate: every mutation of `map_tab`/`map_used` and of the map live total occurs between `map_lock()`/`map_unlock()`; no `atomic_load`+`atomic_store` pair decrements a total (a CAS loop does); (b) a full table ABORTS — probe8 runs a child with `ALLOC_PEAK_MAP_SLOTS=1` that needs two ranges and requires `SIGABRT` plus the `capacity exhausted` diagnostic, and requires that the child did NOT survive; (c) probe8's concurrency phase: 8 threads × 64 iterations, the peak must be ≥ 8,388,608 B (all eight 1 MiB mappings live at the barrier — a lost update makes it smaller), the range table must return to its baseline live total and baseline entry count, and a leaked entry would have aborted the run; (d) mutation: restore the v1.9 load/store decrement or the silent drop → (b)/(c) fail |
+| G-V19-01 | thread-safe, fail-closed mmap accounting (V19-01) | (a) source gate: every mutation of `map_tab`/`map_used` and of the map live total occurs between `map_lock()`/`map_unlock()`; no `atomic_load`+`atomic_store` pair decrements a total (a CAS loop does); (b) a full table ABORTS, and only WHERE INTENDED — probe8 runs the child under `ALLOC_PEAK_MAP_SLOTS=64`, which the child's own measured baseline (3 interpreter regions) makes the exact capacity of 61 explicit mappings; the gate requires the flushed `MAPPED` line whose tracked count EQUALS the capacity, a table filled to exactly 64 ranges, `SIGABRT` (−6) rather than an exit code, and the single diagnostic line matched byte for byte including its `(tracked 64, capacity 64, live 2,363,392)` numbers; `ALLOC_PEAK_MAP_SLOTS=1` is deliberately NOT used, because the interpreter's startup mappings fill it before the probe's first mapping, which is how an earlier form of this check passed without ever reaching the abort; a negative control with the capacity unset must reach `SURVIVED` and exit 0; (c) probe8's concurrency phase: 8 threads × 64 iterations, the peak must be ≥ 8,388,608 B (all eight 1 MiB mappings live at the barrier — a lost update makes it smaller), the range table must return to its baseline live total and baseline entry count, and a leaked entry would have aborted the run; (d) mutation: restore the v1.9 load/store decrement or the silent drop → (b)/(c) fail |
 | G-V19-02 | range-aware mapping bookkeeping (V19-02) | (a) probe8 A: map 12,288 B → `munmap` the middle page → live 8,192 B in TWO ranges → free the remaining pieces → live 0; (b) probe8 B: 8,192 B → `mremap(MAYMOVE)` to 32,768 B → live 32,768 B → `munmap` → 0 — an add-only or subtract-only implementation misses one of the two figures; (c) source gate: `mremap` is interposed and passes `MREMAP_FIXED`'s fifth argument, `MAP_FIXED` installs subtract the replaced range first, and adjacent ranges coalesce; (d) mutations: ignore partial unmaps, treat `mremap` as a no-op, or stop coalescing → (a)/(b) or the table-baseline check fail |
 | G-V19-03 | native allocation inventory, derived and gated (V19-03) | (a) `expected.json` carries the five-item inventory (unit × count derivation and a bound per item) and `run_all.compare_inventory` computes each item from the measured stages and FAILS when it exceeds its bound, when a stage is missing, or when it falls below the one-page negative tolerance the two ~0 B items carry (allocator block reuse makes a few dozen bytes of peak-difference noise, and a stage that measured LESS by more than a page would mean the difference is not the consumer it claims to be); (b) `per_request_bound` (258,048 B) is asserted ≤ `HTTP_HEADROOM`; (c) the client-only region is the gated figure — the loopback server runs in its own process, so a probe that ever measured the server again would raise every stage and breach the bounds; (d) doc gate: A.5.8 contains the derivation column, the cold/warm split and the unenumerated-remainder arithmetic; deleting any of them fails |
 | G-V19-04 | CI enforces the probe gate (V19-04) | (a) `.github/workflows/ci.yml` has a `probe-suite` job that pins CPython 3.12.3, compiles `tools/obs/probes/alloc_peak.c` with `-Wall -Wextra -Werror`, and runs `python3 -m tools.obs.probes.run_all --check --report artifacts/probes/report.json`; (b) the gate step's exit status survives the pipe (`PIPESTATUS`) and the job fails when the gate fails; (c) `probe-suite-evidence` (gate.log, manifest.json, report.json, build.log) and `alloc-peak-so` are uploaded with `if: always()`, so a red run still yields its raw output; (d) mutation: drop the build step, the gate step or the artifact upload → the workflow no longer proves anything and the gate fails on the missing artifact |
@@ -1976,6 +1976,11 @@ outcome (V19-04);
 so A.0 pins it against this document and `--manifest` prints its digest — the chain is document (git-anchored) →
 `expected.json` → every probe file (V19-05).
 
+**D51** a failed allocation moves no accounting: `realloc(p, n)` returning `NULL` for `n != 0` leaves `p` alive, so the shim
+returns `NULL` and changes nothing (subtracting there would under-count a live block forever), and by the same rule the
+capacity refusal runs BEFORE the live total is advanced, so an aborted mapping is never half-counted. Both rules are
+enforced by measurement, not by reading: the 4 MiB + 4 MiB `realloc`-failure case (A.5.4) and probe8's property (D).
+
 ## 12. Normative constants (single table; source of truth `tools/obs/params.py` + runner additions)
 
 | Constant | Value | Source / section |
@@ -2041,13 +2046,13 @@ PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check      # exit 0 pass /
 | `tools/obs/probes/probe5_byte_equality.py` | §5.1.1 writer vs `_lines([record_to_json…])` (G-V14-02) | 2,647 | `61278c289c1ab2cb10ed7305e3e572e63debed8f1a9b6997a2a440b5c0572a47` |
 | `tools/obs/probes/probe6_native.py` | native term: `mallinfo2` samples, both interposed channels, and the A.5.8 stage inventory (server in its own process) | 15,462 | `f98854229e0c02f2b5781b2fb4daaabce8fc283b89fe2a494473a1ce148929bc` |
 | `tools/obs/probes/probe7_structure.py` | phase 3 — §5.1.2 `scan_structure` (parse + key check + discard) | 780 | `d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4` |
-| `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` dual-channel peak shim: malloc family AND a locked, range-aware direct anonymous `mmap` (A.5.4/A.5.7) | 16,816 | `4765757008287d97c96ce2966c47d79804bbd4888fbd5df707043b7f043d52b8` |
+| `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` dual-channel peak shim: malloc family AND a locked, range-aware direct anonymous `mmap` (A.5.4/A.5.7) | 17,933 | `4e15e8a8bd66f368a39fb28027e378ca6873617914067248d7e43129bb1417d6` |
 | `tools/obs/probes/run_all.py` | driver: `--check` / `--record` / `--manifest` / `--update-manifest` / `--report` / `--interpose`, and the `expected.json` manifest enforcement | 15,668 | `badb272cdf46a55696270c382d8484fa16f92c5d4f071b51dbf2b511ceebb59f` |
-| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 8,970 | `4e7e6e80484b815021496cd42ab62645b04f6a11d80dd6617d46680df3eaa8dd` |
-| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 6,285 | `eb7574488a5e3f5af9021fa094c46f20142084ff379eabe13c8cf7cb36750b9d` |
+| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 9,676 | `9afd8996efcffdd191011a16a5de45203e5ac18e191460945be037dc2fbaf501` |
+| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 6,285 | `a58a306d43029d1b8d8b85b245da888e5b05fe3ea2baebd83da8b858dc62b5c6` |
 | `tools/obs/probes/__init__.py` | package marker (empty file; `touch tools/obs/probes/__init__.py`) | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
-| `tools/obs/probes/probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort | 10,465 | `42fe25c453f14728e640826ecd463e7ae2e5c99c4f23afd79d30546fe4ee593d` |
-| **14 files** | **total** | **87,335** | `python -m tools.obs.probes.run_all --manifest` prints this table |
+| `tools/obs/probes/probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort | 17,934 | `ffb160e5b6559e5cc6e644b7383f75df6dd5f85bc4786e3fea58fa0a58b13081` |
+| **14 files** | **total** | **96,627** | `python -m tools.obs.probes.run_all --manifest` prints this table |
 
 **The pin has two links, and the second one is CODE (V19-05).** This table is the OUTER link: it names `expected.json`'s
 own byte size and SHA-256, which a file cannot hold about itself. The INNER link is `expected.json`'s `manifest` block — path,
@@ -2258,6 +2263,14 @@ be read:
 | file-backed and shared mappings | EXCLUDED by design | page cache and code sharing, not runner transient (A.5.6) |
 | kernel socket buffers, page cache, driver-pinned memory | NO | outside every userspace instrument (A.5.6, A.5.7.5) |
 
+**`realloc` that FAILS (V19 follow-up).** `realloc(p, n)` with `n != 0` either returns a new block (`p` is gone) or returns
+`NULL` and leaves `p` valid and still owned by the caller. The shim returns `NULL` and moves NO accounting in the second
+case: `usable(NULL)` is 0, so subtracting `usable(p)` there would erase a live block from the total, and every later sample
+would under-count — the single error this instrument exists to prevent. `realloc(p, 0)` is the opposite case (glibc frees
+`p` and returns `NULL`) and is accounted as a free. The regression is one measurement wide: allocate 4 MiB, `realloc` it to
+`SIZE_MAX` (returns `NULL`, block intact and byte-identical), allocate another 4 MiB; the peak must be **8,396,768 B** (both
+blocks counted) and the pre-fix shim reported **4,198,384 B**.
+
 **Concurrency contract (V19-01).** The measured regions contain worker threads and a `ThreadingHTTPServer`, so the range
 table is a shared structure and is treated as one: every mutation of `map_tab`/`map_used` and of the map live total happens
 between `map_lock()` and `map_unlock()` (a spinlock that yields); the totals move by TRUE atomic read-modify-write
@@ -2444,13 +2457,33 @@ properties in a child with the shim preloaded; each is a failure mode of a naive
 | A. partial unmap | map 12,288 → `munmap` the middle 4,096 → live 8,192 in TWO ranges → free both pieces → 0 | exact (12,288 / 8,192 / 2 ranges / 0) |
 | B. `mremap` | map 8,192 → `mremap(MAYMOVE)` to 32,768 → live 32,768 → `munmap` → 0 | exact (8,192 / 32,768 / 0) |
 | C. concurrency | 8 threads × 64 iterations of map / map / partial unmap / `mremap` / unmap, after a warm-up; 1 MiB per thread held at a barrier | peak 8,519,680 ≥ 8,388,608 (every mapping counted: a lost update would under-read); final live 0 and final range count 0 (nothing leaked) |
-| D. fail-closed | a child with `ALLOC_PEAK_MAP_SLOTS=1` needing two ranges | `SIGABRT` (return code −6) with `capacity exhausted` on stderr, and no `SURVIVED` on stdout |
+| D. fail-closed | the child runs under `ALLOC_PEAK_MAP_SLOTS=64`; from its OWN measured baseline (3 interpreter regions) that capacity is exactly 61 explicit mappings, after which one more is attempted | `SIGABRT` (−6); the table filled to exactly 64 ranges; the diagnostic matched BYTE FOR BYTE, `… (tracked 64, capacity 64, live 2,363,392): refusing to under-report`; the flushed `MAPPED` lines prove the abort followed the intended mapping |
+| D′. negative control | the identical program and preload, capacity left at the compiled 1024, only 4 explicit mappings | exit 0, `SURVIVED` printed, no diagnostic — so the abort in (D) is caused by the capacity and by nothing else |
 
 The peak in (C) is above the 8,388,608 B floor by 131,072 B, which is the interpreter's own arena growth during the phase
 (eight threads creating thread states); the gate accepts it inside `floor + 8 × 64 pages` and requires the exactness
 properties, not the exact peak. Property (C) is what makes V19-01's lock a MEASURED requirement: without it, 8 × 64 = 512
 concurrent insertions and removals of overlapping ranges lose entries, and either the peak falls below the floor or the
 table drifts away from its baseline.
+
+Property (D) is deliberately not written as "`ALLOC_PEAK_MAP_SLOTS=1` must abort". An earlier form of it did exactly that,
+and the check was a FALSE POSITIVE: the interpreter maps anonymous memory for its own arenas before any probe code runs, so
+with a capacity of one the shim aborts during startup — with live 1,064,960 B, a tracked count of 1 and none of the probe's
+mappings in existence — and "aborted + no SURVIVED" is satisfied by an abort that proves nothing. The check now depends on
+facts the child itself reports, so it cannot pass by accident:
+
+* the child prints `BASELINE live=… regions=…` and `CAPACITY …` with `flush=True` BEFORE it maps anything, so the capacity
+  that will fill the table is derived from this run, not from an assumption about startup;
+* every `MAPPED` line is flushed before the next mapping is attempted, so its presence on stdout proves the interposer
+  recorded that mapping while the process was alive, and its last instance must report tracked == capacity and live ==
+  baseline + (capacity − baseline regions) × 4,096;
+* the table must fill EXACTLY (61 successful mappings, no more, no fewer), which also proves no explicit mapping coalesced:
+  the addresses are `MAP_FIXED_NOREPLACE` and 1 GiB apart;
+* the abort must be `SIGABRT` (−6) — not an exit code — and the single diagnostic line must equal the expected string byte
+  for byte, including the numbers the same child just printed, so a truncated or reworded message cannot pass and an abort
+  raised anywhere else cannot be mistaken for this one;
+* the negative control (D′) runs the identical program with the capacity untouched: it must reach `SURVIVED`, exit 0 and
+  emit no diagnostic. Without it, a preload failure or a rejected address would look like a capacity abort.
 
 ### A.6 Budget reconciliation (normative §6.5 restated with the measured evidence)
 
@@ -3273,6 +3306,11 @@ if __name__ == "__main__":
 // failure mode this instrument exists to prevent. ALLOC_PEAK_MAP_SLOTS may only REDUCE the capacity (test use: it is how
 // probe8 proves the abort path); production runs use the compiled default.
 //
+// REALLOC FAILURE (V19 follow-up). `realloc(p, n)` with n != 0 that returns NULL leaves p valid and owned by the caller,
+// so the shim returns NULL and moves NOTHING: subtracting usable(p) there would erase a live block from the total and
+// every later sample would be an under-count. `realloc(p, 0)` is different - glibc frees p and returns NULL - and is
+// accounted as a free.
+//
 // Public symbols:
 //   void   alloc_peak_reset(void):        baseline := live, peak := 0, and the same for the mmap counter
 //   size_t alloc_peak_peak(void):         peak live-minus-baseline malloc bytes since the reset
@@ -3487,7 +3525,6 @@ static void map_record(uintptr_t s, size_t len) {      /* called with the lock h
     if (len == 0) return;
     uintptr_t e = s + len;
     (void)map_forget(s, e);                            /* MAP_FIXED installs over the old bytes */
-    map_live_add(len);                                 /* the NEW bytes, not the coalesced extent */
     size_t i = 0;
     while (i < map_used) {
         uintptr_t rs = map_tab[i].start;
@@ -3497,7 +3534,8 @@ static void map_record(uintptr_t s, size_t len) {      /* called with the lock h
         if (re > e) e = re;
         map_tab[i] = map_tab[--map_used];
     }
-    map_reserve(1);
+    map_reserve(1);                                    /* before the total moves: a refused range must not be counted */
+    map_live_add(len);                                 /* the NEW bytes, not the coalesced extent */
     map_tab[map_used].start = s;
     map_tab[map_used].len = (size_t)(e - s);
     map_used++;
@@ -3559,9 +3597,15 @@ void *calloc(size_t n, size_t size) {
     return p;
 }
 
+/* realloc(p, n) with n != 0 either returns a NEW block (p is gone) or fails and leaves p intact. On failure the
+   original allocation is still live and still counted, so the tracking state must not move at all: usable(NULL) is 0,
+   and subtracting the old size there would erase a block that the caller still owns - an under-count, which is the
+   one error this instrument must never make. realloc(p, 0) is the other case: glibc frees p and returns NULL, so the
+   subtraction IS correct and is kept below. */
 void *realloc(void *old, size_t size) {
     size_t was = usable(old);
     void *p = real_realloc ? real_realloc(old, size) : __libc_realloc(old, size);
+    if (p == NULL && size != 0) return NULL;             /* failure: old block untouched, tracking untouched too */
     size_t now = usable(p);
     if (now >= was) track_add(now - was); else track_sub(was - now);
     return p;
@@ -4010,11 +4054,17 @@ Three instruments, none interchangeable; the document's A.5 fences each one expl
 * **`alloc_peak.c` malloc counter** — live `malloc`/`calloc`/`realloc`/`free` bytes across every malloc arena and
   thread, peak since `alloc_peak_reset()`. Counts blocks that glibc serves with `mmap` (they arrive through
   `malloc`), and counts allocations that live and die inside the region. Blind to memory obtained by calling `mmap`
-  DIRECTLY — which is exactly how CPython's own object allocator obtains its 1 MiB arenas.
+  DIRECTLY — which is exactly how CPython's own object allocator obtains its 1 MiB arenas. A `realloc` that returns
+  `NULL` for a non-zero size leaves the old block valid and owned by the caller, so the shim moves NO accounting there
+  (`realloc(p, 0)` is a free); subtracting the old size on failure would under-count a live block forever.
 * **`alloc_peak.c` mmap counter** — live `MAP_ANONYMOUS|MAP_PRIVATE` mapping bytes, same reset/peak discipline, with a
   locked range table: partial unmaps subtract only the overlap, `mremap` is remove+add, adjacent ranges coalesce, and a
   table overflow ABORTS rather than dropping an entry (an under-count is the one failure this instrument exists to
-  prevent). `probe8` proves all four properties.
+  prevent). `probe8` proves all four properties — and its overflow check is deliberately not "a child with capacity 1
+  must abort": the interpreter's own startup mappings fill such a table first, so an abort proves nothing. It requires
+  the EXACT diagnostic line with the numbers the child itself printed, flushed `MAPPED` lines showing the abort followed
+  the intended mapping, the table filled to exactly its capacity, and a NEGATIVE CONTROL that reaches `SURVIVED` with the
+  capacity untouched.
 * **`mallinfo2()` samples** — REPORTED ONLY, never gated. A difference of two samples is a LOWER BOUND (A.5.2/A.5.3):
   it misses buffers that live and die between samples, sees only the calling thread's arena(s), and `uordblks` alone
   excludes mmapped blocks.
@@ -4141,9 +4191,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 8970,
+        "bytes": 9676,
         "path": "tools/obs/probes/README.md",
-        "sha256": "4e7e6e80484b815021496cd42ab62645b04f6a11d80dd6617d46680df3eaa8dd"
+        "sha256": "9afd8996efcffdd191011a16a5de45203e5ac18e191460945be037dc2fbaf501"
       },
       {
         "bytes": 0,
@@ -4151,9 +4201,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       {
-        "bytes": 16816,
+        "bytes": 17933,
         "path": "tools/obs/probes/alloc_peak.c",
-        "sha256": "4765757008287d97c96ce2966c47d79804bbd4888fbd5df707043b7f043d52b8"
+        "sha256": "4e15e8a8bd66f368a39fb28027e378ca6873617914067248d7e43129bb1417d6"
       },
       {
         "bytes": 1358,
@@ -4191,9 +4241,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
         "sha256": "d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4"
       },
       {
-        "bytes": 10465,
+        "bytes": 17934,
         "path": "tools/obs/probes/probe8_mmap_threads.py",
-        "sha256": "42fe25c453f14728e640826ecd463e7ae2e5c99c4f23afd79d30546fe4ee593d"
+        "sha256": "ffb160e5b6559e5cc6e644b7383f75df6dd5f85bc4786e3fea58fa0a58b13081"
       },
       {
         "bytes": 4044,
@@ -4317,16 +4367,34 @@ argued:
      live at the same instant; the recorded peak must be at least the sum (a lost update makes it smaller) and the
      phase must END at exactly the baseline, with the range table back to its starting size (an entry leaked per
      iteration would grow the table, and the shim aborts rather than drop one).
-  D. CAPACITY EXHAUSTION fails closed: a child with ALLOC_PEAK_MAP_SLOTS=1 that needs two ranges must die with
-     SIGABRT and a diagnostic - never continue with an untracked mapping, which would silently under-count.
+  D. CAPACITY EXHAUSTION fails closed, and is proven to happen WHERE INTENDED. The interpreter itself maps anonymous
+     memory before any probe code runs (its arenas are part of the tracked table), so a fixed `ALLOC_PEAK_MAP_SLOTS=1`
+     aborts during startup - the v2.0 form of this check passed for exactly that reason, having never reached its own
+     mapping. This probe therefore measures the child's own baseline first, sets the capacity relative to it
+     (PRESSURE_SLOTS, comfortably above startup), and requires all four of:
+       D1. the child prints a flushed MAPPED line before dying, so the abort is known to have happened AFTER the
+           explicit test mapping - and that line must report tracked == capacity and live == baseline + the bytes the
+           child itself mapped;
+       D2. the child fills the table EXACTLY (capacity - baseline regions successful mappings, no more, no fewer);
+       D3. the child dies with SIGABRT, not an exit code, and its stderr carries the exact diagnostic string with the
+           exact tracked/capacity/live numbers the same child just printed - one line, byte for byte, not a substring;
+       D4. a NEGATIVE CONTROL - the identical program, identical preload, capacity left at the compiled default and only
+           a handful of explicit mappings - completes, prints SURVIVED, exits 0, and emits no diagnostic. Without it,
+           an abort caused by anything else (a bad argument, a preload failure) would look like a pass.
+
+     Mapping addresses are MAP_FIXED_NOREPLACE and 1 GiB apart so no two explicit mappings can coalesce, which would
+     otherwise make the table fill later than capacity predicts.
 
 The probe runs its measurements in a child process with `alloc_peak.so` preloaded. Exits 0 when every property holds.
 """
 from __future__ import annotations
 
 import ctypes
+import itertools
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import threading
@@ -4337,12 +4405,65 @@ SHIM = os.path.join(HERE, "alloc_peak.so")
 
 PROT_READ_WRITE = 0x1 | 0x2
 MAP_PRIVATE_ANON = 0x02 | 0x20
+MAP_FIXED_NOREPLACE = 0x10 | 0x100000
 MREMAP_MAYMOVE = 1
+
+# Every mapping this probe makes is placed explicitly and 1 GiB from its neighbour. A kernel-chosen address can land
+# flush against an existing tracked range; the shim coalesces adjacent ranges (correctly, to keep the table bounded), and
+# the region-count assertions of property A would then depend on where the kernel happened to put the mapping. Fixed,
+# isolated addresses remove that degree of freedom, so "+1 range per mapping, +2 after a hole" is a property of the
+# bookkeeping rather than of the address layout.
+ISOLATION_BASE = 0x300000000000
+ISOLATION_STRIDE = 0x40000000
 THREADS = 8
 ITERATIONS = 64
 THREAD_MAPPING = 1024 * 1024
 
 PAGE = 4096
+ISOLATION_SLOT = itertools.count()   # process-wide: unique isolated address per explicit mapping
+
+CONTROL_MAPPINGS = 4          # negative control: a handful of explicit mappings, capacity left at its default
+PRESSURE_SLOTS = 64           # abort run: capacity well above the interpreter's own startup table
+FILL_MAPPINGS = 4096          # "map until the table refuses" - the loop never reaches this number
+DIAGNOSTIC_PREFIX = "alloc_peak: FATAL:"
+
+STAGE = re.compile(r"^(BASELINE|MAPPED|SURVIVED) live=(\d+) regions=(\d+)$")
+CAPACITY = re.compile(r"^CAPACITY (\d+)$")
+
+# The probed program. Its stdout is the evidence: every line is flushed BEFORE the next mapping is attempted, so a
+# MAPPED line on stdout proves the interposer recorded that mapping while the process was still alive.
+CHILD_PROGRAM = """\
+import ctypes, sys
+
+lib = ctypes.CDLL(None)
+mmap = lib.mmap
+mmap.restype = ctypes.c_void_p
+mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+for name in ("alloc_peak_map_live", "alloc_peak_map_regions", "alloc_peak_map_capacity"):
+    getattr(lib, name).restype = ctypes.c_size_t
+
+PAGE = 4096
+STRIDE = 0x40000000                     # 1 GiB apart: two explicit mappings can never be coalesced into one range
+BASE_ADDRESS = 0x200000000000
+MAP_FIXED_NOREPLACE = 0x10 | 0x100000
+
+
+def state(label):
+    print("%s live=%d regions=%d" % (label, lib.alloc_peak_map_live(), lib.alloc_peak_map_regions()), flush=True)
+
+
+state("BASELINE")
+print("CAPACITY %d" % lib.alloc_peak_map_capacity(), flush=True)
+
+for index in range(int(sys.argv[1])):
+    address = BASE_ADDRESS + index * STRIDE
+    p = mmap(ctypes.c_void_p(address), PAGE, 3, 0x02 | 0x20 | MAP_FIXED_NOREPLACE, -1, 0)
+    if p in (None, ctypes.c_void_p(-1).value):
+        raise SystemExit("MAP_FIXED_NOREPLACE rejected at %#x" % address)
+    state("MAPPED")
+
+state("SURVIVED")
+"""
 
 
 def api():
@@ -4362,10 +4483,15 @@ def api():
 
 
 def mapped(lib, size: int) -> int:
-    address = lib.mmap(None, size, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0)
-    if address in (None, ctypes.c_void_p(-1).value):
-        raise SystemExit(f"mmap({size}) failed")
-    return int(address)
+    """Map `size` bytes at an isolated address: address `SLOT.next()` × 1 GiB from its neighbours, so no two explicit
+    mappings can ever be coalesced into one tracked range (the shim would coalesce adjacent ones, correctly)."""
+    address = ISOLATION_BASE + next(ISOLATION_SLOT) * ISOLATION_STRIDE
+    p = lib.mmap(ctypes.c_void_p(address), size, PROT_READ_WRITE, MAP_PRIVATE_ANON | MAP_FIXED_NOREPLACE, -1, 0)
+    if p in (None, ctypes.c_void_p(-1).value):
+        raise SystemExit(f"mmap at {address:#x} ({size} B) failed: the isolated slot is occupied")
+    if int(p) != address:
+        raise SystemExit(f"mmap at {address:#x} returned {int(p):#x}: MAP_FIXED_NOREPLACE not honoured")
+    return address
 
 
 def unmap(lib, address: int, size: int) -> None:
@@ -4460,25 +4586,75 @@ def concurrency(lib) -> dict[str, int | bool]:
     }
 
 
-def fail_closed() -> dict[str, object]:
-    """Property D: the table cannot grow past its capacity, so the shim must abort instead of under-counting."""
-    program = (
-        "import ctypes\n"
-        "lib = ctypes.CDLL(None)\n"
-        "lib.mmap.restype = ctypes.c_void_p\n"
-        "lib.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]\n"
-        "for size in (4096, 4096):\n"
-        "    p = lib.mmap(None, size, 3, 0x22, -1, 0)\n"
-        "    assert p not in (None, ctypes.c_void_p(-1).value), 'mmap failed'\n"
-        "print('SURVIVED')\n"
-    )
-    env = dict(os.environ, LD_PRELOAD=SHIM, ALLOC_PEAK_MAP_SLOTS="1", PYTHONPATH=ROOT)
-    done = subprocess.run([sys.executable, "-c", program], env=env, capture_output=True, timeout=120, cwd=ROOT)
+def _run_stages(slots: int | None, mappings: int) -> dict[str, object]:
+    """Run the probed program once and return what it printed: its own baseline, its mappings, and how it died."""
+    env = {key: value for key, value in os.environ.items() if key != "ALLOC_PEAK_MAP_SLOTS"}
+    env.update(LD_PRELOAD=SHIM, PYTHONPATH=ROOT)
+    if slots is not None:
+        env["ALLOC_PEAK_MAP_SLOTS"] = str(slots)
+    done = subprocess.run([sys.executable, "-c", CHILD_PROGRAM, str(mappings)],
+                          env=env, capture_output=True, timeout=180, cwd=ROOT)
+    stdout = done.stdout.decode("utf-8", "replace")
     stderr = done.stderr.decode("utf-8", "replace")
-    aborted = done.returncode < 0 and -done.returncode == 6          # SIGABRT
-    return {"returncode": done.returncode, "aborted": aborted, "diagnostic": "capacity exhausted" in stderr,
-            "survived": "SURVIVED" in done.stdout.decode("utf-8", "replace"),
-            "ok": aborted and not ("SURVIVED" in done.stdout.decode("utf-8", "replace"))}
+    stages = [(match.group(1), int(match.group(2)), int(match.group(3)))
+              for line in stdout.splitlines() if (match := STAGE.match(line))]
+    capacity = next((int(match.group(1)) for line in stdout.splitlines()
+                     if (match := CAPACITY.match(line))), None)
+    return {
+        "returncode": done.returncode,
+        "baseline": next(((live, regions) for label, live, regions in stages if label == "BASELINE"), None),
+        "capacity": capacity,
+        "mapped": [(live, regions) for label, live, regions in stages if label == "MAPPED"],
+        "survived": any(label == "SURVIVED" for label, _, _ in stages),
+        "fatal": [line for line in stderr.splitlines() if line.startswith(DIAGNOSTIC_PREFIX)],
+        "stderr_tail": stderr[-400:],
+    }
+
+
+def fail_closed() -> dict[str, object]:
+    """Property D: the table cannot grow past its capacity, so the shim must abort - where the test intends, with the
+    exact diagnostic, and not at all when the capacity is not exceeded."""
+    control = _run_stages(None, CONTROL_MAPPINGS)
+    control_baseline = control["baseline"] or (0, 0)
+    control_ok = (
+        control["returncode"] == 0
+        and control["baseline"] is not None and control["capacity"] is not None
+        and control["mapped"] == [(control_baseline[0] + PAGE * (step + 1), control_baseline[1] + (step + 1))
+                                 for step in range(CONTROL_MAPPINGS)]
+        and control["survived"] and not control["fatal"]
+    )
+
+    pressure = _run_stages(PRESSURE_SLOTS, FILL_MAPPINGS)
+    base_live, base_regions = pressure["baseline"] or (0, 0)
+    capacity = int(pressure["capacity"] or 0)
+    slots_left = capacity - base_regions
+    last = pressure["mapped"][-1] if pressure["mapped"] else None
+    aborted = pressure["returncode"] < 0 and -pressure["returncode"] == signal.SIGABRT
+    expected_diagnostic = (
+        f"{DIAGNOSTIC_PREFIX} range table capacity exhausted "
+        f"(tracked {capacity}, capacity {capacity}, live {base_live + PAGE * slots_left}): "
+        f"refusing to under-report")
+    reached_mapping = (slots_left >= 1 and len(pressure["mapped"]) == slots_left
+                       and last == (base_live + PAGE * slots_left, capacity))
+    return {
+        "control": {
+            "mappings": CONTROL_MAPPINGS, "baseline": {"live": control_baseline[0], "regions": control_baseline[1]},
+            "capacity": control["capacity"], "filled": len(control["mapped"]), "survived": control["survived"],
+            "returncode": control["returncode"], "fatal": control["fatal"],
+            "stderr_tail": control["stderr_tail"], "ok": control_ok,
+        },
+        "pressure": {
+            "baseline": {"live": base_live, "regions": base_regions}, "capacity": capacity, "filled": len(pressure["mapped"]),
+            "last": {"live": last[0], "regions": last[1]} if last else None,
+            "aborted_by_sigabrt": aborted, "returncode": pressure["returncode"], "reached_mapping": reached_mapping,
+            "diagnostic": pressure["fatal"][0] if pressure["fatal"] else None,
+            "diagnostic_expected": expected_diagnostic,
+            "diagnostic_exact": pressure["fatal"] == [expected_diagnostic],
+            "survived": pressure["survived"], "stderr_tail": pressure["stderr_tail"],
+        },
+        "ok": bool(control_ok and aborted and reached_mapping and pressure["fatal"] == [expected_diagnostic]
+                   and not pressure["survived"]),
+    }
 
 
 def child() -> int:
@@ -4489,7 +4665,7 @@ def child() -> int:
         "fail_closed": fail_closed(),
         "capacity": int(lib.alloc_peak_map_capacity()),
     }
-    result["ok"] = all(result[key]["ok"] for key in ("partial_mremap", "concurrency"))
+    result["ok"] = all(result[key]["ok"] for key in ("partial_mremap", "concurrency", "fail_closed"))
     print(json.dumps(result, sort_keys=True))
     return 0
 
