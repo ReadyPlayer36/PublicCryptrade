@@ -1,6 +1,7 @@
-"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05).
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02).
 
   python -m tools.obs.probes.run_all --check             # CI gate: exit 0 pass / 1 mismatch / 2 integrity or environment
+  python -m tools.obs.probes.run_all --self-test         # CI gate: the integrity REFUSALS, proven by negative cases
   python -m tools.obs.probes.run_all --record            # print a new measurements array for a REVIEWED revision
   python -m tools.obs.probes.run_all --manifest          # print path/bytes/sha256 for EVERY suite file (A.0)
   python -m tools.obs.probes.run_all --update-manifest   # rewrite expected.json's manifest block (reviewed only)
@@ -13,6 +14,16 @@ is modified, added or deleted, so the code that produces a number is the code th
 contain its own digest; A.0 in the document pins it instead (the document is anchored in git), and `--manifest` prints
 its digest too so a reviewer can check the whole chain.
 
+A FILE IS ITS INODE, NOT ITS NAME (V21-01). Every suite file is enumerated with `lstat` semantics, must BE a regular file
+(a symlink pointing inside or outside the tree, a directory, a FIFO, a socket or a device is a refusal before any
+measurement), and is then opened ONCE with `O_NOFOLLOW`, `fstat`ed and compared to the `lstat` result, so a path swapped
+for a link after the inventory is refused instead of hashed. The bytes that are compared are the bytes of the inode that
+was checked. `--self-test` demonstrates each refusal as a negative regression case.
+
+COUNTS ARE THREE DIFFERENT NUMBERS (V21-02). v2.1 printed "14 files pinned by expected.json", which is false:
+`expected.json` pins 13 files, the suite ships 14, and `expected.json` itself is pinned by §A.0 of the document. The run
+line and the report's `coverage` block name all three, so no reader has to infer which count a number is.
+
 Instruments per phase: `tracemalloc` (Python-object attribution), the interposer's malloc counter (every malloc arena
 and thread, including allocations that live and die inside the region) and, when the request region is measured, the
 interposer's direct-mmap counter (anonymous private mappings, the channel a malloc-only interposer cannot see).
@@ -22,14 +33,18 @@ gate instead of being absorbed by a tolerance.
 """
 from __future__ import annotations
 
+import contextlib
+import errno
 import hashlib
 import importlib
 import json
 import os
 import platform
 import re
+import stat
 import subprocess
 import sys
+import tempfile
 
 from tools.obs.probes import probe_common as C
 
@@ -48,41 +63,140 @@ CANONICAL_PREFIX = "tools/obs/probes/"     # A.0 paths are repository-relative a
 ROW_FIELDS = {"path", "bytes", "sha256"}
 BLOCK_FIELDS = {"algorithm", "files"}
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+# V21-01: O_NOFOLLOW turns "is this a link?" into an OPEN-TIME fact rather than a check the caller must win a race to
+# use. It exists on Linux/POSIX; where it does not, the lstat/ fstat identity comparison below still refuses a link,
+# because a followed link's inode cannot equal the inode lstat named.
+OPEN_REGULAR = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+READ_CHUNK = 1 << 20
 
 
-def sha256(path: str) -> str:
-    with open(path, "rb") as handle:
-        return hashlib.sha256(handle.read()).hexdigest()
+class SuiteIntegrityError(Exception):
+    """A suite file failed its identity check: missing, not a regular file, a link, or replaced while being read."""
 
 
-def suite_files() -> list[str]:
-    """Every tracked file of this suite: the directory listing minus the build artifact and interpreter caches."""
-    names = []
-    for entry in sorted(os.listdir(HERE)):
-        path = os.path.join(HERE, entry)
-        if os.path.isdir(path):
-            if entry not in IGNORED_DIRS:
-                raise SystemExit(f"refused: unexpected directory {entry!r} inside the suite (A.0)")
-            continue
-        if entry in BUILD_ARTIFACTS:
-            continue
-        names.append(entry)
-    return names
+def describe_mode(mode: int) -> str:
+    """Name a non-regular file type for a diagnostic (V21-01): 'not a regular file' alone hides what was there."""
+    if stat.S_ISLNK(mode):
+        return "a symbolic link"
+    if stat.S_ISDIR(mode):
+        return "a directory"
+    if stat.S_ISFIFO(mode):
+        return "a FIFO"
+    if stat.S_ISSOCK(mode):
+        return "a socket"
+    if stat.S_ISCHR(mode):
+        return "a character device"
+    if stat.S_ISBLK(mode):
+        return "a block device"
+    return f"mode {oct(mode)}"
 
 
-def manifest(include_self: bool = True) -> dict:
+@contextlib.contextmanager
+def opened_regular(path: str, label: str):
+    """Yield `(handle, stat_result)` for a suite file that was a regular file at OPEN time, opened without links.
+
+    V21-01: every read of a suite file goes through here. `lstat` refuses a link, directory, FIFO, socket or device
+    before a byte is read; `O_NOFOLLOW` makes the same refusal race-free at open; `os.path.samestat` proves the open
+    descriptor is the inode that was inspected, so a post-enumeration substitution is refused rather than hashed; and
+    the caller's size check proves nothing changed while the bytes were being read.
+    """
+    try:
+        before = os.lstat(path)
+    except FileNotFoundError:
+        raise SuiteIntegrityError(f"{label}: missing on disk") from None
+    except OSError as exc:
+        raise SuiteIntegrityError(f"{label}: lstat failed: {exc.strerror or exc}") from None
+    if not stat.S_ISREG(before.st_mode):
+        raise SuiteIntegrityError(f"{label}: is {describe_mode(before.st_mode)}, not a regular file (V21-01)")
+    try:
+        fd = os.open(path, OPEN_REGULAR)
+    except OSError as exc:
+        raise SuiteIntegrityError(f"{label}: open(O_NOFOLLOW) failed: {exc.strerror or exc} (V21-01)") from None
+    handle = None
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise SuiteIntegrityError(f"{label}: the opened descriptor is {describe_mode(opened.st_mode)}, not a "
+                                      f"regular file (V21-01)")
+        if not os.path.samestat(before, opened):
+            raise SuiteIntegrityError(
+                f"{label}: identity changed between lstat and open (device {before.st_dev}, inode {before.st_ino} -> "
+                f"device {opened.st_dev}, inode {opened.st_ino}): post-enumeration substitution (V21-01)")
+        handle = os.fdopen(fd, "rb", closefd=False)
+        yield handle, opened
+    finally:
+        if handle is not None:
+            handle.close()
+        os.close(fd)
+
+
+def read_regular(path: str, label: str) -> tuple[int, str]:
+    """Return `(bytes, sha256)` for a suite file, hashed from ONE no-follow descriptor (V21-01)."""
+    digest = hashlib.sha256()
+    total = 0
+    with opened_regular(path, label) as (handle, opened):
+        for chunk in iter(lambda: handle.read(READ_CHUNK), b""):
+            total += len(chunk)
+            digest.update(chunk)
+        if total != opened.st_size:
+            raise SuiteIntegrityError(f"{label}: read {total} B from an inode of {opened.st_size} B: modified while "
+                                      f"being hashed (V21-01)")
+    return total, digest.hexdigest()
+
+
+def suite_files(here: str = HERE) -> list[str]:
+    """Every file of this suite: entries that ARE regular files, minus the build artifact and interpreter caches.
+
+    V21-01: an inventory that resolves links cannot pin the code that runs. Anything here that is not a regular file
+    — a symlink (inside or outside the tree, dangling or not), a directory that is not `__pycache__`, a FIFO, a socket,
+    a device — refuses the run instead of being counted, followed or skipped.
+    """
+    try:
+        with os.scandir(here) as entries:
+            listing = sorted(entries, key=lambda entry: entry.name)
+            names: list[str] = []
+            for entry in listing:
+                try:
+                    info = entry.stat(follow_symlinks=False)          # == lstat: a link is reported as a link
+                except OSError as exc:
+                    raise SuiteIntegrityError(f"{entry.name}: lstat failed: {exc.strerror or exc} (V21-01)") from None
+                if stat.S_ISLNK(info.st_mode):
+                    try:
+                        target = os.readlink(entry.path)
+                    except OSError:
+                        target = "?"
+                    raise SuiteIntegrityError(f"{entry.name}: is a symbolic link -> {target!r}; the suite is "
+                                              f"inventoried without following links (V21-01)")
+                if stat.S_ISDIR(info.st_mode):
+                    if entry.name not in IGNORED_DIRS:
+                        raise SuiteIntegrityError(f"unexpected directory {entry.name!r} inside the suite (A.0)")
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    raise SuiteIntegrityError(f"{entry.name}: is {describe_mode(info.st_mode)}, not a regular file "
+                                              f"(V21-01)")
+                if entry.name in BUILD_ARTIFACTS:
+                    continue
+                names.append(entry.name)
+            return names
+    except FileNotFoundError:
+        raise SuiteIntegrityError(f"the suite directory {here!r} does not exist (A.0)") from None
+    except OSError as exc:
+        raise SuiteIntegrityError(f"cannot list the suite directory {here!r}: {exc.strerror or exc} (A.0)") from None
+
+
+def manifest(include_self: bool = True, here: str = HERE) -> dict:
     """The A.0 table: path, byte size and SHA-256 for every suite file (self included for the document's diff)."""
     rows = []
-    for name in suite_files():
+    for name in suite_files(here):
         if name == SELF and not include_self:
             continue
-        path = os.path.join(HERE, name)
-        rows.append({"path": f"tools/obs/probes/{name}", "bytes": os.path.getsize(path), "sha256": sha256(path)})
+        size, digest = read_regular(os.path.join(here, name), f"{CANONICAL_PREFIX}{name}")
+        rows.append({"path": f"{CANONICAL_PREFIX}{name}", "bytes": size, "sha256": digest})
     return {"algorithm": "sha256", "files": rows}
 
 
-def check_manifest(expected: dict) -> list[str]:
-    """V19-05/V20-14: the manifest is the reviewed code, so it is checked as DATA before it is trusted, and a
+def check_manifest(expected: dict, here: str = HERE) -> list[str]:
+    """V19-05/V20-14/V21-01: the manifest is the reviewed code, so it is checked as DATA before it is trusted, and a
     modification, an addition or a deletion is a refusal, never a warning.
 
     v2.0 matched its rows by BASENAME (`os.path.basename(row["path"])`) after indexing them into a dict, which made
@@ -91,6 +205,10 @@ def check_manifest(expected: dict) -> list[str]:
     directory, `bytes`/`sha256` of the wrong type were trusted until they were compared, and a row for `expected.json`
     itself or for the build artifact was reported as a DELETION rather than as the malformed entry it is. Each row is
     now validated on its own and a malformed entry fails closed - a refusal to run, before a single measurement.
+
+    v2.2 adds IDENTITY (V21-01): the inventory refuses any entry that is not a regular file, and each compared file is
+    read through `read_regular`, so a symlink — to a file inside the suite, to one outside it, dangling, or swapped in
+    after the inventory — cannot be hashed in place of the file the manifest pinned.
     """
     failures: list[str] = []
     declared = expected.get("manifest")
@@ -148,25 +266,175 @@ def check_manifest(expected: dict) -> list[str]:
             continue
         by_name[name] = path
         listed[path] = row
-    present = set(suite_files()) - {SELF}
+    try:
+        present = set(suite_files(here)) - {SELF}
+    except SuiteIntegrityError as exc:
+        # V21-01: a non-regular entry makes the whole inventory untrustworthy, so the run stops here. It is reported
+        # as a refusal line, not raised, so `--check` keeps its documented exit status (2).
+        return failures + [f"manifest: {exc}"]
     for name in sorted(present - set(by_name)):
         failures.append(f"manifest: {name} exists but is not in the manifest (added file)")
     for name in sorted(set(by_name) - present):
         failures.append(f"manifest: {name} is listed but missing on disk (deleted file)")
     for name in sorted(present & set(by_name)):
         row = listed[CANONICAL_PREFIX + name]
-        path = os.path.join(HERE, name)
-        if not os.path.isfile(path):
-            failures.append(f"manifest: {name} is not a regular file (V20-14)")
+        try:
+            size, digest = read_regular(os.path.join(here, name), f"{CANONICAL_PREFIX}{name}")
+        except SuiteIntegrityError as exc:
+            failures.append(f"manifest: {exc}")
             continue
-        size = os.path.getsize(path)
         if size != row["bytes"]:
             failures.append(f"manifest: {name} is {size} B, manifest says {row['bytes']} B (modified)")
             continue
-        digest = sha256(path)
         if digest != row["sha256"]:
             failures.append(f"manifest: {name} sha256 {digest[:16]}… != {row['sha256'][:16]}… (modified)")
     return failures
+
+
+def self_test() -> int:
+    """V21-01 negative regressions: a suite entry that is a link or not a regular file must be REFUSED, not hashed.
+
+    Every case builds a throw-away suite tree in a temporary directory, so nothing here reads or writes the real one.
+    CI runs this (`--self-test`) ahead of the gate, so the refusals are demonstrated on every revision instead of being
+    described in prose. The first case is a CONTROL: the same harness must ACCEPT an honest tree, or "everything is
+    refused" would pass this file.
+    """
+    results: list[tuple[str, bool]] = []
+
+    def report_case(label: str, ok: bool, detail: str = "", skipped: bool = False) -> None:
+        results.append((label, ok))
+        mark = "skip" if skipped else ("ok  " if ok else "FAIL")
+        print(f"{mark}  {label}{(' — ' + detail) if detail else ''}")
+
+    def tree(root: str) -> None:
+        for name in ("probe1_phase1.py", "run_all.py"):
+            with open(os.path.join(root, name), "wb") as handle:
+                handle.write(f"# {name}\n".encode())
+
+    def refuses(label: str, needle: str, mutate) -> None:
+        """Record the manifest while every file is honest, apply `mutate`, then require a refusal naming `needle`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree(tmp)
+            block = manifest(include_self=False, here=tmp)
+            mutate(tmp)
+            try:
+                failures = check_manifest({"manifest": block}, here=tmp)
+            except SuiteIntegrityError as exc:      # refusals are RETURNED by check_manifest, never raised
+                failures = [f"raised: {exc}"]
+            text = " | ".join(failures)
+            report_case(label, bool(failures) and needle in text, text or "no failure reported")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        block = manifest(include_self=False, here=tmp)
+        failures = check_manifest({"manifest": block}, here=tmp)
+        report_case("control: an honest tree validates", not failures, " | ".join(failures) or "no failures")
+
+    def link_inside(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.symlink(os.path.join(tmp, "run_all.py"), os.path.join(tmp, "probe1_phase1.py"))
+
+    def link_outside(tmp: str) -> None:
+        outside = os.path.join(os.path.dirname(tmp), "outside-the-suite.txt")
+        with open(outside, "wb") as handle:
+            handle.write(b"not a suite file\n")
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.symlink(outside, os.path.join(tmp, "probe1_phase1.py"))
+
+    def link_added(tmp: str) -> None:
+        os.symlink(os.path.join(tmp, "run_all.py"), os.path.join(tmp, "probe9_extra.py"))
+
+    def link_dangling(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.symlink(os.path.join(tmp, "no-such-file.py"), os.path.join(tmp, "probe1_phase1.py"))
+
+    def link_device(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.symlink("/dev/null", os.path.join(tmp, "probe1_phase1.py"))
+
+    def directory(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.mkdir(os.path.join(tmp, "probe1_phase1.py"))
+
+    def fifo(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.mkfifo(os.path.join(tmp, "probe1_phase1.py"))
+
+    def modified(tmp: str) -> None:
+        with open(os.path.join(tmp, "probe1_phase1.py"), "ab") as handle:
+            handle.write(b"# drift\n")
+
+    refuses("post-enumeration substitution: a link to a file INSIDE the suite is refused", "symbolic link",
+            link_inside)
+    refuses("a link to a file OUTSIDE the suite is refused", "symbolic link", link_outside)
+    refuses("a link ADDED to the suite after the inventory is refused", "symbolic link", link_added)
+    refuses("a DANGLING link is refused (never reported as a deleted file)", "symbolic link", link_dangling)
+    refuses("a link to a device is refused (the link is the problem, not the target)", "symbolic link", link_device)
+    refuses("a DIRECTORY in place of a suite file is refused", "directory", directory)
+    refuses("a FIFO in place of a suite file is refused", "FIFO", fifo)
+    refuses("a MODIFIED regular file is still refused (V19-05 behaviour retained)", "modified", modified)
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        block = manifest(include_self=False, here=tmp)
+        try:
+            os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+            os.mknod(os.path.join(tmp, "probe1_phase1.py"), stat.S_IFCHR | 0o600, os.makedev(1, 3))
+        except (PermissionError, AttributeError, OSError) as exc:
+            report_case("a DEVICE node in place of a suite file is refused", True,
+                        f"skipped: mknod unavailable here ({exc.__class__.__name__}); the symlink-to-/dev/null case "
+                        f"covers devices", skipped=True)
+        else:
+            failures = check_manifest({"manifest": block}, here=tmp)
+            text = " | ".join(failures)
+            report_case("a DEVICE node in place of a suite file is refused", bool(failures) and "device" in text,
+                        text or "no failure reported")
+    if os.path.exists("/dev/null"):                      # a real character device, no privileges needed
+        try:
+            with opened_regular("/dev/null", "/dev/null"):
+                pass
+        except SuiteIntegrityError as exc:
+            report_case("a real character device is refused, not read as a file", "character device" in str(exc),
+                        str(exc))
+        else:
+            report_case("a real character device is refused, not read as a file", False, "the device was accepted")
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        os.symlink(os.path.join(tmp, "run_all.py"), os.path.join(tmp, "link.py"))
+        try:
+            with opened_regular(os.path.join(tmp, "link.py"), "link.py"):
+                pass
+        except SuiteIntegrityError as exc:
+            report_case("opened_regular refuses a link when called directly", "symbolic link" in str(exc), str(exc))
+        else:
+            report_case("opened_regular refuses a link when called directly", False, "the link was accepted")
+    if getattr(os, "O_NOFOLLOW", 0):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree(tmp)
+            os.symlink(os.path.join(tmp, "run_all.py"), os.path.join(tmp, "link.py"))
+            try:
+                os.open(os.path.join(tmp, "link.py"), OPEN_REGULAR)
+            except OSError as exc:
+                report_case("open(..., O_NOFOLLOW) refuses a link at open time (ELOOP): the race-free half of V21-01",
+                            exc.errno == errno.ELOOP,
+                            f"{exc.__class__.__name__}: {exc.strerror} (errno {exc.errno})")
+            else:
+                report_case("open(..., O_NOFOLLOW) refuses a link at open time (ELOOP)", False,
+                            "open SUCCEEDED on a symbolic link")
+    else:
+        report_case("open(..., O_NOFOLLOW) refuses a link at open time (ELOOP)", True,
+                    "skipped: O_NOFOLLOW is unavailable on this platform (lstat + fstat identity still applies)",
+                    skipped=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        path = os.path.join(tmp, "run_all.py")
+        size, digest = read_regular(path, "run_all.py")
+        with open(path, "rb") as handle:
+            want = hashlib.sha256(handle.read()).hexdigest()
+        report_case("a regular file still hashes to its own bytes", (size, digest) == (os.path.getsize(path), want),
+                    f"{size} B, {digest[:16]}…")
+    failed = [label for label, ok in results if not ok]
+    print(f"{'PASS' if not failed else 'FAIL'}: {len(results) - len(failed)}/{len(results)} integrity regression cases")
+    return 0 if not failed else 1
 
 
 def collect() -> list[dict]:
@@ -306,10 +574,40 @@ def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]
     return failures
 
 
+def coverage(block: dict, expected: dict) -> dict:
+    """V21-02: the three counts v2.1 collapsed into one. They are not interchangeable.
+
+    * `inventoried` — every file the suite ships (A.0's rows, `expected.json` included);
+    * `pinned_by_expected_json` — the rows of its `manifest` block (`expected.json` cannot hash itself);
+    * `self` — `expected.json`, pinned by §A.0 of the document instead, which is why A.0 is generated and reviewed.
+    """
+    rows = {row["path"]: row for row in block["files"]}
+    self_path = f"{CANONICAL_PREFIX}{SELF}"
+    return {
+        "inventoried": len(block["files"]),
+        "pinned_by_expected_json": len((expected.get("manifest") or {}).get("files") or []),
+        "self_path": self_path,
+        "self_sha256": (rows.get(self_path) or {}).get("sha256"),
+        "self_pinned_by": "Appendix A.0 of docs/obs-session-runner-design.md (expected.json cannot contain its own "
+                          "digest)",
+        "build_artifacts_excluded": sorted(BUILD_ARTIFACTS),
+        "directories_skipped": sorted(IGNORED_DIRS),
+    }
+
+
 def main(argv: list[str]) -> int:
     mode = argv[1] if len(argv) > 1 else "--check"
+    if mode == "--self-test":
+        # The negative regressions of the integrity checks; they build their own trees and need neither the manifest
+        # nor the pinned interpreter, so they run first in CI and fail closed on their own.
+        return self_test()
     if mode == "--manifest":
-        print(json.dumps(manifest(include_self=True), indent=2, sort_keys=True))
+        try:
+            block = manifest(include_self=True)
+        except SuiteIntegrityError as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(block, indent=2, sort_keys=True))
         return 0
     if mode == "--interpose":
         module = importlib.import_module(f"tools.obs.probes.{argv[2]}")
@@ -320,21 +618,29 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"peak": int(pair["peak"]), "map_peak": int(pair.get("map_peak", 0))}))
         return 0
     expected_path = os.path.join(HERE, SELF)
-    if not os.path.exists(expected_path):
-        print(f"refused: {SELF} is missing (A.0)", file=sys.stderr)
+    try:
+        with opened_regular(expected_path, SELF) as (handle, _info):
+            expected = json.load(handle)
+    except SuiteIntegrityError as exc:
+        print(f"refused: {exc} (A.0)", file=sys.stderr)
         return 2
-    with open(expected_path) as handle:
-        expected = json.load(handle)
+    except (OSError, ValueError) as exc:
+        print(f"refused: {SELF} is not readable JSON: {exc}", file=sys.stderr)
+        return 2
     if expected.get("schema") != SCHEMA:
         print(f"refused: {SELF} schema {expected.get('schema')!r} != {SCHEMA!r} (run_all version skew)", file=sys.stderr)
         return 2
     if mode == "--update-manifest":
         # The repair mode cannot require a valid manifest: it is what repairs it. Everything else refuses first.
-        expected["manifest"] = manifest(include_self=False)
+        try:
+            expected["manifest"] = manifest(include_self=False)
+        except SuiteIntegrityError as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
         with open(expected_path, "w") as handle:
             json.dump(expected, handle, indent=2, sort_keys=True)
             handle.write("\n")
-        print(f"manifest updated: {len(expected['manifest']['files'])} files "
+        print(f"manifest updated: {len(expected['manifest']['files'])} files pinned "
               f"(expected.json excluded: it cannot hash itself; A.0 pins it instead)")
         return 0
     integrity = check_manifest(expected)
@@ -353,11 +659,18 @@ def main(argv: list[str]) -> int:
                           "measurements": measured}, indent=2))
         return 0
     failures = compare(expected, measured, interposed)
+    try:
+        block = manifest(include_self=True)
+    except SuiteIntegrityError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    counts = coverage(block, expected)
     report = {
         "schema": SCHEMA,
         "python": sys.version.split()[0],
         "platform": platform.platform(),
-        "manifest": manifest(include_self=True),
+        "manifest": block,
+        "coverage": counts,
         "measurements": measured,
         "failures": failures,
     }
@@ -373,7 +686,10 @@ def main(argv: list[str]) -> int:
     if failures:
         print(f"FAIL: {len(failures)} check(s) failed", file=sys.stderr)
         return 1
-    print(f"PASS: {len(measured)} measurements, {len(report['manifest']['files'])} files pinned by expected.json")
+    # V21-02: three counts, named. "14 files pinned by expected.json" (v2.1) was false on two of them.
+    print(f"PASS: {len(measured)} measurements; {counts['inventoried']} suite files inventoried, "
+          f"{counts['pinned_by_expected_json']} pinned by expected.json, {SELF} pinned by Appendix A.0")
+    print(f"      {SELF} sha256 {counts['self_sha256']} (compare with A.0)")
     return 0
 
 
