@@ -135,3 +135,70 @@ jobs:
           else
             echo "BLOCKED: hash-pinned constraints evidence remains outstanding; Milestone 1 stays BLOCKED."
           fi
+
+  probe-suite:
+    name: Appendix A probe suite (native memory gate)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned interpreter (the probe values are interpreter-specific; A.1)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.3'
+      - name: Verify the toolchain the gate depends on
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "import sys; assert sys.version.split()[0] == '3.12.3', sys.version; print(sys.version)"
+          command -v cc
+          cc --version | head -n 1
+          command -v openssl
+          openssl version
+          python -c "import ssl; print('OpenSSL for Python:', ssl.OPENSSL_VERSION)"
+      - name: Build the interposer (warnings are errors; the gate needs both channels)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/probes
+          cc -shared -fPIC -O2 -Wall -Wextra -Werror -o tools/obs/probes/alloc_peak.so tools/obs/probes/alloc_peak.c 2>&1 | tee artifacts/probes/build.log
+          ls -l tools/obs/probes/alloc_peak.so | tee -a artifacts/probes/build.log
+      - name: Pin the suite manifest (expected.json digests, recomputed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=$PWD python -m tools.obs.probes.run_all --manifest | tee artifacts/probes/manifest.json
+      - name: Run the probe gate (fails on any mismatch, modified file, addition or deletion)
+        id: gate
+        shell: bash
+        run: |
+          set +e
+          PYTHONPATH=$PWD python -m tools.obs.probes.run_all --check --report artifacts/probes/report.json 2>&1 | tee artifacts/probes/gate.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### Appendix A probe gate (exit $rc)"
+            echo '```'
+            cat artifacts/probes/gate.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - name: "Upload raw probe outputs (always: evidence outlives a red gate)"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-suite-evidence
+          path: |
+            artifacts/probes/gate.log
+            artifacts/probes/manifest.json
+            artifacts/probes/report.json
+            artifacts/probes/build.log
+          if-no-files-found: error
+      - name: Upload the built interposer alongside the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alloc-peak-so
+          path: tools/obs/probes/alloc_peak.so
+          if-no-files-found: warn
