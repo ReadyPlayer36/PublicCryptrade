@@ -16,6 +16,7 @@ the standard library.
 cd <repository root>
 cc -shared -fPIC -O2 -Wall -Wextra -Werror -o tools/obs/probes/alloc_peak.so tools/obs/probes/alloc_peak.c
 PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check
+PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --self-test
 ```
 
 Exit status: `0` every recorded value reproduced, every bound held, every inventory item inside its derived bound, and
@@ -23,9 +24,14 @@ every file matching `expected.json`; `1` a measurement mismatch (printed on stde
 match `expected.json` (a file was modified, added or deleted), the interpreter is not the pinned CPython 3.12.3, or
 `openssl` is missing.
 
+The pass line names three DIFFERENT counts (V21-02): every suite file is inventoried (14), `expected.json` pins every
+other one (13), and `expected.json` itself is pinned by §A.0 of the design document, because a file cannot contain its
+own digest. v2.1 printed a single number ("14 files pinned by expected.json") and was wrong on two of the three.
+
 Other modes:
 
 ```sh
+PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --self-test        # the integrity REFUSALS, as negative cases (CI)
 PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --record           # new measurements array (REVIEWED revisions only)
 PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --manifest         # path/bytes/sha256 for EVERY suite file (A.0)
 PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --update-manifest  # rewrite expected.json's manifest (REVIEWED only)
@@ -41,6 +47,13 @@ paths or basenames, `bytes` a non-negative integer, `sha256` 64 lowercase hex, n
 `--check` verifies it BEFORE measuring anything and refuses (exit 2) on a modification, an addition or a deletion, so
 the code that produces a number is exactly the code that was reviewed. `expected.json` cannot contain its own digest;
 A.0 pins it against the document instead, and `--manifest` prints its digest too.
+
+Every suite file is checked by IDENTITY as well as by name (V21-01). The inventory refuses any entry that is not a
+regular file — a symlink pointing inside the suite, one pointing outside it, a dangling link, a directory, a FIFO, a
+socket or a device — and every compared file is opened ONCE with `O_NOFOLLOW`, `fstat`ed and matched against its
+`lstat`, so a path swapped for a link after the inventory is refused instead of hashed. `--self-test` runs those
+refusals as negative regression cases, with a CONTROL that an honest tree is still accepted, and CI runs it before
+the gate.
 
 After a REVIEWED change: `--update-manifest` (this directory), then regenerate A.0/A.7 from the document (D44).
 
@@ -58,7 +71,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
-| `run_all.py` | driver: `--check`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose` |
+| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose` |
 | `expected.json` | the file manifest (size + SHA-256) AND the recorded values, bounds and inventory derivations |
 | `README.md` | this file |
 
