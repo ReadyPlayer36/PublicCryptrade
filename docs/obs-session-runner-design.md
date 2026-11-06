@@ -1,4 +1,4 @@
-# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v2.1 (NORMATIVE)
+# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v2.2 (NORMATIVE)
 
 Status: design only. No live request is authorized by this document. Milestone 1 remains **BLOCKED** until the reviewer
 accepts the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.9**: it resolves
@@ -13,23 +13,46 @@ added or deleted file refuses the run before any number is produced (A.0, G-V19-
 disagree, this document governs, and sections not restated here remain normative as written in v1.9. The
 v1.8/v1.7/v1.6/v1.5/v1.4/v1.3 maps are retained unchanged as §1.1–§1.6.
 
-**v2.1 status (this revision).** v2.1 supersedes v2.0 and closes the five findings of the v2.0 review (V20-11…V20-15,
+**v2.2 status (this revision).** v2.2 supersedes v2.1 and closes the three findings of the v2.1 review (V21-01…V21-03,
+§1.0c). It changes no measurement, no bound and no protocol constant: the protocol, §6.5's budgets, the allocation
+inventory and all ten recorded readings stand exactly as reviewed. Three things change, and all three are about what the
+EVIDENCE is worth: the gate now trusts the IDENTITY of a file rather than its name, so a symlink cannot stand in for a
+probe and a path swapped mid-run is refused (V21-01); the run line and the report separate the three file counts that
+v2.1 collapsed into one wrong sentence — 14 inventoried, 13 pinned by `expected.json`, and `expected.json` pinned by A.0
+(V21-02); and the lineage claim is now an exact-SHA, exact-run statement rather than a working-tree disclaimer
+(V21-03).
+
+**v2.1 status (retained).** v2.1 superseded v2.0 and closed the five findings of the v2.0 review (V20-11…V20-15,
 §1.0b). It re-opens nothing that v1.9 resolved: the protocol, §6.5's constants, the allocation inventory and every budget
-stand exactly as reviewed. What changes is the EVIDENCE CHAIN, in four places and one honesty rule: the `realloc`-failure
+stand exactly as reviewed. What it changed was the EVIDENCE CHAIN, in four places and one honesty rule: the `realloc`-failure
 case of A.5.4 is now a gated measurement instead of a documented anecdote (V20-11/V20-12); the map live total aborts on
 underflow instead of clamping at zero (V20-13); the manifest is validated as DATA — canonical paths, no duplicates,
 typed fields — before any byte of it is trusted (V20-14); and this document no longer claims a passing run at a tree
 where the gate did not pass (V20-15).
 
 Anchor: repository `ReadyPlayer36/PublicCryptrade`, branch `main`, commit
-`109a0d3178c9fe74671a5c3bea4912978ae00f27` (this revision's anchor; v1.9 as delivered). Its predecessor
-`f0c0ad0d36e1eb84517af98b82a0d55f8ca978f5` is v1.9's anchor and belongs to the same lineage (`impl-obs-step1` →
-`f337862e52dada43f425cee05154e18f212987aa` → `dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f` →
-`673f9a2ace30a449267adace9af0f9d94865bda1` → `11ff12535e42639e3bab53304651e3ea2b5cd6b3` → `7b1493e` → `f0c0ad0` →
-`109a0d3`); this document is reviewed against the actual Step-1 code in `tools/obs/` at `109a0d3`. Branch-sync result
-re-established for this revision: `git diff f0c0ad0 109a0d3` touches ONLY this document plus the `tools/obs/probes/`
-suite, and `git diff f0c0ad0 109a0d3 -- tools/obs/` (the Step-1 package) is EMPTY, so every correction below is a
-design-text-versus-code discrepancy, not code drift. Hard citations re-verified at `109a0d3` (byte-identical to
+`e30ef37011af7cc073fa13c8ee5384ae080995b5` (this revision's anchor: v2.1 as merged to `main`, and the tree that GitHub
+Actions run `42208989835` gated). Its lineage is `impl-obs-step1` → `f337862e52dada43f425cee05154e18f212987aa` →
+`dbfe53cecaea63b0a5128a756f5ede0c12c3ca6f` → `673f9a2ace30a449267adace9af0f9d94865bda1` →
+`11ff12535e42639e3bab53304651e3ea2b5cd6b3` → `7b1493e` → `f0c0ad0` → `109a0d3` (v1.9) → `e30ef37` (v2.1), and it
+carries every prior review. This document is reviewed against the actual Step-1 code in `tools/obs/` at `109a0d3`; those
+citations stand unchanged because no probe change reaches that package. Branch-sync result re-established for this
+revision: at `e30ef37` the `tools/obs/probes/` suite is byte-identical to the files A.0 pins — that run's
+`run_all --manifest` step printed all thirteen digests, and they are the digests this appendix records (G-V21-03) — so
+every number below is reproduced from those bytes rather than inherited as prose. Hard citations re-verified at
+`109a0d3` (byte-identical to `f0c0ad0` and `7b1493e`): `audit.py` 70–86 (`abort_condition_seq`), 289–296 (check (g):
+`wrapper_count` must be a caller-supplied integer — the "independent egress counter"), 619–631 (`audit_run` reloads the
+run via `load_run` at 626); `runstore.py` 35/39–42 (format + frozen key sets), 45 (`ManifestError(ValueError)`), 172/217
+(`_canonical`/`_lines`), 194–201 (`_parse_json` dialect: `_no_duplicate_keys`, `parse_constant` rejection), 206–209
+(`record_to_json` base64-encodes the body), 221–244 (`write_run`: path opens, no fsync), 246–250 (`_read`), 253–258
+(`load_manifest` fails closed without a 64-hex pin), 279–286 (`_jsonl`: whole-file split, truncation first), 291–346
+(field validators), 348–357 (`_record_from_json` decodes `body_b64` from a str first), 370–388 (`load_run`); `eventlog.py`
+50–58 (digest-line format; `bytes(r.body)` is `r.body` — probe-verified identity, so bodies hash in place). Phase memory
+numbers in §6.5 and Appendix A are measurements over the exact normative sequences on CPython 3.12.3 (`tracemalloc`,
+worst-case inputs); methodology, raw values, the native-instrumentation boundaries, the allocation inventory and the
+probe sources are Appendix A. Those probes ARE repository code at `tools/obs/probes/` (fourteen files; A.0 records size
+and SHA-256 for each, `expected.json` pins every other file, and the CI job compiles the interposer, proves the
+integrity refusals and runs the gate — G-V19-04/G-V19-05/V20-14/V21-01). Hard citations re-verified at `109a0d3` (byte-identical to
 `f0c0ad0` and `7b1493e`): `audit.py` 70–86 (`abort_condition_seq`), 289–296 (check (g): `wrapper_count` must be a
 caller-supplied integer — the "independent egress counter"), 619–631 (`audit_run` reloads the run via `load_run` at 626);
 `runstore.py` 35/39–42 (format + frozen key sets), 45 (`ManifestError(ValueError)`), 172/217 (`_canonical`/`_lines`),
@@ -41,17 +64,25 @@ the body), 221–244 (`write_run`: path opens, no fsync), 246–250 (`_read`), 2
 are measurements over the exact normative sequences on CPython 3.12.3 (`tracemalloc`, worst-case inputs); methodology, raw
 values, the native-instrumentation boundaries, the allocation inventory and the probe sources are Appendix A. Those probes
 ARE repository code at `tools/obs/probes/` (fourteen files; A.0 records size and SHA-256 for each, `expected.json` pins
-every other file, and the CI job compiles the interposer and runs the gate — G-V19-04/G-V19-05/V20-14).
+every other file, and the CI job compiles the interposer, proves the integrity refusals with `--self-test` and runs the gate —
+G-V19-04/G-V19-05/V20-14/V21-01).
 
-**What v2.1 claims, and what it does not (V20-15).** v2.0 asserted that `run_all --check` "exits 0" for that revision.
-The CI `probe-suite` job on `58bccc1852d652893e6562d44a8db3ddc10dc774` did not pass: it failed inside manifest validation,
-which is precisely the class of failure V20-14 hardens. This revision therefore makes no claim about any commit. It
-reports the gate result for the WORKING TREE whose bytes are the ones A.0 pins —
-`PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check` prints
-`PASS: 10 measurements, 14 files pinned by expected.json` and exits 0 on the pinned interpreter, with the manifest
-verified before the first measurement — and it states plainly that the same command has NOT been demonstrated on a
-COMMIT of these files. A green line here is a claim about a specific tree; until that tree is a commit, the line says
-which tree it is. The reviewer's pipeline is what turns it into a claim about a SHA.
+**What v2.2 claims, and where it is evidenced (V21-03).** v2.1 could report only a working-tree result, and said so
+in the same sentence. That gap closed when the tree became a commit: `e30ef37011af7cc073fa13c8ee5384ae080995b5` on
+`main`, GitHub Actions run `42208989835` (`CI` #180, attempt 1, `push`), job `Appendix A probe suite (native memory gate)`
+`127862655167`, conclusion **success**. That job's gate step ran
+`PYTHONPATH=$PWD python -m tools.obs.probes.run_all --check --report artifacts/probes/report.json`, printed
+`report written to artifacts/probes/report.json` and
+`PASS: 10 measurements, 14 files pinned by expected.json`, and exited 0; its `--manifest` step printed all thirteen
+pinned digests, which are the digests A.0 records; and it uploaded `gate.log`, `manifest.json`, `report.json`, `build.log`
+and the built interposer as `probe-suite-evidence` / `alloc-peak-so`. The ten measurements in this appendix are therefore
+a claim about a COMMIT — those bytes, CPython 3.12.3, gcc 13.3.0.
+What is still NOT claimed, and is stated instead of blurred: (i) the line this revision PRINTS is not the line that run
+printed — V21-02 corrects the count wording, so v2.2's line is
+`PASS: 10 measurements; 14 suite files inventoried, 13 pinned by expected.json, expected.json pinned by Appendix A.0`,
+demonstrated on the working tree this appendix pins, with the next pipeline run as its exact-SHA confirmation;
+(ii) `alloc_peak.so` is compiled on the runner and never committed; (iii) a claim about a DIFFERENT commit needs a
+different run.
 
 Imperative key words MUST, MUST NOT, SHALL, SHOULD, SHOULD NOT are normative. "§n" refers to a section of this document;
 "protocol §n" refers to `docs/obs-protocol.md` v0.5. Code identifiers in `monospace` refer to real symbols in `tools/obs/`
@@ -120,10 +151,10 @@ cancellation allowance), `runstore.py` (manifest 8-key set, exclusive create, pi
 | V19-01 | `alloc_peak.c`'s direct-`mmap` table was a single-writer array with no lock (`map_tab`/`map_used`), `map_untracked` decremented the live total with a load-then-store pair (a lost update under two cores), and a FULL table silently dropped the entry — which turns `map_peak` into an under-count, the one failure mode the instrument exists to prevent, in a region that runs a `ThreadingHTTPServer` and worker threads | §A.5.4 (concurrency and accounting contract), §A.5.9 (properties A–D), §A.7.9 (`alloc_peak.c`), §11 (G-V19-01), D46 | The range table and every live total are mutated under ONE spinlock; the totals use true atomic read-modify-write (`fetch_add`, and a CAS-decrement loop for subtraction — never a load/store pair); the peak is published with a compare-exchange loop so a second thread crossing the high-water mark cannot overwrite a higher value; and exhaustion of the table ABORTS with a diagnostic instead of dropping an entry (`ALLOC_PEAK_MAP_SLOTS` may only REDUCE the capacity, which is how the abort path is tested). Probe8 runs 8 threads × 64 iterations of map/partial-unmap/mremap/unmap and requires the peak to see all 8 MiB simultaneously AND the table to return exactly to its baseline |
 | V19-02 | The same table tracked only `(addr, len)` pairs with an all-or-nothing `munmap` match: a PARTIAL unmap was ignored (the entry stayed, over-counting), `mremap` was not interposed at all (a moved or grown mapping was invisible), `MAP_FIXED` over an existing tracked range double-counted, and nothing coalesced adjacent ranges, so a page-by-page workload could exhaust a 512-slot table and — under V19-01's silent drop — lose bytes | §A.5.4 (range arithmetic), §A.5.9 (A/B), §A.7.9, §11 (G-V19-02), D47 | Bookkeeping is RANGE-based: `[start, start+len)`; a partial `munmap` subtracts exactly the overlap and keeps one surviving piece or SPLITS into two; `mremap` (incl. `MREMAP_MAYMOVE`, `MREMAP_FIXED` and `MREMAP_DONTUNMAP`) is accounted as remove(old) + add(new), and a source the shim never tracked is never started into the count; an `mmap` that replaces tracked bytes subtracts them first; adjacent ranges coalesce so the table is bounded by the number of DISJOINT regions, not by the number of calls. Probe8 asserts the exact byte counts (12,288 → hole → 8,192 in two ranges → 0; 8,192 → `mremap` → 32,768 → 0) |
 | V19-03 | A.5's headroom was a four-row table of ASSERTED bounds ("TLS record buffers 32,768", "OpenSSL per-connection state 65,536") with no derivation, no per-consumer measurement, and the unenumerated remainder left as "× 2, covering unenumerated consumers" — a factor, not a bound | §A.5.8 (new: allocation inventory), §A.5.5 (restated), §A.2/A.3 (measured), §11 (G-V19-03), D48 | The request path is decomposed into an INVENTORY: five stages measured in separate children (the loopback server moved into its own process, so the region is the client path only), cold vs warm to separate the one-time dynamic loading from the per-request cost, and each consumer bounded as `unit × count` from a protocol constant (16,384 B TLS record, 16,384 B handshake/server state, 8,192 B `socket.makefile` buffer, 65,536 B `CHUNK_BYTES`, 8,192 B of allocator headers) and CHECKED against its stage by the gate. Measured: TLS session 77,864 B ≤ 98,304; HTTP staging 69,992 B ≤ 86,016; body staging 0 B ≤ 65,536; scaling control 0 B for a 1 MiB body; per-request bounds sum to 258,048 B ≤ 262,144 B; the one-time loading is 168,048 B and is charged to `HARNESS_FIXED_BUDGET_BYTES` rather than to a request |
-| V19-04 | Nothing in CI compiled the interposer or ran the probe gate: the numbers in A.2/A.3 could drift, or the .so could fail to build on the runner, without any workflow failing — the suites' claims were reviewable but not enforced | §11 (G-V19-04), `.github/workflows/ci.yml` (`probe-suite` job), §A.1, D49 | A dedicated job pins CPython 3.12.3, asserts `cc`/`openssl`, compiles `alloc_peak.c` with `-Wall -Wextra -Werror`, runs `python3 -m tools.obs.probes.run_all --check --report artifacts/probes/report.json`, and uploads `gate.log`, `manifest.json`, `report.json`, `build.log` and the built shim as `probe-suite-evidence`/`alloc-peak-so` on EVERY outcome; the step preserves the gate's exit status through the pipe (`PIPESTATUS`) and mirrors the outcome into the job summary |
+| V19-04 | Nothing in CI compiled the interposer or ran the probe gate: the numbers in A.2/A.3 could drift, or the .so could fail to build on the runner, without any workflow failing — the suites' claims were reviewable but not enforced | §11 (G-V19-04), `.github/workflows/ci.yml` (`probe-suite` job), §A.1, D49 | A dedicated job pins CPython 3.12.3, asserts `cc`/`openssl`, compiles `alloc_peak.c` with `-Wall -Wextra -Werror`, runs `python3 -m tools.obs.probes.run_all --self-test` (V21-01's negative cases, archived as `self-test.log`) before `python3 -m tools.obs.probes.run_all --check --report artifacts/probes/report.json`, and uploads `gate.log`, `manifest.json`, `report.json`, `self-test.log`, `build.log` and the built shim as `probe-suite-evidence`/`alloc-peak-so` on EVERY outcome; the step preserves the gate's exit status through the pipe (`PIPESTATUS`) and mirrors the outcome into the job summary |
 | V19-05 | A.0 pinned thirteen digests in the DOCUMENT, but the driver only checked that files EXISTED: a modified probe, an added file or a deleted one could still run, so the digest table was advisory and a reviewer's diff was the only enforcement | §A.0 (manifest chain), §A.7.12 (`expected.json`), `run_all.py` (`check_manifest`), §11 (G-V19-05), D50 | `expected.json` now carries a machine-readable `manifest` block (path, bytes, SHA-256) for every other file in the directory, and `--check` verifies it BEFORE measuring: a modification (size or digest), an ADDITION (a file not in the manifest) and a DELETION (a manifest entry with no file) each exit 2 with a per-file diagnostic. `expected.json` cannot hash itself, so A.0 pins IT against the document, `--manifest` prints its digest, and `--update-manifest` is the only writer — a reviewed-revision tool |
 
-### 1.0b V20 findings resolved in v2.1 (this revision)
+### 1.0b V20 findings resolved in v2.1 (retained)
 
 v2.1 exists because the v2.0 review found the evidence chain unsound in three places, the instrument silently lossy in a
 fourth, and the manifest gate red in CI. Every row is closed by a mechanism a reviewer can RUN; the numbers below are
@@ -135,7 +166,19 @@ measurements from the working tree A.0 pins.
 | V20-12 | The regression above needs a measurement that survives being re-run, and a manifest entry that closes: v2.0's `probe6_native.py` and `expected.json` were recorded for a file set that the same commit did not contain | §A.0 (size + SHA-256 rows), §A.7.11, `expected.json` manifest, D52 | `realloc_accounting` is a first-class row of `expected.json` (`bound` = the ceiling, `tolerance` 0.02 against the recorded peak) so a drifting figure fails `--check` instead of passing silently; `probe6_native.py` is re-pinned in A.0 and A.7 at its final size and digest, and A.0/A.7 are generated from the files rather than typed. The instrument's own symbol lookup is documented as a measurement hazard (previous row) |
 | V20-13 | `map_live_sub()` clamped a subtraction larger than the tracked total (`cur > n ? cur - n : 0`). A clamped total is an under-count: it is small, plausible, permanent, and no later sample can reveal it — the one error the instrument exists to prevent (V19-01's silent drop, restored through arithmetic) | §A.5.4 (accounting contract), §11 (G-V20-03), D53 | The live total is never clamped: an underflow means the range table and the total disagree, so `map_fail_underflow()` writes `alloc_peak: FATAL: mmap accounting underflow: %zu B to subtract, %zu B tracked (regions %zu): refusing to clamp to zero` and calls `abort()`, under the same lock discipline as the capacity refusal. Demonstrated with a fault-injected build (one 4 MiB range silently lost from the table: `SIGABRT`, `4202496 B to subtract, 2121728 B tracked (regions 3)`), while the shipped build is unaffected. The path is NOT reachable from a correct shim, so it is verified once by fault injection rather than shipped as a test hook |
 | V20-14 | `check_manifest()` indexed rows by BASENAME (`os.path.basename(row["path"])` into a dict), so two rows could share a name with one silently overwriting the other, a row naming `probe3_decode.py` or `/etc/x` still bound to the file in this directory, `bytes`/`sha256` of the wrong type were trusted until compared, and rows for `expected.json` or `alloc_peak.so` surfaced as a DELETION instead of the malformed entry they are. That is how a manifest can be green in review and red — or wrong — in CI | §A.0 (manifest chain), §A.7.12 (`expected.json`), `run_all.py` (`check_manifest`), §11 (G-V20-02), D54 | The manifest is validated as DATA before it is trusted: `manifest` must be an object with only `algorithm`/`files`, `algorithm` must be `sha256`, `files` must be a non-empty array of objects whose ONLY fields are `path`/`bytes`/`sha256`; `path` must be the canonical `tools/obs/probes/<name>`, duplicate PATHS and duplicate BASENAMES are refused, `bytes` must be a non-negative `int` (booleans excluded), `sha256` must be 64 lowercase hex; a row for `expected.json` (it cannot pin itself) and a row for the build artifact are refused BY NAME; unknown fields fail closed at row and block level. Twenty-three malformed manifests (duplicate path, duplicate basename under another directory, bare basename, absolute path, `"1234"`, `-1`, `true`, short/uppercase/missing digest, unknown field, non-object row, self-pin, artifact pin, `md5`, stray block field, `files` not a list, empty `files`, wrong size, wrong digest, deleted row, missing or invalid block) each produced exit-2 with a per-entry diagnostic, and the real manifest still validates — G-V20-02 exercises exactly that |
-| V20-15 | The document claimed a passing run at the v2.0 revision ("`run_all --check` exits 0") that CI did not reproduce, and A.0/A.7 lagged the files they described — a review-lineage defect, not a code defect: a claim with no tree behind it | §1.0b (this table), the anchor paragraph of the preamble, §A.0 (regenerated), §A.7 (regenerated), §11 (G-V20-02), D55 | Every gate claim in this revision names its TREE: the working tree that produced A.0's digests, on the pinned interpreter, `PASS: 10 measurements, 14 files pinned`. The v2.0 claim is WITHDRAWN in place (not deleted) with what CI actually reported, and A.0/A.7 are regenerated from the files by script at review time (not by CI — G-V18-02 b), so this revision's appendix matches its tree. A claim about a commit is left to the pipeline that can make one |
+| V20-15 | The document claimed a passing run at the v2.0 revision ("`run_all --check` exits 0") that CI did not reproduce, and A.0/A.7 lagged the files they described — a review-lineage defect, not a code defect: a claim with no tree behind it | §1.0b (this table), the anchor paragraph of the preamble, §A.0 (regenerated), §A.7 (regenerated), §11 (G-V20-02), D55 | Every gate claim in this revision names its TREE: the working tree that produced A.0's digests, on the pinned interpreter, `PASS: 10 measurements, 14 files pinned` (v2.2 corrects THAT LINE'S COUNT — §1.0c V21-02 — because `expected.json` pins thirteen files, not fourteen). The v2.0 claim is WITHDRAWN in place (not deleted) with what CI actually reported, and A.0/A.7 are regenerated from the files by script at review time (not by CI — G-V18-02 b), so this revision's appendix matches its tree. A claim about a commit is left to the pipeline that can make one |
+
+### 1.0c V21 findings resolved in v2.2 (this revision)
+
+v2.2 exists because the v2.1 review found the evidence chain trusting NAMES where it needed IDENTITIES, reporting a count
+that was true of neither link in the chain, and still leaning on a working-tree claim after that tree had become a commit.
+No measurement moved: `--check` still compares ten measurements against the same recorded values, on the same interpreter.
+
+| Finding | Defect as reviewed | Where it is closed | Mechanism |
+|---|---|---|---|
+| V21-01 | The inventory and the manifest check followed symbolic links. `suite_files()` listed names and treated anything that was not a directory as a file; `check_manifest()` asked `os.path.isfile()` (which follows links and answers "yes" for a link to a regular file), took `os.path.getsize()` and then opened the path a SECOND time to hash it. A link named `probe6_native.py` — pointing at another probe, at a file outside the repository, or at `/dev/null` — was hashed as if it were that probe; a FIFO or a device in the directory was accepted as a suite file; and a path swapped between the size check and the hash was never noticed. The manifest pinned NAMES, and a name is not a body | §A.0 (identity paragraph), §A.7.10 (`run_all.py`), §11 (G-V21-01), D56 | Enumeration uses `os.scandir` with `lstat` semantics and REFUSES any entry that is not a regular file — link (inside the tree, outside it, dangling), directory, FIFO, socket, device — before a single measurement. Every compared file is opened ONCE with `O_NOFOLLOW\|O_CLOEXEC`, `fstat`ed and required to be the SAME inode (`os.path.samestat`) as the `lstat`, then required to have the size it was hashed at, so a post-enumeration substitution is refused rather than hashed; `expected.json` itself is read through the same helper. `--self-test` proves fourteen cases including a CONTROL that an honest tree is ACCEPTED (so "refuse everything" cannot pass): links inside / outside / added-after-the-inventory / dangling / to-a-device, a directory, a FIFO, a real character device (`/dev/null`), a direct `opened_regular` call on a link, `open(O_NOFOLLOW)` failing with `ELOOP`, a modified file still refused, and a regular file still hashing to its own bytes. CI runs `--self-test` before the gate |
+| V21-02 | The success line read `PASS: 10 measurements, 14 files pinned by expected.json`, and `report.json` carried only the 14-row manifest. `expected.json` pins THIRTEEN files — it cannot contain its own digest — so the sentence was false about the thing it named, and a reader had to infer which of the two counts a number belonged to. In an evidence chain that is not cosmetic: a count that is off by one tells the reviewer which link they may skip | §A.7.10, §A.7.11 (`README.md`), §11 (G-V21-02), D57 | `coverage()` names all three counts and both outputs use it: `inventoried` (14 = A.0's rows, `expected.json` included), `pinned_by_expected_json` (13 = the manifest block) and `self` (`expected.json`, whose digest is PRINTED with `self_pinned_by` = Appendix A.0). The run line is `PASS: 10 measurements; 14 suite files inventoried, 13 pinned by expected.json, expected.json pinned by Appendix A.0`, followed by `expected.json sha256 <digest> (compare with A.0)`; `report.json` carries the same object; `--update-manifest` reports "13 files pinned (expected.json excluded…)". The v2.1 line is recorded as WRONG here rather than edited away |
+| V21-03 | The preamble claimed a working-tree result — honest, but weaker than the evidence that existed, because `e30ef37` carried exactly those bytes and its pipeline was green. A reader could not name the run that produced the numbers, and "not demonstrated on a commit" became false the moment CI passed | the preamble ("What v2.2 claims"), §A (preamble), §11 (G-V21-03), D58 | The claim is stated with its exact identifiers: commit `e30ef370…`, run `42208989835`, job `127862655167`, conclusion `success`, the exact command, the exact lines it printed, and the artifact names; A.0's digests are the digests that run's `--manifest` step printed. The claim is SCOPED to what the run printed: the corrected reporting line of V21-02 is a working-tree result until the next run prints it, and that is written down instead of implied |
 
 ### 1.1 V18 findings resolved in v1.9 (retained)
 
@@ -146,7 +189,7 @@ client-only and measures 214,120 B with a 0 B direct-`mmap` channel, A.5.8), §1
 |---|---|---|---|
 | V18-01 | §5.1.2 called the over-long-line class "impossible under the frozen schema" and "proved unreachable for schema-valid artifacts". That claim is unproven and false in the general case: Step-1 validates NO string length — `_jsonl` splits on `b"\\n"` with no upper bound (runstore.py:279–286), `_record_from_json` bounds only three integer ranges (348–357), and `_req_str`/`_req_headers` accept arbitrarily long strings (304–331) — so a Step-1-ACCEPTED legacy artifact can exceed `MAX_LINE`, and `/2` would reject it silently as a side effect of a budget constant rather than as a stated policy | §5.1.2.6 (new: rejection policy), §5.1.2.0 R-1/R-6, §5.1.2.1 (predicate split), §5.1.2.4 (D-21…D-23), §5.1.2.5 (rewritten), §0.2, §11 (G-V18-01), D43 | `obs-loader/2` now states an EXPLICIT REJECTION POLICY: a line whose CONTENT exceeds `MAX_LINE` is rejected BY DESIGN with the deterministic P-6 message, whatever `/1` would have done with it. The impossibility claim is WITHDRAWN and replaced by two named predicates — CONFORMING (written by §5.1.1: the bound is a theorem) and LEGACY-ADMITTED (accepted by `/1`: the bound is NOT a theorem, and the artifact is refused with its line number) — the reachability evidence is cited line by line, and the corpus now ASSERTS reachability: the frozen `/1` oracle must ACCEPT fixture D-21 and `/2` must REJECT it with the cap message, so the case fails if it ever becomes vacuous. No flag, no tolerance, no truncation, no silent skip; verifying oversize legacy evidence requires a reviewed `obs-loader/3` |
 | V18-02 | The Appendix A probe suite existed only as listings inside A.7: a reviewer could read it but not RUN it, nothing bound the printed numbers to bytes that exist, and a drift between a listing and the code it claims to be was undetectable | §A.0 (file manifest: path, role, size, SHA-256), §A.1, §A.2/A.3 (values from this run), §A.7 (mirrors regenerated from the files), `tools/obs/probes/` (13 files), §11 (G-V18-02), D44 | The suite is repository code at the paths the appendix names — `run_all.py`, `alloc_peak.c`, `expected.json`, `README.md` and `probe6_native.py`, plus the six other probe modules, `probe_common.py` and `__init__.py` that they import — and was executed from the repository root for this revision (`python -m tools.obs.probes.run_all --check` exits 0, twice). A.0 records size + SHA-256 per file, `run_all --manifest` prints the same table (G-V18-02 diffs them), the driver REFUSES to run when a file is missing, and A.7 is generated from the files, so a listing can no longer drift from the code it documents |
-| V18-03 | A.5.4 asserted that `alloc_peak.c` "sees every arena and every thread" — but it wrapped only `malloc`/`calloc`/`realloc`/`free`. CPython's object allocator obtains its 1 MiB arenas with a DIRECT `mmap` that the shim never sees, and A.5 offered no argument bounding what an uninstrumented path could hide, so the headroom constant rested on an unexamined channel | §A.5.4 (interception inventory + fenced limits), §A.5.7 (new: direct-`mmap` fence and the allocator-independence proof), §A.2/A.3 (measured channels), §6.6, §11 (G-V18-03), D45 | The over-claim is withdrawn and the channel is closed by MEASUREMENT: `alloc_peak.c` now also interposes `mmap`/`mmap64`/`munmap` for `MAP_ANONYMOUS\\|MAP_PRIVATE` and exposes a second peak — 16,384 B in the native request region and 0 B in each measured phase — and the gate requires `malloc peak + mmap peak ≤ HTTP_HEADROOM` (measured 195,184 + 16,384 = 211,568 ≤ 262,144). A.5.4 itemises every allocator that is and is not intercepted; A.5.7 proves the four-term constant bounds each consumer independently of which allocator serves it, page-rounding included |
+| V18-03 | A.5.4 asserted that `alloc_peak.c` "sees every arena and every thread" — but it wrapped only `malloc`/`calloc`/`realloc`/`free`. CPython's object allocator obtains its 1 MiB arenas with a DIRECT `mmap` that the shim never sees, and A.5 offered no argument bounding what an uninstrumented path could hide, so the headroom constant rested on an unexamined channel | §A.5.4 (interception inventory + fenced limits), §A.5.7 (new: direct-`mmap` fence and the allocator-independence proof), §A.2/A.3 (measured channels), §6.6, §11 (G-V18-03), D45 | The over-claim is withdrawn and the channel is closed by MEASUREMENT: `alloc_peak.c` now also interposes `mmap`/`mmap64`/`munmap` for `MAP_ANONYMOUS\|MAP_PRIVATE` and exposes a second peak — 16,384 B in the native request region and 0 B in each measured phase — and the gate requires `malloc peak + mmap peak ≤ HTTP_HEADROOM` (measured 195,184 + 16,384 = 211,568 ≤ 262,144). A.5.4 itemises every allocator that is and is not intercepted; A.5.7 proves the four-term constant bounds each consumer independently of which allocator serves it, page-rounding included |
 
 ### 1.2 V17 findings resolved in v1.8 (retained)
 
@@ -1882,7 +1925,7 @@ frozen under `obs-run-manifest/1`).
 | G-V17-02 | creation-identity binding + CP3e (V17-02) | spy substitutes `.<run_id>.receipt.tmp` with a foreign file BETWEEN the step-3 `stat` and the `renameat2` call → step 5 compares `st_dst` to `fstat(tmp_fd)` → `PublishIdentityMismatch`, impostor quarantined, NO `receipt_pin` printed, `observe()` ∈ {T3, T4}, never T6; the SAME fixture with step 5 anchored on `st_src` (v1.7's rule) PUBLISHES the impostor — re-introducing that anchor MUST kill the gate; CP3e fixture: rewrite the published receipt in place before step 8 → `snap.sha256 ≠ receipt_sha_written` → CP3 fails, no pin printed; AST/grep gate: every `publish_file` call site passes a non-None `expect` and `identity_source = CREATION`, and `publish_quarantine_of` is the only `OBSERVED` caller; `st_nlink == 1` and `S_ISREG(st_tmp.st_mode)` asserted at step 4 |
 | G-V17-03 | descriptor-relative receipt snapshotting (V17-03) | runtime spy: for every observation, exactly ONE `os.open` per artifact name through `pfd` and ZERO path-based reads/presence calls (`Path.read_bytes`, `open(path)`, `os.path.exists`, `os.lstat`, path `os.stat`); substitution matrix — replace the receipt with (i) absent, (ii) a symlink, (iii) a FIFO, (iv) a directory, (v) a `RECEIPT_MAX_BYTES + 1` file, (vi) foreign bytes, (vii) a swap immediately after the snapshot, (viii) a swap between the audit and the outcome branch — each yields exactly one T-row, (ii)–(v) → T3 via FAULT, (vii)/(viii) → the classification of the FROZEN snapshot (unchanged by the swap); orphan-receipt fixture (receipt, no final) → T3; peak memory of `snapshot` ≤ `RECEIPT_MAX_BYTES + CHUNK_BYTES`; mutation: reintroduce a second presence check or a path read → killer fails |
 | G-V18-01 | explicit rejection policy for over-cap artifacts (V18-01) | (a) REACHABILITY, in this order: the hash-pinned `/1` oracle ACCEPTED fixtures D-21/D-22/D-23 — each is a valid 12-key record whose line content is 6,990,684 / 6,291,630 / > `MAX_LINE` B — and `/2` rejected each with `records.jsonl line {n} exceeds the maximum line length` at the right line number; the test FAILS if `/1` rejects a fixture (the reachability claim became vacuous) or if `/2` accepts one; (b) D-23 additionally asserts NONE of the bodies was decoded (P-6 precedes P-8: the cap is a file-level pre-parse fact); (c) AST/behaviour gate: no truncation, split, skip, retry-with-`/1`, tolerance flag, environment variable or keyword argument can change the verdict for an over-cap file — a mutation adding any of them MUST fail; (d) doc gate: §5.1.2.6 exists and contains the strings `REJECTION POLICY`, `CONFORMING`, `LEGACY-ADMITTED` and the 6,852 B / 697,196 B margin figures, and neither "impossible under the frozen schema" nor "proved unreachable" appears anywhere except inside an explicit retraction quotation (§5.1.2.1, §5.1.2.6 P7 — a grep gate) |
-| G-V18-02 | the probe suite is delivered code, not prose (V18-02) | (a) `python -m tools.obs.probes.run_all --manifest` reproduces A.0's fourteen path/size/SHA-256 rows byte for byte, and `--check` exits 0 on the pinned interpreter; (b) every A.7 listing is byte-identical to the file it names IN THIS REVISION and A.0's rows are `--manifest`'s output, both GENERATED from `tools/obs/probes/` by script; the generation is a REVIEW-TIME step — the script is not part of the suite and CI does not diff the appendix — so a later drift of the DOCUMENT is caught by review, while `--check` catches drift of the FILES; stated as a residual, not claimed as automation (V20-15); (c) the driver REFUSES to run (exit 2) when any of the fourteen files is missing — a partially copied suite cannot silently narrow the protocol — and, since v2.0, when any file's size or SHA-256 differs from `expected.json`'s manifest (V19-05); (d) `alloc_peak.so` is absent from the committed tree and the gate FAILS, not skips, when `cc` cannot build it; (e) README.md documents the run line, the TLS-fixture policy (committed fixture preferred, ephemeral `openssl` fallback otherwise) and the instrument limits — deleting any of the three fails |
+| G-V18-02 | the probe suite is delivered code, not prose (V18-02) | (a) `python -m tools.obs.probes.run_all --manifest` reproduces A.0's fourteen path/size/SHA-256 rows byte for byte, and `--check` exits 0 on the pinned interpreter; (b) every A.7 listing is byte-identical to the file it names IN THIS REVISION once this document's CRLF line separators are normalised (A.7 preamble; the modules are committed with LF) and A.0's rows are `--manifest`'s output, both GENERATED from `tools/obs/probes/` by script; the generation is a REVIEW-TIME step — the script is not part of the suite and CI does not diff the appendix — so a later drift of the DOCUMENT is caught by review, while `--check` catches drift of the FILES; stated as a residual, not claimed as automation (V20-15); (c) the driver REFUSES to run (exit 2) when any of the fourteen files is missing — a partially copied suite cannot silently narrow the protocol — and, since v2.0, when any file's size or SHA-256 differs from `expected.json`'s manifest (V19-05); and, since v2.2, when any entry in this directory is not a REGULAR FILE — a link (inside the tree, outside it or dangling), a directory, a FIFO, a socket or a device — so the fourteen files cannot be satisfied by a link to something else (V21-01); (d) `alloc_peak.so` is absent from the committed tree and the gate FAILS, not skips, when `cc` cannot build it; (e) README.md documents the run line, the TLS-fixture policy (committed fixture preferred, ephemeral `openssl` fallback otherwise) and the instrument limits — deleting any of the three fails |
 | G-V18-03 | direct-`mmap` fence around the native term (V18-03) | (a) `alloc_peak.c` exports `alloc_peak_map_peak()` and its symbol table contains `mmap`, `mmap64` and `munmap` (build gate: `nm -D`); (b) `probe6` reports a `map_peak` for the request region and `run_all` compares the SUM `peak + map_peak` against `HTTP_HEADROOM`, failing when the interposer is unavailable instead of skipping; (c) the phases report their `map_peak` (0 B measured) and a phase whose channel exceeds `HTTP_HEADROOM` fails with the A.5.7 note that the malloc figure is no longer a usable bound; (d) a mutation that removes the mmap interposition MUST fail (a) and (b); a mutation that compares only the malloc channel MUST fail (b); (e) doc gate: A.5.4 contains the interception inventory (including `posix_memalign`/`aligned_alloc`/`brk` as NOT intercepted) and A.5.7 contains the acknowledgment, the measured channel table and the page-rounding lemma — deleting any of them fails |
 
 | G-V17-04 | native instrumentation + repository probes (V17-04; channels extended by V18-03) | CI runs `python -m tools.obs.probes.run_all --check` (exit 0 required) on the pinned interpreter, asserting for every phase BOTH instruments: `tracemalloc` peaks (8,396,983 / 148,004 / 11,188,520 / 11,188,600 / 11,188,520 B) and interposed malloc peaks (8,400,920 / 147,848 / 11,186,544 B) within their §6.5 bounds, the banned `no_del` variant still FAILING its bound (5,656,528 B), byte equality at 8,511,232 B, and `native_headroom`'s client-only request region on BOTH channels — malloc 214,120 B plus direct `mmap` 0 B, SUM 214,120 B ≤ `HTTP_HEADROOM = 262,144 B` — plus the five A.5.8 inventory items, each inside its derived bound (77,864 ≤ 98,304 / 69,992 ≤ 86,016 / 0 ≤ 65,536 / 0 ≤ 65,536 / 168,048 ≤ 196,608); probe6's `mallinfo2` sample max is reported and NEVER compared (it is a lower bound — 105,072 B this revision against a 52,192 B end delta, the under-read A.5.3 documents); `HTTP_HEADROOM == 262,144` and the A.5.8 per-request item bounds sum to 253,952 ≤ it, while the four coarse A.5.7.4 terms plus one page of rounding each sum to ≤ 147,456 B; a probe file whose sha256 differs from A.0's manifest without a doc revision fails; doc gate: A.5 must contain the `uordblks`/`hblkhd`/`MMAP_THRESHOLD`/per-thread-arena/kernel-buffer clauses, the retraction sentence, the interception inventory (A.5.4) and the arena-granularity caveat — deleting any of them fails |
@@ -1895,6 +1938,9 @@ frozen under `obs-run-manifest/1`).
 | G-V20-01 | the `realloc`-failure regression is a GATED measurement (V20-11/V20-12) | (a) `probe6_native --realloc` exists and is exercised by `run_all --check` through the `realloc_accounting` row; (b) the row's clauses are conjunctive: child exit 0, `NULL` return, `errno == ENOMEM`, block byte-identical, block still writable, second block allocated, peak ≥ 8,388,608 B and ≤ 12,582,912 B; (c) demonstrated twice: 8,398,608 B on the shipped shim (all eight clauses true) and 4,200,608 B with the A.5.4 guard removed (the peak clause fails, so the gate fails); (d) the recorded peak is re-measured every run with `tolerance` 0.02, so a drift fails rather than passing on a stale figure; (e) mutation: delete the `if (p == NULL && size != 0) return NULL;` line → (c) fails |
 | G-V20-02 | the manifest is validated as DATA, not matched by name (V20-14) | (a) every row must be an object with exactly `path`/`bytes`/`sha256`; `path` must be the canonical `tools/obs/probes/<name>`; duplicate paths and duplicate basenames are refused; `bytes` is a non-negative `int`, `sha256` is 64 lowercase hex; `expected.json` and `alloc_peak.so` may not be pinned; the block itself admits only `algorithm` (which must be `sha256`) and a non-empty `files` array; (b) demonstrated: twenty-three malformed manifests each produce exit 2 with a per-entry diagnostic while the real manifest validates — duplicate path, duplicate basename under another directory, bare basename, absolute path, `bytes` as `"1234"`/`-1`/`true`, short/uppercase/missing digest, unknown row field, non-object row, self-pin, artifact pin, `algorithm: md5`, stray block field, `files` not a list, empty `files`, wrong size, wrong digest, deleted row, and a missing or non-object block; (c) since v2.1, A.0 and A.7 are regenerated from the files by script, so this revision's appendix cannot claim a digest the file does not have (review-time: CI verifies the manifest, not the appendix — G-V18-02 b); (d) mutation: restore v2.0's basename indexing → the duplicate-path and basename cases are ACCEPTED (one row silently overwrites the other) and (b) fails |
 | G-V20-03 | the map live total cannot be clamped (V20-13) | (a) source gate: `map_live_sub` contains no clamp (`cur > n ? ... : 0` is gone) and calls `map_fail_underflow(n, cur)`, which writes one diagnostic line with both figures and `abort()`s; (b) demonstrated with a FAULT-INJECTED build (one 4 MiB range silently removed from the table): `SIGABRT` (−6) and the byte-exact line `alloc_peak: FATAL: mmap accounting underflow: 4202496 B to subtract, 2121728 B tracked (regions 3): refusing to clamp to zero`, while the shipped build runs the same child to `SURVIVED` with `live` back at its baseline; (c) the path is NOT reachable from a correct shim, so it is verified by fault injection in review rather than shipped as a test hook — stated as a limit, not hidden: CI cannot provoke a lost range without a deliberate bug in the instrument; (d) mutation: restore the clamp → the injected build exits 0 with a silently reduced total instead of aborting |
+| G-V21-01 | the suite's inventory is IDENTITY-based, not name-based (V21-01) | (a) `suite_files()` enumerates with `os.scandir` + `lstat` semantics and REFUSES any entry that is not a regular file; `check_manifest()` hashes each file through ONE `O_NOFOLLOW` descriptor and requires `os.path.samestat(lstat, fstat)` plus an unchanged size, so the bytes compared belong to the inode inspected; (b) `--self-test` runs fourteen cases and exits non-zero if ANY refusal is missing: post-enumeration substitution by a link to a file inside the suite, a link to a file outside it, a link added after the inventory, a dangling link, a link to `/dev/null`, a directory, a FIFO, a real character device, a direct `opened_regular` call on a link, `open(O_NOFOLLOW)` refusing with `ELOOP`, a modified file still refused — plus a CONTROL that an honest tree validates and that a regular file still hashes to its own bytes; (c) CI runs `--self-test` before the gate and archives `self-test.log`; (d) mutation: restore `os.listdir` + `os.path.isfile` → the link cases are ACCEPTED and (b) fails |
+| G-V21-02 | the reported counts are three distinct counts, correctly named (V21-02) | (a) the success line names inventoried (14), pinned-by-`expected.json` (13) and `expected.json`-pinned-by-A.0 separately, and prints `expected.json`'s digest; (b) `report.json` carries `coverage.{inventoried, pinned_by_expected_json, self_path, self_sha256, self_pinned_by}` and those values EQUAL `len(manifest.files)` (14) and `len(expected.manifest.files)` (13); (c) demonstrated twice on the working tree this appendix pins, and v2.1's single-number line is recorded as wrong in §1.0c rather than silently replaced; (d) mutation: print one number for both → (a) fails |
+| G-V21-03 | the lineage claim names its commit and its run (V21-03) | (a) the preamble names commit `e30ef37011af7cc073fa13c8ee5384ae080995b5`, run `42208989835`, job `127862655167`, conclusion `success`, the exact command and the exact printed lines; (b) A.0's fourteen digests equal the digests that run's `--manifest` step printed, so the claim is about those bytes and not about a nearby tree — independently checkable from the `probe-suite-evidence` artifact or `gh run view 42208989835 --log`; (c) the claim is SCOPED — it covers the ten measurements at that SHA, and says the v2.2 reporting line is a working-tree result until the next run prints it; (d) mutation: delete the run id, or widen the claim to "all output at e30ef37", → the sentence then contradicts that run's `gate.log` and fails review |
 
 Decisions (new): **D11** dynamic target supplied as `target_fn` evaluated per admission read (static path retained);
 **D12** on budget breach, discard the whole body (`b""` + `error=INCIDENT-MEMORY`) rather than persisting a partial one;
@@ -2033,6 +2079,20 @@ A malformed manifest is a refusal to run, not a warning (G-V20-02).
 tree is a working tree rather than a commit it must say so in the same sentence. v2.0's "`--check` exits 0" outlived the
 tree it described and was false at the commit CI tested; v2.1 withdraws it in place, reports the working-tree result with
 its command and its numbers, and leaves the pinned-SHA claim to the pipeline that can make one (V20-15).
+**D56** a manifest pins INODES, not names: hashing a path is a statement about whatever that path resolves to at that
+instant, which is not necessarily the file the reviewer read. The inventory therefore refuses links and every other
+non-regular entry outright, and each comparison goes through one `O_NOFOLLOW` descriptor whose `fstat` must equal the
+`lstat` it was enumerated with (V21-01, G-V21-01). A refusal is cheap and recoverable; a hash of somebody else's file is
+the one defect the evidence chain cannot survive.
+
+**D57** a count must name what it counts: 14 files exist, `expected.json` pins 13 of them, and `expected.json` is pinned by
+A.0 — three numbers, three names, never one sentence (V21-02, G-V21-02). In an evidence chain an off-by-one is not
+cosmetic: it tells the reviewer which link they are allowed to skip.
+
+**D58** when the pipeline passes, the claim moves to the pipeline: a working-tree result is the honest maximum before a run
+exists and the minimum afterwards. v2.2 replaces v2.1's disclaimer with the SHA, the run, the job, the command and the
+printed lines, and keeps the distinction — in the same paragraph — for anything that run did not print (V21-03,
+G-V21-03).
 
 ## 12. Normative constants (single table; source of truth `tools/obs/params.py` + runner additions)
 
@@ -2078,10 +2138,14 @@ other file, and the driver refuses to run when anything was modified, added or d
 freshly compiled interposer with its raw outputs archived (G-V19-04), and its native figure is decomposed into derived
 consumers rather than asserted (A.5.8). Every number below was produced by running those exact files — the working tree
 whose digests A.0 records — with `PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check` on the pinned interpreter,
-which printed `PASS: 10 measurements, 14 files pinned by expected.json` and exited 0. That is a statement about THIS tree,
-not about a commit (V20-15, D55); the pinned-SHA claim belongs to the pipeline that runs on the commit.
+which printed `PASS: 10 measurements, 14 files pinned by expected.json` and exited 0 — and at commit
+`e30ef37011af7cc073fa13c8ee5384ae080995b5`, GitHub Actions run `42208989835` printed that same line from those same bytes
+and uploaded its gate log, manifest, report and build log as `probe-suite-evidence` (V21-03, G-V21-03). For the ten
+measurements below the claim is therefore a statement about a COMMIT, not about a tree that resembles one; the
+corrected reporting line introduced by V21-02 is a working-tree result until the next run prints it, and that is stated
+where it belongs (§1.0c) rather than implied here.
 
-### A.0 The probe suite IS repository code, delivered, pinned and machine-enforced (V17-04; V18-02; V19-05)
+### A.0 The probe suite IS repository code, delivered, pinned and machine-enforced (V17-04; V18-02; V19-05; V21-01)
 
 These fourteen files exist at the paths below in the repository; they are not a description of a suite, they ARE it. Every
 number in A.2/A.3 was produced by running them from the repository root, and the gate that reproduces those numbers is the
@@ -2103,12 +2167,19 @@ PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check      # exit 0 pass /
 | `tools/obs/probes/probe6_native.py` | native term: `mallinfo2` samples, both interposed channels, and the A.5.8 stage inventory (server in its own process) | 21,295 | `0c052217fccbdc86a602692c0bbc42f09e8db17a1060b72738e10bcce1ccb752` |
 | `tools/obs/probes/probe7_structure.py` | phase 3 — §5.1.2 `scan_structure` (parse + key check + discard) | 780 | `d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4` |
 | `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` dual-channel peak shim: malloc family AND a locked, range-aware direct anonymous `mmap` (A.5.4/A.5.7) | 19,327 | `19064773bb13436d9386ac896fa9ab3021f01afe0e5bf05a03b1bfdca210efa3` |
-| `tools/obs/probes/run_all.py` | driver: `--check` / `--record` / `--manifest` / `--update-manifest` / `--report` / `--interpose`, and the `expected.json` manifest enforcement | 20,851 | `16ca92b8cba0b076d6693913d7db90bb6ef80de84032ee8d77531e96ed96e135` |
-| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 10,404 | `229cf6f05951990ce9bbd770a54c1fc6b47b5ccff20dec301b68162826aa2c2c` |
-| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 6,548 | `e071a061d86f6c441b230b9aff38f189a54fe54c42ff8d3846b290525fbd02d6` |
+| `tools/obs/probes/run_all.py` | driver: `--check` / `--self-test` / `--record` / `--manifest` / `--update-manifest` / `--report` / `--interpose`; the no-follow inventory (V21-01), the `expected.json` manifest enforcement and the three counts (V21-02) | 38,246 | `d85d7ce5c2d24e2b6b1f8dea92c3ab7431c8050b22ee315dda785a02f5d24ddb` |
+| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 11,556 | `062a18c1edd0d71ff22bde01ad1cad01c74eb3d945bcbb57823f78e8a856587f` |
+| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 6,548 | `988c28ab8e2433158d00312a8619df1d7ae2628c8cf5d1a19dad00c19eb3672d` |
 | `tools/obs/probes/__init__.py` | package marker (empty file; `touch tools/obs/probes/__init__.py`) | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 | `tools/obs/probes/probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort | 17,934 | `ffb160e5b6559e5cc6e644b7383f75df6dd5f85bc4786e3fea58fa0a58b13081` |
-| **14 files** | **total** | **110,028** | `python -m tools.obs.probes.run_all --manifest` prints this table |
+| **14 files** | **total** | **128,575** | `python -m tools.obs.probes.run_all --manifest` prints this table |
+
+**A file is its INODE, not its name (V21-01).** This table pins BODIES, and the driver is what makes that true: the
+inventory refuses any entry in this directory that is not a regular file, and every comparison hashes through a single
+`O_NOFOLLOW` descriptor whose `fstat` must be the same inode as the `lstat` it was enumerated with. A symlink — to
+another probe, to a file outside the repository, dangling, or swapped in after the inventory — is a refusal (exit 2)
+whose message names the link and its target, never a hash of whatever it points at; `--self-test` proves each case and
+also proves that an honest tree still passes, so the refusal cannot be satisfied by refusing everything (G-V21-01).
 
 **The pin has two links, and the second one is CODE (V19-05).** This table is the OUTER link: it names `expected.json`'s
 own byte size and SHA-256, which a file cannot hold about itself. The INNER link is `expected.json`'s `manifest` block — path,
@@ -2570,7 +2641,10 @@ derivation before it may appear in a measured region.
 
 ### A.7 The complete suite, file by file (V17-04; generated from the delivered files by V18-02 and v2.0)
 
-Every listing below is GENERATED from the file it names, and A.0 pins the same bytes. Section numbers are STABLE across
+Every listing below is GENERATED from the file it names, and A.0 pins the same bytes. Listings use THIS
+DOCUMENT's CRLF line separators: the probe modules are committed with LF, so the text is identical line for line
+while the separator bytes are the document's. A.0's SHA-256 is the authority on the file's own bytes, and
+(G-V18-02 b) compares the listings after normalising that separator. Section numbers are STABLE across
 revisions so that citations stay valid: v1.9 used A.7.1–A.7.13, and v2.0 appends `probe8_mmap_threads.py` as A.7.14 rather
 than renumbering the twelve files a reviewer already knows. If a listing and a file disagree, the file is what runs (G-V18-02).
 
@@ -3879,9 +3953,10 @@ __attribute__((destructor)) static void report(void) {
 #### A.7.10 `tools/obs/probes/run_all.py`
 
 ```python
-"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05).
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02).
 
   python -m tools.obs.probes.run_all --check             # CI gate: exit 0 pass / 1 mismatch / 2 integrity or environment
+  python -m tools.obs.probes.run_all --self-test         # CI gate: the integrity REFUSALS, proven by negative cases
   python -m tools.obs.probes.run_all --record            # print a new measurements array for a REVIEWED revision
   python -m tools.obs.probes.run_all --manifest          # print path/bytes/sha256 for EVERY suite file (A.0)
   python -m tools.obs.probes.run_all --update-manifest   # rewrite expected.json's manifest block (reviewed only)
@@ -3894,6 +3969,16 @@ is modified, added or deleted, so the code that produces a number is the code th
 contain its own digest; A.0 in the document pins it instead (the document is anchored in git), and `--manifest` prints
 its digest too so a reviewer can check the whole chain.
 
+A FILE IS ITS INODE, NOT ITS NAME (V21-01). Every suite file is enumerated with `lstat` semantics, must BE a regular file
+(a symlink pointing inside or outside the tree, a directory, a FIFO, a socket or a device is a refusal before any
+measurement), and is then opened ONCE with `O_NOFOLLOW`, `fstat`ed and compared to the `lstat` result, so a path swapped
+for a link after the inventory is refused instead of hashed. The bytes that are compared are the bytes of the inode that
+was checked. `--self-test` demonstrates each refusal as a negative regression case.
+
+COUNTS ARE THREE DIFFERENT NUMBERS (V21-02). v2.1 printed "14 files pinned by expected.json", which is false:
+`expected.json` pins 13 files, the suite ships 14, and `expected.json` itself is pinned by §A.0 of the document. The run
+line and the report's `coverage` block name all three, so no reader has to infer which count a number is.
+
 Instruments per phase: `tracemalloc` (Python-object attribution), the interposer's malloc counter (every malloc arena
 and thread, including allocations that live and die inside the region) and, when the request region is measured, the
 interposer's direct-mmap counter (anonymous private mappings, the channel a malloc-only interposer cannot see).
@@ -3903,14 +3988,18 @@ gate instead of being absorbed by a tolerance.
 """
 from __future__ import annotations
 
+import contextlib
+import errno
 import hashlib
 import importlib
 import json
 import os
 import platform
 import re
+import stat
 import subprocess
 import sys
+import tempfile
 
 from tools.obs.probes import probe_common as C
 
@@ -3929,41 +4018,140 @@ CANONICAL_PREFIX = "tools/obs/probes/"     # A.0 paths are repository-relative a
 ROW_FIELDS = {"path", "bytes", "sha256"}
 BLOCK_FIELDS = {"algorithm", "files"}
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+# V21-01: O_NOFOLLOW turns "is this a link?" into an OPEN-TIME fact rather than a check the caller must win a race to
+# use. It exists on Linux/POSIX; where it does not, the lstat/ fstat identity comparison below still refuses a link,
+# because a followed link's inode cannot equal the inode lstat named.
+OPEN_REGULAR = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+READ_CHUNK = 1 << 20
 
 
-def sha256(path: str) -> str:
-    with open(path, "rb") as handle:
-        return hashlib.sha256(handle.read()).hexdigest()
+class SuiteIntegrityError(Exception):
+    """A suite file failed its identity check: missing, not a regular file, a link, or replaced while being read."""
 
 
-def suite_files() -> list[str]:
-    """Every tracked file of this suite: the directory listing minus the build artifact and interpreter caches."""
-    names = []
-    for entry in sorted(os.listdir(HERE)):
-        path = os.path.join(HERE, entry)
-        if os.path.isdir(path):
-            if entry not in IGNORED_DIRS:
-                raise SystemExit(f"refused: unexpected directory {entry!r} inside the suite (A.0)")
-            continue
-        if entry in BUILD_ARTIFACTS:
-            continue
-        names.append(entry)
-    return names
+def describe_mode(mode: int) -> str:
+    """Name a non-regular file type for a diagnostic (V21-01): 'not a regular file' alone hides what was there."""
+    if stat.S_ISLNK(mode):
+        return "a symbolic link"
+    if stat.S_ISDIR(mode):
+        return "a directory"
+    if stat.S_ISFIFO(mode):
+        return "a FIFO"
+    if stat.S_ISSOCK(mode):
+        return "a socket"
+    if stat.S_ISCHR(mode):
+        return "a character device"
+    if stat.S_ISBLK(mode):
+        return "a block device"
+    return f"mode {oct(mode)}"
 
 
-def manifest(include_self: bool = True) -> dict:
+@contextlib.contextmanager
+def opened_regular(path: str, label: str):
+    """Yield `(handle, stat_result)` for a suite file that was a regular file at OPEN time, opened without links.
+
+    V21-01: every read of a suite file goes through here. `lstat` refuses a link, directory, FIFO, socket or device
+    before a byte is read; `O_NOFOLLOW` makes the same refusal race-free at open; `os.path.samestat` proves the open
+    descriptor is the inode that was inspected, so a post-enumeration substitution is refused rather than hashed; and
+    the caller's size check proves nothing changed while the bytes were being read.
+    """
+    try:
+        before = os.lstat(path)
+    except FileNotFoundError:
+        raise SuiteIntegrityError(f"{label}: missing on disk") from None
+    except OSError as exc:
+        raise SuiteIntegrityError(f"{label}: lstat failed: {exc.strerror or exc}") from None
+    if not stat.S_ISREG(before.st_mode):
+        raise SuiteIntegrityError(f"{label}: is {describe_mode(before.st_mode)}, not a regular file (V21-01)")
+    try:
+        fd = os.open(path, OPEN_REGULAR)
+    except OSError as exc:
+        raise SuiteIntegrityError(f"{label}: open(O_NOFOLLOW) failed: {exc.strerror or exc} (V21-01)") from None
+    handle = None
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise SuiteIntegrityError(f"{label}: the opened descriptor is {describe_mode(opened.st_mode)}, not a "
+                                      f"regular file (V21-01)")
+        if not os.path.samestat(before, opened):
+            raise SuiteIntegrityError(
+                f"{label}: identity changed between lstat and open (device {before.st_dev}, inode {before.st_ino} -> "
+                f"device {opened.st_dev}, inode {opened.st_ino}): post-enumeration substitution (V21-01)")
+        handle = os.fdopen(fd, "rb", closefd=False)
+        yield handle, opened
+    finally:
+        if handle is not None:
+            handle.close()
+        os.close(fd)
+
+
+def read_regular(path: str, label: str) -> tuple[int, str]:
+    """Return `(bytes, sha256)` for a suite file, hashed from ONE no-follow descriptor (V21-01)."""
+    digest = hashlib.sha256()
+    total = 0
+    with opened_regular(path, label) as (handle, opened):
+        for chunk in iter(lambda: handle.read(READ_CHUNK), b""):
+            total += len(chunk)
+            digest.update(chunk)
+        if total != opened.st_size:
+            raise SuiteIntegrityError(f"{label}: read {total} B from an inode of {opened.st_size} B: modified while "
+                                      f"being hashed (V21-01)")
+    return total, digest.hexdigest()
+
+
+def suite_files(here: str = HERE) -> list[str]:
+    """Every file of this suite: entries that ARE regular files, minus the build artifact and interpreter caches.
+
+    V21-01: an inventory that resolves links cannot pin the code that runs. Anything here that is not a regular file
+    — a symlink (inside or outside the tree, dangling or not), a directory that is not `__pycache__`, a FIFO, a socket,
+    a device — refuses the run instead of being counted, followed or skipped.
+    """
+    try:
+        with os.scandir(here) as entries:
+            listing = sorted(entries, key=lambda entry: entry.name)
+            names: list[str] = []
+            for entry in listing:
+                try:
+                    info = entry.stat(follow_symlinks=False)          # == lstat: a link is reported as a link
+                except OSError as exc:
+                    raise SuiteIntegrityError(f"{entry.name}: lstat failed: {exc.strerror or exc} (V21-01)") from None
+                if stat.S_ISLNK(info.st_mode):
+                    try:
+                        target = os.readlink(entry.path)
+                    except OSError:
+                        target = "?"
+                    raise SuiteIntegrityError(f"{entry.name}: is a symbolic link -> {target!r}; the suite is "
+                                              f"inventoried without following links (V21-01)")
+                if stat.S_ISDIR(info.st_mode):
+                    if entry.name not in IGNORED_DIRS:
+                        raise SuiteIntegrityError(f"unexpected directory {entry.name!r} inside the suite (A.0)")
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    raise SuiteIntegrityError(f"{entry.name}: is {describe_mode(info.st_mode)}, not a regular file "
+                                              f"(V21-01)")
+                if entry.name in BUILD_ARTIFACTS:
+                    continue
+                names.append(entry.name)
+            return names
+    except FileNotFoundError:
+        raise SuiteIntegrityError(f"the suite directory {here!r} does not exist (A.0)") from None
+    except OSError as exc:
+        raise SuiteIntegrityError(f"cannot list the suite directory {here!r}: {exc.strerror or exc} (A.0)") from None
+
+
+def manifest(include_self: bool = True, here: str = HERE) -> dict:
     """The A.0 table: path, byte size and SHA-256 for every suite file (self included for the document's diff)."""
     rows = []
-    for name in suite_files():
+    for name in suite_files(here):
         if name == SELF and not include_self:
             continue
-        path = os.path.join(HERE, name)
-        rows.append({"path": f"tools/obs/probes/{name}", "bytes": os.path.getsize(path), "sha256": sha256(path)})
+        size, digest = read_regular(os.path.join(here, name), f"{CANONICAL_PREFIX}{name}")
+        rows.append({"path": f"{CANONICAL_PREFIX}{name}", "bytes": size, "sha256": digest})
     return {"algorithm": "sha256", "files": rows}
 
 
-def check_manifest(expected: dict) -> list[str]:
-    """V19-05/V20-14: the manifest is the reviewed code, so it is checked as DATA before it is trusted, and a
+def check_manifest(expected: dict, here: str = HERE) -> list[str]:
+    """V19-05/V20-14/V21-01: the manifest is the reviewed code, so it is checked as DATA before it is trusted, and a
     modification, an addition or a deletion is a refusal, never a warning.
 
     v2.0 matched its rows by BASENAME (`os.path.basename(row["path"])`) after indexing them into a dict, which made
@@ -3972,6 +4160,10 @@ def check_manifest(expected: dict) -> list[str]:
     directory, `bytes`/`sha256` of the wrong type were trusted until they were compared, and a row for `expected.json`
     itself or for the build artifact was reported as a DELETION rather than as the malformed entry it is. Each row is
     now validated on its own and a malformed entry fails closed - a refusal to run, before a single measurement.
+
+    v2.2 adds IDENTITY (V21-01): the inventory refuses any entry that is not a regular file, and each compared file is
+    read through `read_regular`, so a symlink — to a file inside the suite, to one outside it, dangling, or swapped in
+    after the inventory — cannot be hashed in place of the file the manifest pinned.
     """
     failures: list[str] = []
     declared = expected.get("manifest")
@@ -4029,25 +4221,175 @@ def check_manifest(expected: dict) -> list[str]:
             continue
         by_name[name] = path
         listed[path] = row
-    present = set(suite_files()) - {SELF}
+    try:
+        present = set(suite_files(here)) - {SELF}
+    except SuiteIntegrityError as exc:
+        # V21-01: a non-regular entry makes the whole inventory untrustworthy, so the run stops here. It is reported
+        # as a refusal line, not raised, so `--check` keeps its documented exit status (2).
+        return failures + [f"manifest: {exc}"]
     for name in sorted(present - set(by_name)):
         failures.append(f"manifest: {name} exists but is not in the manifest (added file)")
     for name in sorted(set(by_name) - present):
         failures.append(f"manifest: {name} is listed but missing on disk (deleted file)")
     for name in sorted(present & set(by_name)):
         row = listed[CANONICAL_PREFIX + name]
-        path = os.path.join(HERE, name)
-        if not os.path.isfile(path):
-            failures.append(f"manifest: {name} is not a regular file (V20-14)")
+        try:
+            size, digest = read_regular(os.path.join(here, name), f"{CANONICAL_PREFIX}{name}")
+        except SuiteIntegrityError as exc:
+            failures.append(f"manifest: {exc}")
             continue
-        size = os.path.getsize(path)
         if size != row["bytes"]:
             failures.append(f"manifest: {name} is {size} B, manifest says {row['bytes']} B (modified)")
             continue
-        digest = sha256(path)
         if digest != row["sha256"]:
             failures.append(f"manifest: {name} sha256 {digest[:16]}… != {row['sha256'][:16]}… (modified)")
     return failures
+
+
+def self_test() -> int:
+    """V21-01 negative regressions: a suite entry that is a link or not a regular file must be REFUSED, not hashed.
+
+    Every case builds a throw-away suite tree in a temporary directory, so nothing here reads or writes the real one.
+    CI runs this (`--self-test`) ahead of the gate, so the refusals are demonstrated on every revision instead of being
+    described in prose. The first case is a CONTROL: the same harness must ACCEPT an honest tree, or "everything is
+    refused" would pass this file.
+    """
+    results: list[tuple[str, bool]] = []
+
+    def report_case(label: str, ok: bool, detail: str = "", skipped: bool = False) -> None:
+        results.append((label, ok))
+        mark = "skip" if skipped else ("ok  " if ok else "FAIL")
+        print(f"{mark}  {label}{(' — ' + detail) if detail else ''}")
+
+    def tree(root: str) -> None:
+        for name in ("probe1_phase1.py", "run_all.py"):
+            with open(os.path.join(root, name), "wb") as handle:
+                handle.write(f"# {name}\n".encode())
+
+    def refuses(label: str, needle: str, mutate) -> None:
+        """Record the manifest while every file is honest, apply `mutate`, then require a refusal naming `needle`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree(tmp)
+            block = manifest(include_self=False, here=tmp)
+            mutate(tmp)
+            try:
+                failures = check_manifest({"manifest": block}, here=tmp)
+            except SuiteIntegrityError as exc:      # refusals are RETURNED by check_manifest, never raised
+                failures = [f"raised: {exc}"]
+            text = " | ".join(failures)
+            report_case(label, bool(failures) and needle in text, text or "no failure reported")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        block = manifest(include_self=False, here=tmp)
+        failures = check_manifest({"manifest": block}, here=tmp)
+        report_case("control: an honest tree validates", not failures, " | ".join(failures) or "no failures")
+
+    def link_inside(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.symlink(os.path.join(tmp, "run_all.py"), os.path.join(tmp, "probe1_phase1.py"))
+
+    def link_outside(tmp: str) -> None:
+        outside = os.path.join(os.path.dirname(tmp), "outside-the-suite.txt")
+        with open(outside, "wb") as handle:
+            handle.write(b"not a suite file\n")
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.symlink(outside, os.path.join(tmp, "probe1_phase1.py"))
+
+    def link_added(tmp: str) -> None:
+        os.symlink(os.path.join(tmp, "run_all.py"), os.path.join(tmp, "probe9_extra.py"))
+
+    def link_dangling(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.symlink(os.path.join(tmp, "no-such-file.py"), os.path.join(tmp, "probe1_phase1.py"))
+
+    def link_device(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.symlink("/dev/null", os.path.join(tmp, "probe1_phase1.py"))
+
+    def directory(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.mkdir(os.path.join(tmp, "probe1_phase1.py"))
+
+    def fifo(tmp: str) -> None:
+        os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+        os.mkfifo(os.path.join(tmp, "probe1_phase1.py"))
+
+    def modified(tmp: str) -> None:
+        with open(os.path.join(tmp, "probe1_phase1.py"), "ab") as handle:
+            handle.write(b"# drift\n")
+
+    refuses("post-enumeration substitution: a link to a file INSIDE the suite is refused", "symbolic link",
+            link_inside)
+    refuses("a link to a file OUTSIDE the suite is refused", "symbolic link", link_outside)
+    refuses("a link ADDED to the suite after the inventory is refused", "symbolic link", link_added)
+    refuses("a DANGLING link is refused (never reported as a deleted file)", "symbolic link", link_dangling)
+    refuses("a link to a device is refused (the link is the problem, not the target)", "symbolic link", link_device)
+    refuses("a DIRECTORY in place of a suite file is refused", "directory", directory)
+    refuses("a FIFO in place of a suite file is refused", "FIFO", fifo)
+    refuses("a MODIFIED regular file is still refused (V19-05 behaviour retained)", "modified", modified)
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        block = manifest(include_self=False, here=tmp)
+        try:
+            os.unlink(os.path.join(tmp, "probe1_phase1.py"))
+            os.mknod(os.path.join(tmp, "probe1_phase1.py"), stat.S_IFCHR | 0o600, os.makedev(1, 3))
+        except (PermissionError, AttributeError, OSError) as exc:
+            report_case("a DEVICE node in place of a suite file is refused", True,
+                        f"skipped: mknod unavailable here ({exc.__class__.__name__}); the symlink-to-/dev/null case "
+                        f"covers devices", skipped=True)
+        else:
+            failures = check_manifest({"manifest": block}, here=tmp)
+            text = " | ".join(failures)
+            report_case("a DEVICE node in place of a suite file is refused", bool(failures) and "device" in text,
+                        text or "no failure reported")
+    if os.path.exists("/dev/null"):                      # a real character device, no privileges needed
+        try:
+            with opened_regular("/dev/null", "/dev/null"):
+                pass
+        except SuiteIntegrityError as exc:
+            report_case("a real character device is refused, not read as a file", "character device" in str(exc),
+                        str(exc))
+        else:
+            report_case("a real character device is refused, not read as a file", False, "the device was accepted")
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        os.symlink(os.path.join(tmp, "run_all.py"), os.path.join(tmp, "link.py"))
+        try:
+            with opened_regular(os.path.join(tmp, "link.py"), "link.py"):
+                pass
+        except SuiteIntegrityError as exc:
+            report_case("opened_regular refuses a link when called directly", "symbolic link" in str(exc), str(exc))
+        else:
+            report_case("opened_regular refuses a link when called directly", False, "the link was accepted")
+    if getattr(os, "O_NOFOLLOW", 0):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree(tmp)
+            os.symlink(os.path.join(tmp, "run_all.py"), os.path.join(tmp, "link.py"))
+            try:
+                os.open(os.path.join(tmp, "link.py"), OPEN_REGULAR)
+            except OSError as exc:
+                report_case("open(..., O_NOFOLLOW) refuses a link at open time (ELOOP): the race-free half of V21-01",
+                            exc.errno == errno.ELOOP,
+                            f"{exc.__class__.__name__}: {exc.strerror} (errno {exc.errno})")
+            else:
+                report_case("open(..., O_NOFOLLOW) refuses a link at open time (ELOOP)", False,
+                            "open SUCCEEDED on a symbolic link")
+    else:
+        report_case("open(..., O_NOFOLLOW) refuses a link at open time (ELOOP)", True,
+                    "skipped: O_NOFOLLOW is unavailable on this platform (lstat + fstat identity still applies)",
+                    skipped=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        path = os.path.join(tmp, "run_all.py")
+        size, digest = read_regular(path, "run_all.py")
+        with open(path, "rb") as handle:
+            want = hashlib.sha256(handle.read()).hexdigest()
+        report_case("a regular file still hashes to its own bytes", (size, digest) == (os.path.getsize(path), want),
+                    f"{size} B, {digest[:16]}…")
+    failed = [label for label, ok in results if not ok]
+    print(f"{'PASS' if not failed else 'FAIL'}: {len(results) - len(failed)}/{len(results)} integrity regression cases")
+    return 0 if not failed else 1
 
 
 def collect() -> list[dict]:
@@ -4187,10 +4529,40 @@ def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]
     return failures
 
 
+def coverage(block: dict, expected: dict) -> dict:
+    """V21-02: the three counts v2.1 collapsed into one. They are not interchangeable.
+
+    * `inventoried` — every file the suite ships (A.0's rows, `expected.json` included);
+    * `pinned_by_expected_json` — the rows of its `manifest` block (`expected.json` cannot hash itself);
+    * `self` — `expected.json`, pinned by §A.0 of the document instead, which is why A.0 is generated and reviewed.
+    """
+    rows = {row["path"]: row for row in block["files"]}
+    self_path = f"{CANONICAL_PREFIX}{SELF}"
+    return {
+        "inventoried": len(block["files"]),
+        "pinned_by_expected_json": len((expected.get("manifest") or {}).get("files") or []),
+        "self_path": self_path,
+        "self_sha256": (rows.get(self_path) or {}).get("sha256"),
+        "self_pinned_by": "Appendix A.0 of docs/obs-session-runner-design.md (expected.json cannot contain its own "
+                          "digest)",
+        "build_artifacts_excluded": sorted(BUILD_ARTIFACTS),
+        "directories_skipped": sorted(IGNORED_DIRS),
+    }
+
+
 def main(argv: list[str]) -> int:
     mode = argv[1] if len(argv) > 1 else "--check"
+    if mode == "--self-test":
+        # The negative regressions of the integrity checks; they build their own trees and need neither the manifest
+        # nor the pinned interpreter, so they run first in CI and fail closed on their own.
+        return self_test()
     if mode == "--manifest":
-        print(json.dumps(manifest(include_self=True), indent=2, sort_keys=True))
+        try:
+            block = manifest(include_self=True)
+        except SuiteIntegrityError as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(block, indent=2, sort_keys=True))
         return 0
     if mode == "--interpose":
         module = importlib.import_module(f"tools.obs.probes.{argv[2]}")
@@ -4201,21 +4573,29 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"peak": int(pair["peak"]), "map_peak": int(pair.get("map_peak", 0))}))
         return 0
     expected_path = os.path.join(HERE, SELF)
-    if not os.path.exists(expected_path):
-        print(f"refused: {SELF} is missing (A.0)", file=sys.stderr)
+    try:
+        with opened_regular(expected_path, SELF) as (handle, _info):
+            expected = json.load(handle)
+    except SuiteIntegrityError as exc:
+        print(f"refused: {exc} (A.0)", file=sys.stderr)
         return 2
-    with open(expected_path) as handle:
-        expected = json.load(handle)
+    except (OSError, ValueError) as exc:
+        print(f"refused: {SELF} is not readable JSON: {exc}", file=sys.stderr)
+        return 2
     if expected.get("schema") != SCHEMA:
         print(f"refused: {SELF} schema {expected.get('schema')!r} != {SCHEMA!r} (run_all version skew)", file=sys.stderr)
         return 2
     if mode == "--update-manifest":
         # The repair mode cannot require a valid manifest: it is what repairs it. Everything else refuses first.
-        expected["manifest"] = manifest(include_self=False)
+        try:
+            expected["manifest"] = manifest(include_self=False)
+        except SuiteIntegrityError as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
         with open(expected_path, "w") as handle:
             json.dump(expected, handle, indent=2, sort_keys=True)
             handle.write("\n")
-        print(f"manifest updated: {len(expected['manifest']['files'])} files "
+        print(f"manifest updated: {len(expected['manifest']['files'])} files pinned "
               f"(expected.json excluded: it cannot hash itself; A.0 pins it instead)")
         return 0
     integrity = check_manifest(expected)
@@ -4234,11 +4614,18 @@ def main(argv: list[str]) -> int:
                           "measurements": measured}, indent=2))
         return 0
     failures = compare(expected, measured, interposed)
+    try:
+        block = manifest(include_self=True)
+    except SuiteIntegrityError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    counts = coverage(block, expected)
     report = {
         "schema": SCHEMA,
         "python": sys.version.split()[0],
         "platform": platform.platform(),
-        "manifest": manifest(include_self=True),
+        "manifest": block,
+        "coverage": counts,
         "measurements": measured,
         "failures": failures,
     }
@@ -4254,7 +4641,10 @@ def main(argv: list[str]) -> int:
     if failures:
         print(f"FAIL: {len(failures)} check(s) failed", file=sys.stderr)
         return 1
-    print(f"PASS: {len(measured)} measurements, {len(report['manifest']['files'])} files pinned by expected.json")
+    # V21-02: three counts, named. "14 files pinned by expected.json" (v2.1) was false on two of them.
+    print(f"PASS: {len(measured)} measurements; {counts['inventoried']} suite files inventoried, "
+          f"{counts['pinned_by_expected_json']} pinned by expected.json, {SELF} pinned by Appendix A.0")
+    print(f"      {SELF} sha256 {counts['self_sha256']} (compare with A.0)")
     return 0
 
 
@@ -4283,6 +4673,7 @@ the standard library.
 cd <repository root>
 cc -shared -fPIC -O2 -Wall -Wextra -Werror -o tools/obs/probes/alloc_peak.so tools/obs/probes/alloc_peak.c
 PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check
+PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --self-test
 ```
 
 Exit status: `0` every recorded value reproduced, every bound held, every inventory item inside its derived bound, and
@@ -4290,9 +4681,14 @@ every file matching `expected.json`; `1` a measurement mismatch (printed on stde
 match `expected.json` (a file was modified, added or deleted), the interpreter is not the pinned CPython 3.12.3, or
 `openssl` is missing.
 
+The pass line names three DIFFERENT counts (V21-02): every suite file is inventoried (14), `expected.json` pins every
+other one (13), and `expected.json` itself is pinned by §A.0 of the design document, because a file cannot contain its
+own digest. v2.1 printed a single number ("14 files pinned by expected.json") and was wrong on two of the three.
+
 Other modes:
 
 ```sh
+PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --self-test        # the integrity REFUSALS, as negative cases (CI)
 PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --record           # new measurements array (REVIEWED revisions only)
 PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --manifest         # path/bytes/sha256 for EVERY suite file (A.0)
 PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --update-manifest  # rewrite expected.json's manifest (REVIEWED only)
@@ -4308,6 +4704,13 @@ paths or basenames, `bytes` a non-negative integer, `sha256` 64 lowercase hex, n
 `--check` verifies it BEFORE measuring anything and refuses (exit 2) on a modification, an addition or a deletion, so
 the code that produces a number is exactly the code that was reviewed. `expected.json` cannot contain its own digest;
 A.0 pins it against the document instead, and `--manifest` prints its digest too.
+
+Every suite file is checked by IDENTITY as well as by name (V21-01). The inventory refuses any entry that is not a
+regular file — a symlink pointing inside the suite, one pointing outside it, a dangling link, a directory, a FIFO, a
+socket or a device — and every compared file is opened ONCE with `O_NOFOLLOW`, `fstat`ed and matched against its
+`lstat`, so a path swapped for a link after the inventory is refused instead of hashed. `--self-test` runs those
+refusals as negative regression cases, with a CONTROL that an honest tree is still accepted, and CI runs it before
+the gate.
 
 After a REVIEWED change: `--update-manifest` (this directory), then regenerate A.0/A.7 from the document (D44).
 
@@ -4325,7 +4728,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
-| `run_all.py` | driver: `--check`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose` |
+| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose` |
 | `expected.json` | the file manifest (size + SHA-256) AND the recorded values, bounds and inventory derivations |
 | `README.md` | this file |
 
@@ -4418,7 +4821,7 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
     "openssl": "3.0.13",
     "platform": "Linux x86-64",
     "python": "3.12.3",
-    "updated": "v2.1"
+    "updated": "v2.2"
   },
   "inventory": {
     "items": [
@@ -4475,9 +4878,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 10404,
+        "bytes": 11556,
         "path": "tools/obs/probes/README.md",
-        "sha256": "229cf6f05951990ce9bbd770a54c1fc6b47b5ccff20dec301b68162826aa2c2c"
+        "sha256": "062a18c1edd0d71ff22bde01ad1cad01c74eb3d945bcbb57823f78e8a856587f"
       },
       {
         "bytes": 0,
@@ -4535,9 +4938,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
         "sha256": "c1662be01889bddbdba6426e566cd3da9b2bb7e50a955000c35670b9f7e5cca4"
       },
       {
-        "bytes": 20851,
+        "bytes": 38246,
         "path": "tools/obs/probes/run_all.py",
-        "sha256": "16ca92b8cba0b076d6693913d7db90bb6ef80de84032ee8d77531e96ed96e135"
+        "sha256": "d85d7ce5c2d24e2b6b1f8dea92c3ab7431c8050b22ee315dda785a02f5d24ddb"
       }
     ]
   },
@@ -4993,5 +5396,5 @@ if __name__ == "__main__":
     print(json.dumps(main()))
 ```
 
-End of v2.1. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
+End of v2.2. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
 document, not an implementation choice.
