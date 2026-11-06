@@ -27,6 +27,7 @@ import importlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 
@@ -43,6 +44,10 @@ SELF = "expected.json"
 BUILD_ARTIFACTS = {"alloc_peak.so"}
 IGNORED_DIRS = {"__pycache__"}
 SCHEMA = "obs-probes/2"
+CANONICAL_PREFIX = "tools/obs/probes/"     # A.0 paths are repository-relative and complete (V20-14)
+ROW_FIELDS = {"path", "bytes", "sha256"}
+BLOCK_FIELDS = {"algorithm", "files"}
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
 def sha256(path: str) -> str:
@@ -77,27 +82,90 @@ def manifest(include_self: bool = True) -> dict:
 
 
 def check_manifest(expected: dict) -> list[str]:
-    """V19-05: a modification, an addition or a deletion is a refusal, never a warning."""
+    """V19-05/V20-14: the manifest is the reviewed code, so it is checked as DATA before it is trusted, and a
+    modification, an addition or a deletion is a refusal, never a warning.
+
+    v2.0 matched its rows by BASENAME (`os.path.basename(row["path"])`) after indexing them into a dict, which made
+    every structural question about the manifest unanswerable: two rows could share a basename with one silently
+    overwriting the other, a row could name `probe3_decode.py` (or `/etc/whatever`) and still bind to the file in this
+    directory, `bytes`/`sha256` of the wrong type were trusted until they were compared, and a row for `expected.json`
+    itself or for the build artifact was reported as a DELETION rather than as the malformed entry it is. Each row is
+    now validated on its own and a malformed entry fails closed - a refusal to run, before a single measurement.
+    """
     failures: list[str] = []
-    declared = expected.get("manifest") or {}
-    rows = declared.get("files") or []
-    if not rows:
-        return ["manifest: expected.json has no manifest block (V19-05)"]
-    listed = {os.path.basename(row["path"]): row for row in rows}
+    declared = expected.get("manifest")
+    if not isinstance(declared, dict):
+        return ["manifest: expected.json has no manifest object (V19-05)"]
+    unknown_block = sorted(set(declared) - BLOCK_FIELDS)
+    if unknown_block:
+        failures.append(f"manifest: unknown field(s) {unknown_block} in the manifest block (V20-14)")
+    if declared.get("algorithm") != "sha256":
+        failures.append(f"manifest: algorithm {declared.get('algorithm')!r} != 'sha256' (V20-14)")
+    rows = declared.get("files")
+    if not isinstance(rows, list) or not rows:
+        return failures + ["manifest: 'files' must be a non-empty list (V19-05)"]
+    listed: dict[str, dict] = {}              # canonical path -> validated row
+    by_name: dict[str, str] = {}              # basename -> canonical path already seen
+    for index, row in enumerate(rows):
+        where = f"manifest: files[{index}]"
+        if not isinstance(row, dict):
+            failures.append(f"{where}: entry is {type(row).__name__}, not an object (V20-14)")
+            continue
+        unknown = sorted(set(row) - ROW_FIELDS)
+        if unknown:
+            failures.append(f"{where}: unknown field(s) {unknown} (V20-14)")
+        path, size, digest = row.get("path"), row.get("bytes"), row.get("sha256")
+        valid = True
+        if not isinstance(path, str) or not path:
+            failures.append(f"{where}: 'path' must be a non-empty string (V20-14)")
+            valid = False
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            failures.append(f"{where} {path!r}: 'bytes' must be a non-negative integer (V20-14)")
+            valid = False
+        if not isinstance(digest, str) or SHA256_HEX.fullmatch(digest) is None:
+            failures.append(f"{where} {path!r}: 'sha256' must be 64 lowercase hex characters (V20-14)")
+            valid = False
+        if not valid:
+            continue
+        name = os.path.basename(path)
+        if path != CANONICAL_PREFIX + name:
+            failures.append(f"{where}: {path!r} is not the canonical path {CANONICAL_PREFIX + name!r} (V20-14)")
+            continue                          # a non-canonical path never resolves to a file here
+        if name.startswith(".") or name in (".", ".."):
+            failures.append(f"{where}: {path!r} is not a suite file name (V20-14)")
+            continue
+        if name == SELF:
+            failures.append(f"{where}: {SELF} cannot pin itself; A.0 pins it against the document (V20-14)")
+            continue
+        if name in BUILD_ARTIFACTS:
+            failures.append(f"{where}: {name} is a build artifact and is never pinned (G-V18-02 d, V20-14)")
+            continue
+        if path in listed:
+            failures.append(f"{where}: duplicate path {path} (V20-14)")
+            continue
+        if name in by_name:
+            failures.append(f"{where}: {path} repeats the basename of {by_name[name]} (V20-14)")
+            continue
+        by_name[name] = path
+        listed[path] = row
     present = set(suite_files()) - {SELF}
-    for name in sorted(present - set(listed)):
+    for name in sorted(present - set(by_name)):
         failures.append(f"manifest: {name} exists but is not in the manifest (added file)")
-    for name in sorted(set(listed) - present):
+    for name in sorted(set(by_name) - present):
         failures.append(f"manifest: {name} is listed but missing on disk (deleted file)")
-    for name in sorted(present & set(listed)):
+    for name in sorted(present & set(by_name)):
+        row = listed[CANONICAL_PREFIX + name]
         path = os.path.join(HERE, name)
+        if not os.path.isfile(path):
+            failures.append(f"manifest: {name} is not a regular file (V20-14)")
+            continue
         size = os.path.getsize(path)
-        if size != listed[name]["bytes"]:
-            failures.append(f"manifest: {name} is {size} B, manifest says {listed[name]['bytes']} B (modified)")
+        if size != row["bytes"]:
+            failures.append(f"manifest: {name} is {size} B, manifest says {row['bytes']} B (modified)")
             continue
         digest = sha256(path)
-        if digest != listed[name]["sha256"]:
-            failures.append(f"manifest: {name} sha256 {digest[:16]}… != {listed[name]['sha256'][:16]}… (modified)")
+        if digest != row["sha256"]:
+            failures.append(f"manifest: {name} sha256 {digest[:16]}… != {row['sha256'][:16]}… (modified)")
     return failures
 
 
@@ -166,7 +234,13 @@ def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]
             if got.get("pass") is not False:
                 failures.append(f"{name}: banned pattern PASSED its bound (it must fail)")
         elif got.get("pass") is False:
-            failures.append(f"{name}: peak {got['peak']} exceeds its bound {got['bound']}")
+            if name == "realloc_accounting":
+                detail = got.get("detail") or {}
+                failed = sorted(key for key, held in (detail.get("checks") or {}).items() if not held) or ["child"]
+                failures.append(f"{name}: the realloc-failure regression did not hold: {failed} (peak {got['peak']} B, "
+                                f"two-block floor {detail.get('two_block_floor')} B; A.5.4/V20-11)")
+            else:
+                failures.append(f"{name}: peak {got['peak']} exceeds its bound {got['bound']}")
         if want.get("peak") and name not in ("native_headroom", "mmap_accounting"):
             if abs(got["peak"] - want["peak"]) > want["peak"] * tolerance:
                 failures.append(f"{name}: peak {got['peak']} != recorded {want['peak']} (tolerance {tolerance:.0%})")
@@ -201,6 +275,17 @@ def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]
                                 f"HTTP_HEADROOM {C.HTTP_HEADROOM} (A.5.7 fence)")
             failures.extend(compare_inventory(expected, detail))
             # the mallinfo2 figure is a LOWER BOUND and is deliberately NOT compared to a recorded value
+        if name == "realloc_accounting":
+            detail = got.get("detail") or {}
+            checks = detail.get("checks") or {}
+            if not checks:
+                failures.append("realloc_accounting: the regression reported no clause results (A.5.4/V20-11)")
+            for clause in sorted(checks):
+                if checks[clause] is not True:
+                    failures.append(f"realloc_accounting: clause {clause!r} did not hold (A.5.4/V20-11)")
+            if int(got.get("peak") or 0) < int(detail.get("two_block_floor") or 1):
+                failures.append(f"realloc_accounting: peak {got.get('peak')} B does not cover both 4 MiB blocks "
+                                f"(floor {detail.get('two_block_floor')} B): a failed realloc erased a live block")
         if name == "mmap_accounting":
             detail = got.get("detail") or {}
             concurrency = detail.get("concurrency") or {}
