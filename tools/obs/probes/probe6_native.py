@@ -36,6 +36,18 @@ and `big - full` must track the extra body bytes (a consumer that scaled with an
 The TLS fixture is the repository's `tests/fixtures/tls/localhost.pem` when present; otherwise an ephemeral
 self-signed certificate is generated with `openssl` in a temporary directory, so a clean clone can run the gate
 without committing key material (A.1, probes/README.md).
+
+CHILDREN ARE STARTED FROM THE PARENT'S VERIFIED BYTES (V23-01). v2.3 launched this file's server, stage and realloc
+children with `python -m tools.obs.probes.probe6_native`, so the child's interpreter opened this FILE after the driver
+had verified a manifest the child never read: a tree substituted in that window would have run unverified code inside
+the measurement. Every child here now starts through `probe_common.spawn_suite_child` / `run_suite_child`, which send
+the source over a pipe from the buffers the parent's manifest check accepted, with the manifest's own digest per frame
+and a closed package (`__path__ = []`) in the child, so nothing it is not given can be imported from disk. That holds
+for the measured stage children, the realloc child and the loopback server child alike, and for the grandchildren a
+child itself starts. WHAT IS PRESERVED: the child is still a fresh interpreter counted from exec by the shim (its
+startup is inside the reported peak, exactly as before), with the same `cwd`, the same `sys.argv` (`-m` gives the module
+path and the parent passes that path), the same reset points inside `child()` and `realloc_child()`, and the module is
+still executed as `__main__`. Run this file on its own and it refuses to start a child rather than fall back to `-m`.
 """
 from __future__ import annotations
 
@@ -222,14 +234,12 @@ def serve_forever_child(port: int, tls: bool, payload_bytes: int, cert: str = ""
 
 
 def start_server(kind: str) -> tuple[subprocess.Popen, int]:
-    """Launch the server process and wait for its port."""
-    command = [sys.executable, "-m", "tools.obs.probes.probe6_native", "--serve",
-               str(KIND_BODY[kind]), "plain" if kind == "connect" else "tls"]
+    """Launch the server process — from the verified bytes (V23-01) — and wait for its port."""
+    arguments = ["--serve", str(KIND_BODY[kind]), "plain" if kind == "connect" else "tls"]
     if kind != "connect":
         cert, key = material()
-        command += [cert, key]
-    process = subprocess.Popen(command, cwd=ROOT, env=dict(os.environ, PYTHONPATH=ROOT),
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        arguments += [cert, key]
+    process = C.spawn_suite_child("probe6_native", arguments, cwd=ROOT)
     assert process.stdout is not None
     line = process.stdout.readline().decode().strip()
     if not line.startswith("PORT "):
@@ -244,9 +254,8 @@ def interposed_peak(stage: str = "full") -> dict[str, object] | None:
         return None
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as handle:
         report = handle.name
-    env = dict(os.environ, LD_PRELOAD=SHIM, ALLOC_PEAK_FILE=report, PYTHONPATH=ROOT)
-    done = subprocess.run([sys.executable, "-m", "tools.obs.probes.probe6_native", "--child", stage],
-                          env=env, capture_output=True, timeout=300, cwd=ROOT)
+    done = C.run_suite_child("probe6_native", ["--child", stage],
+                             env={"LD_PRELOAD": SHIM, "ALLOC_PEAK_FILE": report}, timeout=300, cwd=ROOT)
     if done.returncode != 0:
         return {"error": done.stderr.decode()[-400:]}
     data = json.loads(done.stdout.decode() or "{}")
@@ -334,9 +343,7 @@ def realloc_regression() -> dict:
         row["pass"] = False
         row["detail"]["error"] = "alloc_peak.so is not built: the regression cannot be measured (A.7.9, V19-04)"
         return row
-    done = subprocess.run([sys.executable, "-m", "tools.obs.probes.probe6_native", "--realloc"],
-                          env=dict(os.environ, LD_PRELOAD=SHIM, PYTHONPATH=ROOT),
-                          capture_output=True, timeout=300, cwd=ROOT)
+    done = C.run_suite_child("probe6_native", ["--realloc"], env={"LD_PRELOAD": SHIM}, timeout=300, cwd=ROOT)
     stdout = done.stdout.decode()
     try:
         data = json.loads(stdout.splitlines()[-1] if stdout.strip() else "{}")
