@@ -55,6 +55,22 @@ socket or a device — and every compared file is opened ONCE with `O_NOFOLLOW`,
 refusals as negative regression cases, with a CONTROL that an honest tree is still accepted, and CI runs it before
 the gate.
 
+Nothing here is imported by PATH (V22-01). `--check` reads each suite file once, hashes that buffer against
+`expected.json` and KEEPS it; only after every row matches does the driver `compile()` those buffers into fresh module
+objects (`types.ModuleType`, registered in `sys.modules`) and execute them, so the code that produces a number is the
+code a reviewer verified. Nothing the driver executes is re-read from disk and no `.pyc` is consulted for it, a file
+that fails the check contributes no executable source at all, and the interposed child (`--interpose`) verifies and
+binds the same tree by the same route before it measures. Two paths are deliberately outside this binding and are
+named instead of implied: `run_all.py` itself, which the interpreter imports before any check can run (A.0 pins it;
+`--manifest` prints its digest), and the three measured children that probe6/probe8 start with `-m` on the tree the
+parent just verified — the shim counts a process from exec, so rebinding their startup would move the recorded
+native peaks (A.5.4/A.5.8). Those children leave a `__pycache__` entry, which the inventory ignores by design.
+
+`--self-test` counts outcomes separately (V22-03): `17 passed, 0 failed, 1 skipped` rather than folding skips into
+passes. A case this host cannot run (no `CAP_MKNOD`, no `O_NOFOLLOW`) prints as `skip` and never counts as a pass;
+the exit status depends only on failures. Its cases include a real inode swapped between `lstat()` and `open()`
+(V22-02), so `samestat`'s refusal is demonstrated rather than argued.
+
 After a REVIEWED change: `--update-manifest` (this directory), then regenerate A.0/A.7 from the document (D44).
 
 ## Files
@@ -71,7 +87,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
-| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose` |
+| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution (V22-01) |
 | `expected.json` | the file manifest (size + SHA-256) AND the recorded values, bounds and inventory derivations |
 | `README.md` | this file |
 
