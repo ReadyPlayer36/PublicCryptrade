@@ -1,4 +1,4 @@
-"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01; v2.5 V24-01).
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01; v2.5 V24-01; v2.6 V25-01).
 
   python -m tools.obs.probes.run_all --check             # CI gate: exit 0 pass / 1 mismatch / 2 integrity or environment
   python -m tools.obs.probes.run_all --self-test         # CI gate: the integrity REFUSALS, proven by negative cases
@@ -72,6 +72,20 @@ working directory — so an edit that drops a flag fails closed instead of silen
 proves it with a child whose working directory holds a hostile `sitecustomize.py`, `hashlib.py` and `ssl.py`: none of
 them runs, `hashlib` still resolves to the real standard library, and a child started without the flags is refused.
 
+THE BOOTSTRAP CHECKS THE INTERPRETER BEFORE IT IMPORTS ANYTHING (V25-01). v2.5 launched the child correctly, but the
+bootstrap's first line imported `builtins`, `hashlib`, `json`, `os`, `sys` and `types`, so `isolated()` ran AFTER the
+imports it exists to protect: with `-I` dropped, a working-directory `hashlib.py` executes during `import hashlib`,
+ahead of the first check. The prelude now imports `sys` alone — built in, never searched for on `sys.path` — refuses
+from `sys.stderr` with `SystemExit(86)` (no `os._exit()`, since `os` must not be imported in order to refuse), CALLS
+`isolated()` as its first executable statement, and only then imports `builtins`/`hashlib`/`json`/`os`/`types`.
+`isolated()` is import-free: it uses `sys.flags` and the form of each `sys.path` entry instead of `os.getcwd()`, and
+`cwd_free()` re-confirms the path claim after the imports as defence in depth. `--self-test` parses the bootstrap it is
+about to run and fails unless `isolated()` is executed before the first file-backed import with only `sys` ahead of it,
+and it launches the child twice with ONE FLAG REMOVED: `-S` without `-I` in a working directory whose `hashlib.py`
+records itself and raises, and `-I` without `-S` in a working directory holding `sitecustomize.py`. Both must exit 86
+with nothing planted ever executing, and a CONTROL shows the same `hashlib.py` plant DOES run once `-I` is removed, so
+the two refusals cannot pass vacuously.
+
 COUNTS ARE THREE DIFFERENT NUMBERS (V21-02). v2.1 printed "14 files pinned by expected.json", which is false:
 `expected.json` pins 13 files, the suite ships 14, and `expected.json` itself is pinned by §A.0 of the document. The run
 line and the report's `coverage` block name all three, so no reader has to infer which count a number is.
@@ -89,6 +103,7 @@ gate instead of being absorbed by a tolerance.
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import errno
 import hashlib
@@ -436,6 +451,14 @@ def self_test() -> int:
     shadow `hashlib.py` / `ssl.py` modules, and prove the interpreter is isolated and site-free before any child code
     runs: the hook never executes, the shadow modules never win, `hashlib` is still the real standard-library module,
     and a child launched WITHOUT `-I -S` is refused by the bootstrap rather than measured.
+
+    V25-01's cases (added in v2.6) check the ORDER v2.5 left implicit. The bootstrap text is PARSED and `isolated()` must
+    be executed before the first file-backed import, with `sys` the only module imported ahead of it — a comment cannot
+    satisfy that and a reordering cannot pass it. The launcher's `CHILD_FLAGS` must be exactly `('-I', '-S')` and
+    `child_command()` exactly `[sys.executable, '-I', '-S', '-c', BOOTSTRAP]`, so neither flag can be dropped silently.
+    Then each flag is removed ON ITS OWN in a hostile working directory: `-S` kept but `-I` gone (where a planted
+    `hashlib.py` would win) and `-I` kept but `-S` gone (where `site` runs again). Both partial launches must be REFUSED
+    with nothing planted executing, and a CONTROL runs the same plant with no isolation at all to show it is live.
     """
     counts = {"passed": 0, "failed": 0, "skipped": 0}
 
@@ -680,6 +703,42 @@ def self_test() -> int:
     else:
         sys.modules.pop("obs_selftest_common", None)
     if transport is not None:
+        # V25-01: the guard must come FIRST, and it must be in the SOURCE the child runs. Parsed, not pattern-matched:
+        # a reordering fails, and a comment mentioning the ordering cannot satisfy it.
+        try:
+            parsed = ast.parse(transport.BOOTSTRAP, "<bootstrap>")
+        except SyntaxError as exc:
+            report_case("the bootstrap validates the interpreter BEFORE importing hashlib/json/os/types (V25-01)",
+                        False, f"the bootstrap does not parse: {exc}")
+        else:
+            guard_at: int | None = None
+            first_backed: int | None = None
+            prelude: list[str] = []
+            for node in parsed.body:
+                if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) \
+                        and getattr(node.value.func, "id", None) == "isolated":
+                    guard_at = node.lineno
+                    continue
+                if isinstance(node, ast.Import):
+                    names = [alias.name.split(".")[0] for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    names = [(node.module or "").split(".")[0]]
+                else:
+                    continue
+                if guard_at is None:
+                    prelude.extend(names)
+                if first_backed is None and set(names) & {"builtins", "hashlib", "json", "os", "types"}:
+                    first_backed = node.lineno
+            ordered = guard_at is not None and first_backed is not None and guard_at < first_backed \
+                and set(prelude) <= {"sys"}
+            report_case("the bootstrap validates the interpreter BEFORE importing hashlib/json/os/types (V25-01)",
+                        ordered,
+                        f"isolated() at line {guard_at}, first file-backed import at line {first_backed}, "
+                        f"imported ahead of the guard: {sorted(set(prelude)) or ['none']}")
+        report_case("the child launcher carries BOTH -I and -S, in that order (V25-01)",
+                    tuple(transport.CHILD_FLAGS) == ("-I", "-S")
+                    and transport.child_command() == [sys.executable, "-I", "-S", "-c", transport.BOOTSTRAP],
+                    f"CHILD_FLAGS={tuple(transport.CHILD_FLAGS)!r}, command opens {transport.child_command()[:3]!r}")
         with tempfile.TemporaryDirectory() as tmp:
             frames = {"__init__.py": b"",
                       "probe_common.py": b"MARK = 'common'\n",
@@ -830,6 +889,48 @@ def self_test() -> int:
                             bare.returncode == transport.CHILD_REFUSED and bare.stdout == b""
                             and "not started isolated" in bare.stderr.decode(),
                             f"exit {bare.returncode}: {(bare_err[-1] if bare_err else 'no stderr')[:110]}")
+
+                # V25-01: each flag REMOVED ON ITS OWN, in the same hostile directory. Its `hashlib.py` records itself
+                # and raises, so "did the plant run" is a file on disk, not an opinion about the source.
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(marker)
+                # CONTROL: with `-I` gone, `PYTHONPATH` and the child's cwd are importable again, so a plain
+                # `import hashlib` DOES execute the plant. Without this, "nothing ran" below would prove nothing.
+                subprocess.run([sys.executable, "-S", "-c", "import hashlib"], cwd=hostile,
+                               env={**os.environ, "PYTHONPATH": hostile}, capture_output=True, timeout=120)
+                shadow_ran = startup_ran()
+                report_case("control: the planted hashlib.py DOES execute once -I is removed (V25-01)",
+                            "hashlib" in shadow_ran,
+                            f"plants that ran without -I: {shadow_ran!r}")
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(marker)
+
+                # (a) `-I` removed, `-S` kept: nothing protects the import path, so the guard has to refuse BEFORE
+                # `import hashlib` is reached. The plant must never execute and no payload byte may be read.
+                no_isolation = subprocess.run([sys.executable, "-S", "-c", transport.BOOTSTRAP],
+                                              input=transport.payload(probe_frames),
+                                              env={**startup_env, "PYTHONPATH": hostile}, cwd=hostile,
+                                              capture_output=True, timeout=120)
+                no_isolation_err = no_isolation.stderr.decode().strip().splitlines()
+                ran_without_i = startup_ran()
+                report_case("-I removed, -S kept: the child FAILS CLOSED and no shadow hashlib.py runs (V25-01)",
+                            no_isolation.returncode == transport.CHILD_REFUSED and no_isolation.stdout == b""
+                            and ran_without_i == "",
+                            f"exit {no_isolation.returncode}, plants that ran {ran_without_i!r}: "
+                            f"{(no_isolation_err[-1] if no_isolation_err else 'no stderr')[:110]}")
+
+                # (b) `-S` removed, `-I` kept: `site` runs again at startup, so the interpreter is not site-free even
+                # though its path is clean. The child is REJECTED; `-I` still keeps the cwd hook out of reach.
+                no_site_flag = subprocess.run([sys.executable, "-I", "-c", transport.BOOTSTRAP],
+                                              input=transport.payload(probe_frames), env=dict(startup_env),
+                                              cwd=hostile, capture_output=True, timeout=120)
+                no_site_err = no_site_flag.stderr.decode().strip().splitlines()
+                ran_without_s = startup_ran()
+                report_case("-S removed, -I kept: the child is REJECTED and no cwd hook executes (V25-01)",
+                            no_site_flag.returncode == transport.CHILD_REFUSED and no_site_flag.stdout == b""
+                            and ran_without_s == "",
+                            f"exit {no_site_flag.returncode}, plants that ran {ran_without_s!r}: "
+                            f"{(no_site_err[-1] if no_site_err else 'no stderr')[:110]}")
 
     with tempfile.TemporaryDirectory() as tmp:
         tree(tmp)
