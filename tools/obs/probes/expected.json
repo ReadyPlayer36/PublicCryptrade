@@ -3,7 +3,7 @@
     "openssl": "3.0.13",
     "platform": "Linux x86-64",
     "python": "3.12.3",
-    "updated": "v2.2"
+    "updated": "v2.4"
   },
   "inventory": {
     "items": [
@@ -60,9 +60,9 @@
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 13175,
+        "bytes": 15678,
         "path": "tools/obs/probes/README.md",
-        "sha256": "bd6edc09db03adc6ae03184dfe40f4b5b644f4f57671e89e48e8c99c68925ddd"
+        "sha256": "785395218537a17c89d79f3c3b93e2ef65715569379fe83c1d3abea0849086b6"
       },
       {
         "bytes": 0,
@@ -100,9 +100,9 @@
         "sha256": "61278c289c1ab2cb10ed7305e3e572e63debed8f1a9b6997a2a440b5c0572a47"
       },
       {
-        "bytes": 21295,
+        "bytes": 22236,
         "path": "tools/obs/probes/probe6_native.py",
-        "sha256": "0c052217fccbdc86a602692c0bbc42f09e8db17a1060b72738e10bcce1ccb752"
+        "sha256": "6f630fc3646f06794dcd98513d0dd3cfe20ebb89c59334b62089a5738936dbb4"
       },
       {
         "bytes": 780,
@@ -110,19 +110,19 @@
         "sha256": "d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4"
       },
       {
-        "bytes": 17934,
+        "bytes": 19110,
         "path": "tools/obs/probes/probe8_mmap_threads.py",
-        "sha256": "ffb160e5b6559e5cc6e644b7383f75df6dd5f85bc4786e3fea58fa0a58b13081"
+        "sha256": "f802508e3bcbb97d4973edc712a9c86fd124cf2cade195d4a4dbdaa5f973c601"
       },
       {
-        "bytes": 4044,
+        "bytes": 21483,
         "path": "tools/obs/probes/probe_common.py",
-        "sha256": "c1662be01889bddbdba6426e566cd3da9b2bb7e50a955000c35670b9f7e5cca4"
+        "sha256": "d07fb9bc8c2ec674d8a98fddc18d0ca0989811b254fa7bf539c9e57898dfe775"
       },
       {
-        "bytes": 52242,
+        "bytes": 60669,
         "path": "tools/obs/probes/run_all.py",
-        "sha256": "6739c8339d51de771187b523d6f387414e5d3be6fc7956a7f74b71005cbad2cd"
+        "sha256": "e66a6861323d3f1066a0d8233622e7353e8e6f50ae7afb962203a321bfde2043"
       }
     ]
   },
@@ -193,7 +193,7 @@
       "bound": 262144,
       "end_delta": 52192,
       "instrument": "mallinfo2 sample max (LOWER BOUND); the gate uses the interposed client-only region",
-      "interposed": 214120,
+      "interposed": 217072,
       "interposed_map_peak": 0,
       "peak": 105072,
       "probe": "native_headroom",
@@ -210,7 +210,7 @@
     {
       "bound": 12582912,
       "instrument": "alloc_peak.so malloc channel, one child: 4 MiB, a failed realloc(p, SIZE_MAX), a second 4 MiB (A.5.4, V20-11/V20-12)",
-      "peak": 8398608,
+      "peak": 8398528,
       "probe": "realloc_accounting",
       "tolerance": 0.02
     }
