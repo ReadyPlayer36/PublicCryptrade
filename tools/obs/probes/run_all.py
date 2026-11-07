@@ -1,4 +1,4 @@
-"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03).
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01).
 
   python -m tools.obs.probes.run_all --check             # CI gate: exit 0 pass / 1 mismatch / 2 integrity or environment
   python -m tools.obs.probes.run_all --self-test         # CI gate: the integrity REFUSALS, proven by negative cases
@@ -31,16 +31,31 @@ that passes cannot execute a byte that was not hashed, and no `.pyc` is consulte
 interposed child (`--interpose`, one phase under `alloc_peak.so`) verifies and binds the tree by the same route before it
 measures.
 
-WHAT THAT BINDING DOES NOT COVER, STATED RATHER THAN IMPLIED (V22-01). Two paths stay outside it, and neither is hidden.
-First, the DRIVER ITSELF: `python -m tools.obs.probes.run_all` is imported by the interpreter before any of this code can
-run, so `run_all.py` is the trust root and cannot verify itself; A.0 pins it, and `--manifest` prints the digest a
-reviewer compares. Second, the three CHILD interpreters that probe6 and probe8 start (`-m tools.obs.probes.probe6_native`
-for the stage and `--realloc` children, `-m tools.obs.probes.probe8_mmap_threads --child` for the mmap child) are
-launched with `-m` on the tree the parent has just verified, not from the retained buffers. That is deliberate: the shim
-counts a process from exec, so a child's Python startup is part of the native peak it reports, and rebinding it through a
-bootstrap would move the recorded numbers (A.5.4/A.5.8) — the parent's check runs immediately before the spawn, the child
-reports its own failure, and the values it returns are gated. A child of a `-m` import also leaves a `__pycache__` entry,
-which the inventory ignores by design (G-V18-02 d).
+WHAT THAT BINDING DOES NOT COVER, STATED RATHER THAN IMPLIED (V22-01, revised by V23-01). One path stays outside it and
+is not hidden: the DRIVER ITSELF. `python -m tools.obs.probes.run_all` is imported by the interpreter before any of this
+code can run, so `run_all.py` is the trust root and cannot verify the import that created it; A.0 pins it, `--manifest`
+prints the digest a reviewer compares, and every measurement is produced by a module that WAS checked. v2.3 also left
+the CHILD interpreters outside (they were launched with `-m` on the checked tree but executed from disk); v2.4 closes
+that, and the next paragraph says how.
+
+A CHILD IS STARTED FROM THE SAME BYTES (V23-01). v2.3 spawned probe6's server, stage and realloc children and probe8's
+mmap child with `python -m tools.obs.probes.<probe>`, so the child's interpreter opened the module FILE — after the
+parent's manifest check, in a process that never read the manifest. A tree substituted in that window ran unverified
+code inside a gated measurement. Every child is now started from the parent's retained buffers, through
+`probe_common.spawn_suite_child` / `run_suite_child` / `run_program` (which live in probe_common.py, itself a pinned
+file): the source travels over a pipe, one frame per module with the SHA-256 `expected.json` PROMISES for that file,
+and the child recomputes it and refuses to execute anything that does not match. The child's bootstrap is bound the
+same way — the parent passes the digest of the bootstrap text and the child hashes the `-c` argument it was actually
+started with (`sys.orig_argv`) — and the child's `tools.obs.probes` package is CLOSED (`__path__ = []`), so a module the
+parent did not send cannot be imported from disk there. Dependencies are not assumed: the closure is read with `ast`
+from the verified sources, so `probe_common` (and anything else a probe imports) is in the payload ahead of the probe.
+WHAT IS PRESERVED, because it decides the numbers: the child is still a fresh interpreter, and the shim still counts it
+from exec, so Python startup remains inside the native peak exactly as in v2.3 and earlier; the same `cwd`, the same
+`sys.argv[0]` (`-m` gives the module path, and the parent passes that path), the same resets inside the measured
+regions, and the module is still executed as `__main__`. probe8's inline capacity program, previously a `-c` argument
+with no binding, travels the same pipe. Every gate (`--check`, `--record`, `--interpose`) starts its children this way,
+so there is no mode left that falls back to `-m`; a probe executed on its own has no registered suite and refuses to
+start an unverified child instead of doing it silently (see probes/README.md).
 
 COUNTS ARE THREE DIFFERENT NUMBERS (V21-02). v2.1 printed "14 files pinned by expected.json", which is false:
 `expected.json` pins 13 files, the suite ships 14, and `expected.json` itself is pinned by §A.0 of the document. The run
@@ -396,6 +411,11 @@ def self_test() -> int:
     described in prose. The first case is a CONTROL: the same harness must ACCEPT an honest tree, or "everything is
     refused" would pass this file. A case this host cannot run is printed as `skip` and counted as skipped, never as
     passed (V22-03): the summary says how many of each, and only failures affect the exit status.
+
+    V23-01's cases (added in v2.4) start REAL children through the transport that probe_common.py ships — executed here
+    from its verified bytes, exactly as the driver executes it — and prove the three properties a `-m` spawn never had:
+    a frame that does not match the promised digest is refused instead of executed, a child runs the bytes it was sent
+    even when the path it was told about now holds different source, and the child's bootstrap cannot be swapped.
     """
     counts = {"passed": 0, "failed": 0, "skipped": 0}
 
@@ -628,6 +648,81 @@ def self_test() -> int:
         needle = b"import" + b"_module("
         report_case("the driver contains no path-based import of a suite module (V22-01)", needle not in text,
                     "no path-based import found" if needle not in text else "a path-based import is still present")
+    # V23-01: the child transport, executed from probe_common.py's own bytes (the code that will run in the child, not a
+    # copy written for the test). The cases below start REAL child processes; each is a negative or a positive control.
+    transport = None
+    common_path = os.path.join(HERE, "probe_common.py")
+    try:
+        common_data, _, _ = read_regular(common_path, "probe_common.py")
+        transport = _execute_module("obs_selftest_common", common_path, common_data)
+    except (SuiteIntegrityError, SyntaxError) as exc:
+        report_case("the child transport loads from probe_common.py's verified bytes (V23-01)", False, str(exc))
+    else:
+        sys.modules.pop("obs_selftest_common", None)
+    if transport is not None:
+        with tempfile.TemporaryDirectory() as tmp:
+            frames = {"__init__.py": b"",
+                      "probe_common.py": b"MARK = 'common'\n",
+                      "probe9_child.py": b"print('VERIFIED-RUN', flush=True)\n"}
+            origins = {name: os.path.join(tmp, name) for name in frames}
+            digests = {name: hashlib.sha256(chunk).hexdigest() for name, chunk in frames.items()}
+            control = transport.run_child(frames, digests, origins, "probe9_child", [])
+            control_out = control.stdout.decode()
+            report_case("control: a child runs the module the parent sent (V23-01)",
+                        control.returncode == 0 and "VERIFIED-RUN" in control_out,
+                        f"exit {control.returncode}, stdout {control_out.strip()[:60]!r}")
+
+            substituted = dict(frames)
+            substituted["probe9_child.py"] = b"print('SUBSTITUTED', flush=True)\n"
+            refused = transport.run_child(substituted, digests, origins, "probe9_child", [])
+            refused_out = refused.stdout.decode()
+            refused_err = refused.stderr.decode().strip().splitlines()
+            report_case("a child REFUSES a frame that does not match its manifest digest (V23-01)",
+                        refused.returncode == transport.CHILD_REFUSED and "SUBSTITUTED" not in refused_out,
+                        f"exit {refused.returncode}: {(refused_err[-1] if refused_err else 'no stderr')[:110]}")
+
+            with open(origins["probe9_child.py"], "wb") as handle:     # the substitution a `-m` spawn would have run
+                handle.write(b"print('FROM-DISK', flush=True)\n")
+            on_disk = transport.run_child(frames, digests, origins, "probe9_child", [])
+            disk_out = on_disk.stdout.decode()
+            report_case("a child executes the VERIFIED bytes, never the file that replaced them (V23-01)",
+                        on_disk.returncode == 0 and "VERIFIED-RUN" in disk_out and "FROM-DISK" not in disk_out,
+                        f"stdout {disk_out.strip()[:40]!r} while the path held 'FROM-DISK'")
+
+            environment = transport.child_env(digests, origins, "probe9_child", "module", [])
+            altered = transport.BOOTSTRAP.replace("obs-child: REFUSED:", "obs-child: WELCOMED:")
+            swapped = subprocess.run([sys.executable, "-c", altered], input=transport.payload(frames),
+                                     env=environment, capture_output=True, timeout=120)
+            swapped_err = swapped.stderr.decode().strip().splitlines()
+            report_case("a child started with a DIFFERENT bootstrap refuses to run at all (V23-01)",
+                        swapped.returncode == transport.CHILD_REFUSED and swapped.stdout == b"",
+                        f"exit {swapped.returncode}: {(swapped_err[-1] if swapped_err else 'no stderr')[:110]}")
+
+            whole = transport.payload(frames)
+            cut = subprocess.run([sys.executable, "-c", transport.BOOTSTRAP], input=whole[: len(whole) // 2],
+                                 env=environment, capture_output=True, timeout=120)
+            cut_err = cut.stderr.decode().strip().splitlines()
+            report_case("a TRUNCATED payload is refused, never half-executed (V23-01)",
+                        cut.returncode == transport.CHILD_REFUSED and cut.stdout == b"",
+                        f"exit {cut.returncode}: {(cut_err[-1] if cut_err else 'no stderr')[:110]}")
+
+            # `tools/obs/probes/probe7_structure.py` exists on disk and is importable from this cwd; in the child the
+            # package is closed, so an unverified sibling must be unreachable even though the file is right there.
+            probe = (b"try:\n"
+                     b"    import tools.obs.probes.probe7_structure as sibling\n"
+                     b"except ModuleNotFoundError as exc:\n"
+                     b"    print('CLOSED', exc, flush=True)\n"
+                     b"else:\n"
+                     b"    print('OPEN', sibling.__file__, flush=True)\n")
+            closed = dict(frames)
+            closed["probe9_child.py"] = probe
+            closed_digests = {name: hashlib.sha256(chunk).hexdigest() for name, chunk in closed.items()}
+            leaked = transport.run_child(closed, closed_digests, origins, "probe9_child", [])
+            leaked_out = leaked.stdout.decode()
+            report_case("a child's suite package is CLOSED: an unverified sibling cannot be imported (V23-01)",
+                        leaked.returncode == 0 and "CLOSED" in leaked_out and "OPEN" not in leaked_out,
+                        leaked_out.strip()[:100] or "no output")
+
     with tempfile.TemporaryDirectory() as tmp:
         tree(tmp)
         path = os.path.join(tmp, "run_all.py")
@@ -653,14 +748,18 @@ def collect(modules: dict[str, types.ModuleType]) -> list[dict]:
     return results
 
 
-def interposed(measurement: str) -> dict[str, int] | None:
-    """Re-run one phase in a child with alloc_peak.so preloaded; None when the shim cannot be used."""
+def interposed(measurement: str, common: types.ModuleType) -> dict[str, int] | None:
+    """Re-run one phase in a child with alloc_peak.so preloaded; None when the shim cannot be used.
+
+    V23-01: the child is THIS driver, executed from the `run_all.py` buffer the manifest check accepted, and it verifies
+    the tree itself before it measures anything (`--interpose` runs the same `check_manifest`). The old `-m` spawn left
+    that child's own source unverified by its parent; the child still re-checks the tree, so this is defence in depth
+    rather than a replacement for the check.
+    """
     module = BY_MEASUREMENT.get(measurement)
     if module is None or not os.path.exists(SHIM):
         return None
-    done = subprocess.run([sys.executable, "-m", "tools.obs.probes.run_all", "--interpose", module],
-                          env=dict(os.environ, LD_PRELOAD=SHIM, PYTHONPATH=ROOT),
-                          capture_output=True, timeout=300, cwd=ROOT)
+    done = common.run_suite_child("run_all", ["--interpose", module], env={"LD_PRELOAD": SHIM}, timeout=300, cwd=ROOT)
     if done.returncode != 0:
         return None
     data = json.loads(done.stdout.decode() or "{}")
@@ -865,6 +964,14 @@ def main(argv: list[str]) -> int:
     except SyntaxError as exc:
         print(f"refused: {exc.filename}:{exc.lineno}: {exc.msg} (V22-01)", file=sys.stderr)
         return 2
+    # V23-01: hand the suite to probe_common, so every child is fed THESE buffers and the MANIFEST's digests. The rows
+    # were validated by check_manifest above, and the buffers are the ones it accepted, so the two cannot disagree
+    # without one of the two checks having failed first.
+    manifest_sha = {row["path"]: row["sha256"] for row in expected["manifest"]["files"]}
+    modules["probe_common"].register_sources(
+        sources,
+        {name: manifest_sha[CANONICAL_PREFIX + name] for name in sources},
+        {name: os.path.join(HERE, name) for name in sources})     # the path `-m` used to execute from
     if mode == "--interpose":
         name = argv[2] if len(argv) > 2 else ""
         module = modules.get(name)
@@ -882,7 +989,8 @@ def main(argv: list[str]) -> int:
                           "measurements": collect(modules)}, indent=2))
         return 0
     measured = collect(modules)
-    failures = compare(expected, measured, interposed, modules["probe_common"])
+    failures = compare(expected, measured, lambda name: interposed(name, modules["probe_common"]),
+                       modules["probe_common"])
     try:
         block = manifest(include_self=True)
     except SuiteIntegrityError as exc:
