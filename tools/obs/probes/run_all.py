@@ -1,4 +1,4 @@
-"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01).
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01; v2.5 V24-01).
 
   python -m tools.obs.probes.run_all --check             # CI gate: exit 0 pass / 1 mismatch / 2 integrity or environment
   python -m tools.obs.probes.run_all --self-test         # CI gate: the integrity REFUSALS, proven by negative cases
@@ -35,8 +35,9 @@ WHAT THAT BINDING DOES NOT COVER, STATED RATHER THAN IMPLIED (V22-01, revised by
 is not hidden: the DRIVER ITSELF. `python -m tools.obs.probes.run_all` is imported by the interpreter before any of this
 code can run, so `run_all.py` is the trust root and cannot verify the import that created it; A.0 pins it, `--manifest`
 prints the digest a reviewer compares, and every measurement is produced by a module that WAS checked. v2.3 also left
-the CHILD interpreters outside (they were launched with `-m` on the checked tree but executed from disk); v2.4 closes
-that, and the next paragraph says how.
+the CHILD interpreters outside (they were launched with `-m` on the checked tree but executed from disk); v2.4 closed the
+child's PAYLOAD and v2.5 its interpreter STARTUP, and the two paragraphs that follow say how. Nothing else is outside:
+no import, no child and no startup hook contributes a byte to a measurement.
 
 A CHILD IS STARTED FROM THE SAME BYTES (V23-01). v2.3 spawned probe6's server, stage and realloc children and probe8's
 mmap child with `python -m tools.obs.probes.<probe>`, so the child's interpreter opened the module FILE — after the
@@ -56,6 +57,20 @@ regions, and the module is still executed as `__main__`. probe8's inline capacit
 with no binding, travels the same pipe. Every gate (`--check`, `--record`, `--interpose`) starts its children this way,
 so there is no mode left that falls back to `-m`; a probe executed on its own has no registered suite and refuses to
 start an unverified child instead of doing it silently (see probes/README.md).
+
+THE CHILD'S INTERPRETER STARTUP IS ISOLATED TOO (V24-01). v2.4 bound the payload but launched the child as
+`python -c <bootstrap>`: with no `-I` and no `-S`, interpreter STARTUP was outside every check — `site` imports the
+working directory's `sitecustomize`, `PYTHONPATH` entries are searched, and for `-c` the working directory is
+`sys.path[0]`, so a planted `sitecustomize.py` or a shadowing `hashlib.py` (the module the payload verification itself
+calls) could run BEFORE the bootstrap's first line. Every child is now `python -I -S -c <bootstrap>`: `-I` removes the
+`PYTHON*` environment, the user site directory and the working directory from `sys.path`, and `-S` skips `site`
+entirely, so neither `sitecustomize` nor `usercustomize` is imported and no working-directory module can resolve ahead
+of the standard library. The bootstrap enforces the same thing from inside rather than trusting its launcher:
+`isolated()` runs before it reads the parent's request and refuses (exit 86) unless `sys.flags.isolated`, `no_site`,
+`ignore_environment` and `no_user_site` are all set, no startup hook is in `sys.modules` and no `sys.path` entry is the
+working directory — so an edit that drops a flag fails closed instead of silently re-opening the hole. `--self-test`
+proves it with a child whose working directory holds a hostile `sitecustomize.py`, `hashlib.py` and `ssl.py`: none of
+them runs, `hashlib` still resolves to the real standard library, and a child started without the flags is refused.
 
 COUNTS ARE THREE DIFFERENT NUMBERS (V21-02). v2.1 printed "14 files pinned by expected.json", which is false:
 `expected.json` pins 13 files, the suite ships 14, and `expected.json` itself is pinned by §A.0 of the document. The run
@@ -416,6 +431,11 @@ def self_test() -> int:
     from its verified bytes, exactly as the driver executes it — and prove the three properties a `-m` spawn never had:
     a frame that does not match the promised digest is refused instead of executed, a child runs the bytes it was sent
     even when the path it was told about now holds different source, and the child's bootstrap cannot be swapped.
+
+    V24-01's cases (added in v2.5) start a child in a working directory that holds a hostile `sitecustomize.py` and
+    shadow `hashlib.py` / `ssl.py` modules, and prove the interpreter is isolated and site-free before any child code
+    runs: the hook never executes, the shadow modules never win, `hashlib` is still the real standard-library module,
+    and a child launched WITHOUT `-I -S` is refused by the bootstrap rather than measured.
     """
     counts = {"passed": 0, "failed": 0, "skipped": 0}
 
@@ -691,16 +711,16 @@ def self_test() -> int:
 
             environment = transport.child_env(digests, origins, "probe9_child", "module", [])
             altered = transport.BOOTSTRAP.replace("obs-child: REFUSED:", "obs-child: WELCOMED:")
-            swapped = subprocess.run([sys.executable, "-c", altered], input=transport.payload(frames),
-                                     env=environment, capture_output=True, timeout=120)
+            swapped = subprocess.run([sys.executable, *transport.CHILD_FLAGS, "-c", altered],
+                                     input=transport.payload(frames), env=environment, capture_output=True, timeout=120)
             swapped_err = swapped.stderr.decode().strip().splitlines()
             report_case("a child started with a DIFFERENT bootstrap refuses to run at all (V23-01)",
                         swapped.returncode == transport.CHILD_REFUSED and swapped.stdout == b"",
                         f"exit {swapped.returncode}: {(swapped_err[-1] if swapped_err else 'no stderr')[:110]}")
 
             whole = transport.payload(frames)
-            cut = subprocess.run([sys.executable, "-c", transport.BOOTSTRAP], input=whole[: len(whole) // 2],
-                                 env=environment, capture_output=True, timeout=120)
+            cut = subprocess.run([sys.executable, *transport.CHILD_FLAGS, "-c", transport.BOOTSTRAP],
+                                 input=whole[: len(whole) // 2], env=environment, capture_output=True, timeout=120)
             cut_err = cut.stderr.decode().strip().splitlines()
             report_case("a TRUNCATED payload is refused, never half-executed (V23-01)",
                         cut.returncode == transport.CHILD_REFUSED and cut.stdout == b"",
@@ -722,6 +742,94 @@ def self_test() -> int:
             report_case("a child's suite package is CLOSED: an unverified sibling cannot be imported (V23-01)",
                         leaked.returncode == 0 and "CLOSED" in leaked_out and "OPEN" not in leaked_out,
                         leaked_out.strip()[:100] or "no output")
+
+            # V24-01: the child's INTERPRETER STARTUP is isolated too. This working directory plants the three things a
+            # plain `python -c` resolved before the bootstrap's first line: a `sitecustomize` hook, and shadow modules
+            # for `hashlib` (which payload verification itself calls) and `ssl`.
+            with tempfile.TemporaryDirectory() as hostile:
+                marker = os.path.join(hostile, "startup-ran.txt")
+                with open(os.path.join(hostile, "sitecustomize.py"), "w", encoding="utf-8") as handle:
+                    handle.write(f"open({marker!r}, 'a').write('sitecustomize\\n')\n")
+                for shadow in ("hashlib", "ssl"):
+                    with open(os.path.join(hostile, shadow + ".py"), "w", encoding="utf-8") as handle:
+                        handle.write(f"open({marker!r}, 'a').write({shadow!r} + '\\n')\n"
+                                     f"raise ImportError('the {shadow} shadow module executed')\n")
+
+                def startup_ran() -> str:
+                    try:
+                        with open(marker, "r", encoding="utf-8") as handle:
+                            return handle.read().strip()
+                    except FileNotFoundError:
+                        return ""
+
+                # CONTROL: with the flags removed the SAME plant runs, so the isolated cases below are not vacuous.
+                # `PYTHONPATH` is what `-I`/`-E` ignore, and `site` imports `sitecustomize` from it.
+                subprocess.run([sys.executable, "-c", "pass"], cwd=hostile,
+                               env={**os.environ, "PYTHONPATH": hostile}, capture_output=True, timeout=120)
+                control_ran = startup_ran()
+                report_case("control: the planted startup hook DOES run when the interpreter is not isolated (V24-01)",
+                            "sitecustomize" in control_ran,
+                            f"hooks that ran without -I -S: {control_ran!r}")
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(marker)
+
+                probe_source = (
+                    "import hashlib, json, os, ssl, sys\n"
+                    "print('CHILD ' + json.dumps({\n"
+                    "    'isolated': bool(sys.flags.isolated),\n"
+                    "    'no_site': bool(sys.flags.no_site),\n"
+                    "    'ignore_environment': bool(sys.flags.ignore_environment),\n"
+                    "    'no_user_site': bool(sys.flags.no_user_site),\n"
+                    "    'hooks': [n for n in ('site', 'sitecustomize', 'usercustomize') if n in sys.modules],\n"
+                    "    'cwd_on_path': [e for e in sys.path\n"
+                    "                   if e in ('', '.') or (e and os.path.abspath(e) == os.getcwd())],\n"
+                    "    'hashlib': hashlib.__file__,\n"
+                    "    'ssl': ssl.__file__,\n"
+                    "    'digest': hashlib.sha256(b'x').hexdigest()[:16],\n"
+                    "}), flush=True)\n")
+                probe_bytes = probe_source.encode("utf-8")
+                probe_frames = {"__program__": probe_bytes}
+                probe_digests = {"__program__": hashlib.sha256(probe_bytes).hexdigest()}
+                # `PYTHONPATH` points at the hostile directory on purpose: -I must ignore it.
+                startup_env = transport.child_env(probe_digests, {"__program__": "<obs-child-program>"},
+                                                  "__program__", "program", [])
+                startup_env["PYTHONPATH"] = hostile
+                startup = subprocess.run([sys.executable, *transport.CHILD_FLAGS, "-c", transport.BOOTSTRAP],
+                                         input=transport.payload(probe_frames), env=startup_env, cwd=hostile,
+                                         capture_output=True, timeout=120)
+                report: dict = {}
+                for line in startup.stdout.decode().splitlines():
+                    if line.startswith("CHILD "):
+                        report = json.loads(line[len("CHILD "):])
+                ran = startup_ran()
+                report_case(
+                    "a child's interpreter is ISOLATED and site-free (V24-01)",
+                    startup.returncode == 0 and report.get("isolated") is True and report.get("no_site") is True
+                    and report.get("ignore_environment") is True and report.get("no_user_site") is True
+                    and report.get("hooks") == [] and report.get("cwd_on_path") == [],
+                    f"exit {startup.returncode}, {report or 'no child report'}")
+                report_case("a hostile sitecustomize.py in the child's cwd never executes (V24-01)",
+                            startup.returncode == 0 and ran == "",
+                            f"startup hooks that ran: {ran!r}" if ran else "no startup hook ran")
+                report_case(
+                    "a cwd hashlib.py / ssl.py cannot shadow the standard library in the child (V24-01)",
+                    startup.returncode == 0 and report.get("hashlib") == hashlib.__file__
+                    and not (report.get("hashlib") or "").startswith(hostile)
+                    and not (report.get("ssl") or "").startswith(hostile)
+                    and report.get("digest") == hashlib.sha256(b"x").hexdigest()[:16]
+                    and ran == "",
+                    f"hashlib {report.get('hashlib')!r}, ssl {report.get('ssl')!r}, "
+                    f"digest {report.get('digest')!r}, hooks ran {ran!r}")
+                bare = subprocess.run([sys.executable, "-c", transport.BOOTSTRAP],
+                                      input=transport.payload(probe_frames),
+                                      env=transport.child_env(probe_digests, {"__program__": "<obs-child-program>"},
+                                                              "__program__", "program", []),
+                                      cwd=ROOT, capture_output=True, timeout=120)
+                bare_err = bare.stderr.decode().strip().splitlines()
+                report_case("a child started WITHOUT -I -S is refused, never measured (V24-01)",
+                            bare.returncode == transport.CHILD_REFUSED and bare.stdout == b""
+                            and "not started isolated" in bare.stderr.decode(),
+                            f"exit {bare.returncode}: {(bare_err[-1] if bare_err else 'no stderr')[:110]}")
 
     with tempfile.TemporaryDirectory() as tmp:
         tree(tmp)
@@ -754,7 +862,8 @@ def interposed(measurement: str, common: types.ModuleType) -> dict[str, int] | N
     V23-01: the child is THIS driver, executed from the `run_all.py` buffer the manifest check accepted, and it verifies
     the tree itself before it measures anything (`--interpose` runs the same `check_manifest`). The old `-m` spawn left
     that child's own source unverified by its parent; the child still re-checks the tree, so this is defence in depth
-    rather than a replacement for the check.
+    rather than a replacement for the check. V24-01: it is started `-I -S`, so its interpreter startup is isolated and
+    site-free like every other child's, and the measurement window begins at exec as before.
     """
     module = BY_MEASUREMENT.get(measurement)
     if module is None or not os.path.exists(SHIM):
