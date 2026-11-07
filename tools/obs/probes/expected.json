@@ -1,10 +1,10 @@
 {
   "env": {
-    "isolation": "every child runs python -I -S -c <bootstrap> and refuses (exit 86) unless sys.flags.isolated/no_site/ignore_environment/no_user_site/safe_path are set, no site/sitecustomize/usercustomize is imported and sys.path holds no working-directory or relative entry; the bootstrap imports ONLY sys (a built-in) and calls isolated() BEFORE builtins/hashlib/json/os/types, so no file-backed module can run ahead of the guard (V24-01, V25-01)",
+    "isolation": "every child runs python -I -S -c <bootstrap> and refuses (exit 86) unless sys.flags.isolated/no_site/ignore_environment/no_user_site/safe_path are set, no site/sitecustomize/usercustomize is imported and sys.path holds no working-directory or relative entry; the bootstrap imports ONLY sys (a built-in) and calls isolated() BEFORE builtins/hashlib/json/os/types, so no file-backed module can run ahead of the guard (V24-01, V25-01); -I and -S are STATIC launcher invariants, because CPython runs site during interpreter startup before any -c code is compiled, a missing -S can only be detected and refused after the fact (never prevented by the child), so the boundary is the immutable CHILD_FLAGS tuple, the child_command() derived from it alone, and the CI mutation step that fails the build if either flag, the launcher's return value or the isolated() call is tampered with (V26-01)",
     "openssl": "3.0.13",
     "platform": "Linux x86-64",
     "python": "3.12.3",
-    "updated": "v2.6"
+    "updated": "v2.7"
   },
   "inventory": {
     "items": [
@@ -61,9 +61,9 @@
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 19170,
+        "bytes": 20862,
         "path": "tools/obs/probes/README.md",
-        "sha256": "f3d3f6f546eb3d46df3ce775e6d587c9c1255e824ec0a786df085fcd8bcdb513"
+        "sha256": "1e73a76636ce7637af502eb2a6793fa22e36affe70e3ea559deab12fe21ee28e"
       },
       {
         "bytes": 0,
@@ -116,14 +116,14 @@
         "sha256": "f802508e3bcbb97d4973edc712a9c86fd124cf2cade195d4a4dbdaa5f973c601"
       },
       {
-        "bytes": 28147,
+        "bytes": 29909,
         "path": "tools/obs/probes/probe_common.py",
-        "sha256": "67fe2b48714ff1ae58f742bb5c2b544e2fbfe90e327bbd3b9622979792ae0ee2"
+        "sha256": "9c46127004c5ff36a8721241805f8826224a1661048805068c407ded3d718dbd"
       },
       {
-        "bytes": 77478,
+        "bytes": 83535,
         "path": "tools/obs/probes/run_all.py",
-        "sha256": "e2166004f5b5132ce514b85a65a5500389e7f3207bba538bfbe57da3ae94c77f"
+        "sha256": "03a109579dc4d16a0f0076b54ac985f46ff07121674a43a4b0a371876911cca2"
       }
     ]
   },
