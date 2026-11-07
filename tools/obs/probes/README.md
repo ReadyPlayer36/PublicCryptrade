@@ -62,10 +62,10 @@ code a reviewer verified. Nothing the driver executes is re-read from disk and n
 that fails the check contributes no executable source at all, and the interposed child (`--interpose`) verifies and
 binds the same tree by the same route before it measures. One path is deliberately outside this binding and is named
 instead of implied: `run_all.py` itself, which the interpreter imports before any check can run (A.0 pins it;
-`--manifest` prints its digest). The CHILDREN are inside it as of v2.4, their interpreter STARTUP as of v2.5 and their bootstrap's ORDERING as of
-v2.6 — see the next section.
+`--manifest` prints its digest). The CHILDREN are inside it as of v2.4, their interpreter STARTUP as of v2.5, their bootstrap's ORDERING as of
+v2.6 and their flag invariant as STATIC as of v2.7 — see the next section.
 
-## A child starts from the same bytes, in an isolated interpreter (V23-01, V24-01, V25-01)
+## A child starts from the same bytes, in an isolated interpreter (V23-01, V24-01, V25-01, V26-01)
 
 Under v2.3 the measured children (probe6's server, stage and `--realloc` children, probe8's mmap child) were started
 with `python -m tools.obs.probes.<probe>`: the parent had verified the bytes, but the CHILD opened the file, in a
@@ -112,21 +112,35 @@ not be imported in order to refuse), calls `isolated()` as its first executable 
 `sys.flags.safe_path` and the FORM of each `sys.path` entry instead of `os.getcwd()` — and a post-import
 `cwd_free()` re-confirms the path claim as defence in depth, able to add a refusal but never to replace one.
 `--self-test` PARSES the bootstrap and requires `isolated()` to be executed before the first file-backed import with
-only `sys` ahead of it, then removes each flag on its own: `-S` without `-I` in a directory whose `hashlib.py`
-records itself and raises, and `-I` without `-S` in a directory holding `sitecustomize.py`. Both exit 86 with
-nothing planted ever executing, next to a CONTROL that the `hashlib.py` plant DOES run once `-I` is removed.
+only `sys` ahead of it, then removes `-I` in a directory whose `hashlib.py` records itself and raises: exit 86 with
+nothing planted ever executing, next to a CONTROL that the same plant DOES run once `-I` is removed.
 
-`--self-test` counts outcomes separately (V22-03): `33 passed, 0 failed, 1 skipped (34 cases)` rather than folding
-skips into passes (`34 passed` where the device-node case can run). A case this host cannot run (no `CAP_MKNOD`, no
+The flags are a STATIC launcher invariant, not a runtime check (V26-01). v2.6 also removed `-S` in a working directory
+holding `sitecustomize.py` and reported that no hook ran — which proved less than it looked: `-I` keeps the working
+directory off `sys.path` even without `-S`, so that child could never have imported the planted hook, and the case
+exercised `-I` rather than the absence of `site`. The assertion was also impossible in principle. CPython runs `site`
+during interpreter STARTUP, before a byte of the `-c` bootstrap is compiled, so if a SYSTEM site hook exists, no child
+code can prevent it: `isolated()` can only observe `sys.flags.no_site` afterwards and refuse the measurement, and its
+refusal now says so (`DETECTION ONLY`). The guarantee is static and lives in three places: the immutable
+`CHILD_FLAGS = ("-I", "-S")` tuple is the only place the flags are spelled, `child_command()` derives the command from
+it and nothing else, and `.github/workflows/ci.yml` mutates each flag, the launcher's return value and the `isolated()`
+call and FAILS THE BUILD if `--self-test` survives any of them. `--self-test` checks exactly that shape — tuple type,
+item assignment refused, no flag literal inside `child_command()`, the CI step's own text present — and launches a
+`-S`-less child in an EMPTY directory only to show the post-hoc detection fires. The flawed `sitecustomize` case is
+deleted, not relabelled.
+
+`--self-test` counts outcomes separately (V22-03): `35 passed, 0 failed, 1 skipped (36 cases)` rather than folding
+skips into passes (`36 passed` where the device-node case can run). A case this host cannot run (no `CAP_MKNOD`, no
 `O_NOFOLLOW`) prints as `skip` and never counts as a pass; the exit status depends only on failures. Its cases
 include a real inode swapped between `lstat()` and `open()` (V22-02), so `samestat`'s refusal is demonstrated rather
-than argued, and these cases start REAL children (V23-01, V24-01, V25-01): a frame whose digest does not match is refused instead of
+than argued, and these cases start REAL children (V23-01, V24-01, V25-01, V26-01): a frame whose digest does not match is refused instead of
 executed, a child runs the bytes it was sent while the path it names holds different source, a swapped bootstrap and
 a truncated payload are refused, and an unverified sibling cannot be imported from disk. Four of them (V24-01)
 start a child in a working directory holding a hostile `sitecustomize.py` plus `hashlib.py` / `ssl.py` shadows:
 the hook never runs, `hashlib` is still the standard library's, the payload digest still verifies, a child started
 without `-I -S` is refused — and a CONTROL shows the same plant DOES run when the flags are removed, so the cases
-cannot pass vacuously.
+cannot pass vacuously. The rest of the V26-01 cases start no plant at all: they prove the launcher's static shape and
+require the CI mutations, because that — not a child-side check — is what makes a stripped flag fail closed.
 
 After a REVIEWED change: `--update-manifest` (this directory), then regenerate A.0/A.7 from the document (D44).
 
@@ -134,7 +148,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 
 | File | Role |
 |---|---|
-| `probe_common.py` | constants (mirroring §12), the deterministic worst-case fixtures, the shim's getters, and the verified child transport — bootstrap, payload framing, `run_suite_child`, launched `-I -S`, guard before any file-backed import (V23-01, V24-01, V25-01) |
+| `probe_common.py` | constants (mirroring §12), the deterministic worst-case fixtures, the shim's getters, and the verified child transport — bootstrap, payload framing, `run_suite_child`, the static launcher invariant `CHILD_FLAGS`, guard before any file-backed import (V23-01, V24-01, V25-01, V26-01) |
 | `probe1_phase1.py` | phase 1 — request path: 64 KiB chunked scratch accumulation, then `bytes(scratch)` |
 | `probe2_seal.py` | phase 2 — §5.1.1 seal order, plus the BANNED retain-the-chunk variant (must fail its bound) |
 | `probe3_decode.py` | phase 3 — the §5.1.2 `decode_pass` release order on ONE line at `MAX_LINE` |
@@ -144,7 +158,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
-| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution and child binding and the V25-01 pre-import/partial-flag cases (V22-01, V23-01, V24-01, V25-01) |
+| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution and child binding, the V25-01 pre-import/partial-flag cases and the V26-01 static-invariant and CI-mutation cases (V22-01, V23-01, V24-01, V25-01, V26-01) |
 | `expected.json` | the file manifest (size + SHA-256) AND the recorded values, bounds and inventory derivations |
 | `README.md` | this file |
 
