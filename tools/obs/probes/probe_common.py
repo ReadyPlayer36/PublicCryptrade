@@ -183,6 +183,15 @@ CHILD_REFUSED = 86          # a child refusal is never confused with a measureme
 # V24-01: isolated (-I: no PYTHON* environment, no user site, no working directory on sys.path) and site-free (-S: no
 # sitecustomize/usercustomize import at startup). V25-01: the bootstrap verifies BOTH flags before it imports anything
 # that could be resolved from disk, and refuses (exit 86) when either one was dropped.
+#
+# V26-01: THIS TUPLE IS THE ISOLATION BOUNDARY, AND IT IS STATIC. CPython runs `site` during interpreter STARTUP, before
+# a byte of the `-c` bootstrap is compiled, so if a system-level `sitecustomize` exists, a missing `-S` has already
+# imported it by the time any child code can look at `sys.flags.no_site`: the bootstrap can DETECT that state and refuse
+# the measurement, but no script can un-run a hook that executed before it. `-I` is preventable rather than merely
+# detectable only because V25-01 moved the refusal ahead of the file-backed imports. The boundary is therefore this
+# immutable tuple plus `child_command()`, which is the ONLY place the flags are spelled and derives the command from
+# nothing else; .github/workflows/ci.yml mutates each flag, the launcher's return value and the `isolated()` call and
+# fails the build if `--self-test` survives any of them. Nothing inside the bootstrap claims to substitute for that.
 CHILD_FLAGS = ("-I", "-S")
 
 BOOTSTRAP = r'''# V25-01: THIS PRELUDE IMPORTS NOTHING BUT `sys`. `sys` is a BUILT-IN module: it comes from the interpreter's static
@@ -214,9 +223,18 @@ def isolated():
     of `os.getcwd()`/`os.path.abspath()`, which would need `os`.
     """
     flags = sys.flags
-    if not (flags.isolated and flags.no_site and flags.ignore_environment and flags.no_user_site):
-        refuse("the child interpreter was not started isolated and site-free (-I -S): its startup hooks, "
-               "PYTHONPATH or working directory were not protected (V24-01, V25-01)")
+    if not (flags.isolated and flags.ignore_environment and flags.no_user_site):
+        refuse("the child interpreter was not started isolated (-I): its PYTHONPATH, user site directory or working "
+               "directory were not protected (V24-01, V25-01)")
+    # V26-01: this clause is DETECTION, not protection. Without `-S`, `site` has ALREADY run (and may already have
+    # imported a system `sitecustomize`) before this function was compiled, so refusing here can only stop the
+    # measurement — it cannot undo a hook. The guarantee is the static launcher invariant `CHILD_FLAGS` and the CI
+    # mutation step that fails the build if either flag is removed; this check exists so a mis-launched child is never
+    # MEASURED, not so that a mis-launched interpreter is repaired.
+    if not flags.no_site:
+        refuse("the child interpreter was not started site-free (-S): `site` runs BEFORE this bootstrap, so this "
+               "refusal is DETECTION ONLY — a startup hook may already have executed. Protection is the static "
+               "launcher invariant, not this check (V26-01)")
     # -P (implied by -I on 3.11+) is what keeps the working directory out of sys.path for a `-c` command.
     if not getattr(flags, "safe_path", False):
         refuse("the child interpreter ran WITHOUT a safe path (-P, implied by -I), so the working directory may have "
