@@ -1,9 +1,10 @@
 {
   "env": {
+    "isolation": "every child runs python -I -S -c <bootstrap> and refuses (exit 86) unless sys.flags.isolated/no_site/ignore_environment/no_user_site are set, no site/sitecustomize/usercustomize is imported and sys.path holds no working-directory entry (V24-01)",
     "openssl": "3.0.13",
     "platform": "Linux x86-64",
     "python": "3.12.3",
-    "updated": "v2.4"
+    "updated": "v2.5"
   },
   "inventory": {
     "items": [
@@ -60,9 +61,9 @@
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 15678,
+        "bytes": 17538,
         "path": "tools/obs/probes/README.md",
-        "sha256": "785395218537a17c89d79f3c3b93e2ef65715569379fe83c1d3abea0849086b6"
+        "sha256": "8221b076d19e005b8c684e6e2f22f4f2bf51596aa2a776ef6cc8eea4a25f5227"
       },
       {
         "bytes": 0,
@@ -115,14 +116,14 @@
         "sha256": "f802508e3bcbb97d4973edc712a9c86fd124cf2cade195d4a4dbdaa5f973c601"
       },
       {
-        "bytes": 21483,
+        "bytes": 24373,
         "path": "tools/obs/probes/probe_common.py",
-        "sha256": "d07fb9bc8c2ec674d8a98fddc18d0ca0989811b254fa7bf539c9e57898dfe775"
+        "sha256": "6559ba0c7e309ef35368df0c7f0a27206dcccb792924476f4689bf0faccbe437"
       },
       {
-        "bytes": 60669,
+        "bytes": 69422,
         "path": "tools/obs/probes/run_all.py",
-        "sha256": "e66a6861323d3f1066a0d8233622e7353e8e6f50ae7afb962203a321bfde2043"
+        "sha256": "2106d2a2c2214962131e54beeefc2d486cc43064151fbb9647dcaf84782d0682"
       }
     ]
   },
