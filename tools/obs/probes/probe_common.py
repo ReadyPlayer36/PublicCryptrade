@@ -14,6 +14,19 @@ and the child's import would run unverified. That is what V23-01 reported, and t
   * the suite package in the child is CLOSED (`__path__ = []`), so no import can fall back to the filesystem: a module
     the parent did not send does not exist for the child.
 
+THE CHILD'S INTERPRETER STARTUP IS ISOLATED BEFORE ANY OF THAT RUNS (V24-01). v2.4 verified the payload but still
+started the child as `python -c <bootstrap>`, so interpreter STARTUP was unprotected: `site` imports `sitecustomize`,
+`PYTHONPATH` entries are searched, and the working directory is `sys.path[0]` for `-c`, so a plant could run before
+the bootstrap's first line and shadow `hashlib` (which the payload verification itself uses). Every child is now
+`python -I -S -c <bootstrap>`: `-I` drops `PYTHON*` from the environment, the user site directory and the working
+directory from `sys.path`, and `-S` skips `site` altogether, so neither `sitecustomize` nor `usercustomize` is
+imported and nothing in the working directory can resolve ahead of the real standard library. The bootstrap does not
+take that on trust: its first action is `isolated()`, which refuses (exit 86) unless `sys.flags.isolated`, `no_site`,
+`ignore_environment` and `no_user_site` are all set, no startup hook is in `sys.modules`, and no `sys.path` entry is
+the working directory. Dropping a flag therefore FAILS CLOSED instead of quietly re-opening the hole, and `--self-test`
+runs a child whose working directory holds a hostile `sitecustomize.py`, `hashlib.py` and `ssl.py` to prove that none
+of them executes.
+
 What is preserved is the measurement: the child is still a fresh interpreter whose startup is inside the shim's window
 (the shim counts from exec, before this code runs), it still gets `cwd` = repository root and the same `sys.argv[0]`
 (`-m` gives the module path, and that is what the parent passes), it still resets at the same points, and it still runs
@@ -153,6 +166,9 @@ def measure(name: str, fn, **detail) -> dict:
 # ---------------------------------------------------------------------------------------------------------------------
 TRANSPORT_MAGIC = b"OBS-PROBE/1\n"
 CHILD_REFUSED = 86          # a child refusal is never confused with a measurement failure (1) or an abort (SIGABRT)
+# V24-01: isolated (-I: no PYTHON* environment, no user site, no working directory on sys.path) and site-free (-S: no
+# sitecustomize/usercustomize import at startup). The bootstrap refuses to run when it was not started with both.
+CHILD_FLAGS = ("-I", "-S")
 
 BOOTSTRAP = r'''import builtins, hashlib, json, os, sys, types
 
@@ -165,6 +181,21 @@ def refuse(why):
     sys.stderr.write("obs-child: REFUSED: " + why + "\n")
     sys.stderr.flush()
     os._exit(REFUSED)
+
+
+def isolated():
+    flags = sys.flags
+    if not (flags.isolated and flags.no_site and flags.ignore_environment and flags.no_user_site):
+        refuse("the child interpreter was not started isolated and site-free (-I -S): its startup hooks, "
+               "PYTHONPATH or working directory were not protected (V24-01)")
+    hooks = [name for name in ("site", "sitecustomize", "usercustomize") if name in sys.modules]
+    if hooks:
+        refuse("a startup hook ran before the bootstrap (%s): V24-01" % ", ".join(hooks))
+    here = os.getcwd()
+    for entry in sys.path:
+        if entry in ("", ".") or (entry and os.path.abspath(entry) == here):
+            refuse("the child's sys.path contains the working directory (%r): a shadow module could be imported "
+                   "ahead of the standard library (V24-01)" % (entry,))
 
 
 def settings():
@@ -249,6 +280,7 @@ def execute(name, chunk, path, into):
 
 
 def main():
+    isolated()                                # V24-01: before anything reads the parent's request
     expect, origin, target, mode, argv = settings()
     sent = receive(expect)
     package = packages()
@@ -386,7 +418,8 @@ def payload(frames: dict[str, bytes]) -> bytes:
 
 
 def child_command() -> list[str]:
-    return [sys.executable, "-c", BOOTSTRAP]
+    """The child's command line: isolated, site-free, and running this module's bootstrap (V24-01)."""
+    return [sys.executable, *CHILD_FLAGS, "-c", BOOTSTRAP]
 
 
 def frame_name(target: str) -> str:
@@ -404,7 +437,10 @@ def child_env(digests: dict[str, str], origins: dict[str, str], target: str, mod
     listed them, which is dependency order, and JSON objects keep insertion order.
     """
     env = dict(os.environ)
-    env.pop("OBS_CHILD_EXPECT", None)
+    # V24-01: the child is launched with -I (implied -E -s) and -S, so PYTHON* is ignored and no site directory exists.
+    # Removing them here keeps the environment honest: nothing in it suggests the child needs a path to import from.
+    for name in ("OBS_CHILD_EXPECT", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"):
+        env.pop(name, None)
     env.update({
         "OBS_CHILD_BOOTSTRAP": BOOTSTRAP_SHA256,
         "OBS_CHILD_EXPECT": json.dumps(digests),
@@ -412,7 +448,6 @@ def child_env(digests: dict[str, str], origins: dict[str, str], target: str, mod
         "OBS_CHILD_TARGET": target,
         "OBS_CHILD_MODE": mode,
         "OBS_CHILD_ARGV": json.dumps(list(argv)),
-        "PYTHONPATH": ROOT,
     })
     if extra:
         env.update(extra)
