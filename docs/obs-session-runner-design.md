@@ -1,4 +1,4 @@
-# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v2.6 (NORMATIVE)
+# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v2.7 (NORMATIVE)
 
 Status: design only. No live request is authorized by this document. Milestone 1 remains **BLOCKED** until the reviewer
 accepts the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.9**: it resolves
@@ -22,7 +22,19 @@ v2.1 collapsed into one wrong sentence — 14 inventoried, 13 pinned by `expecte
 (V21-02); and the lineage claim is now an exact-SHA, exact-run statement rather than a working-tree disclaimer
 (V21-03).
 
-**v2.6 status (this revision).** v2.6 supersedes v2.5 and closes the v2.5 review's
+**v2.7 status (this revision).** v2.7 supersedes v2.6 and closes the v2.6 review's single blocking finding (V26-01,
+§1.0g). v2.6 fixed the order of the guard and then tested the wrong thing: it removed `-S` in a working directory
+holding `sitecustomize.py` and reported that no hook ran — a case `-I` had already neutralised, because `-I` keeps the
+working directory off `sys.path` whether or not `-S` is present. The deeper problem is that the assertion was
+impossible in principle: CPython runs `site` during interpreter STARTUP, before any `-c` code is compiled, so no child
+script can prevent a system site hook; it can only observe `sys.flags.no_site` afterwards and refuse the measurement.
+v2.7 replaces that claim with the guarantee that actually exists. `-I` and `-S` are documented as STATIC launcher
+invariants in `probe_common.py`, `README.md` and this document; `CHILD_FLAGS` remains the single immutable spelling,
+`child_command()` derives from it alone, the bootstrap's `no_site` refusal now says DETECTION ONLY, the flawed case is
+DELETED rather than relabelled, and CI additionally mutates the launcher's return value. No measurement moved: all ten
+gated readings are unchanged.
+
+**v2.6 status (retained).** v2.6 supersedes v2.5 and closes the v2.5 review's
 single blocking finding (V25-01, §1.0f). v2.5 launched every child `python -I -S -c <bootstrap>` and made the bootstrap
 verify `sys.flags` — but the bootstrap's FIRST LINE was `import builtins, hashlib, json, os, sys, types`, so the
 verification ran after the imports it exists to protect: with `-I` dropped, a working-directory `hashlib.py` executes
@@ -255,7 +267,7 @@ at the launcher and again inside the child, and changes no measurement.
 | V18-02 | The Appendix A probe suite existed only as listings inside A.7: a reviewer could read it but not RUN it, nothing bound the printed numbers to bytes that exist, and a drift between a listing and the code it claims to be was undetectable | §A.0 (file manifest: path, role, size, SHA-256), §A.1, §A.2/A.3 (values from this run), §A.7 (mirrors regenerated from the files), `tools/obs/probes/` (13 files), §11 (G-V18-02), D44 | The suite is repository code at the paths the appendix names — `run_all.py`, `alloc_peak.c`, `expected.json`, `README.md` and `probe6_native.py`, plus the six other probe modules, `probe_common.py` and `__init__.py` that they import — and was executed from the repository root for this revision (`python -m tools.obs.probes.run_all --check` exits 0, twice). A.0 records size + SHA-256 per file, `run_all --manifest` prints the same table (G-V18-02 diffs them), the driver REFUSES to run when a file is missing, and A.7 is generated from the files, so a listing can no longer drift from the code it documents |
 | V18-03 | A.5.4 asserted that `alloc_peak.c` "sees every arena and every thread" — but it wrapped only `malloc`/`calloc`/`realloc`/`free`. CPython's object allocator obtains its 1 MiB arenas with a DIRECT `mmap` that the shim never sees, and A.5 offered no argument bounding what an uninstrumented path could hide, so the headroom constant rested on an unexamined channel | §A.5.4 (interception inventory + fenced limits), §A.5.7 (new: direct-`mmap` fence and the allocator-independence proof), §A.2/A.3 (measured channels), §6.6, §11 (G-V18-03), D45 | The over-claim is withdrawn and the channel is closed by MEASUREMENT: `alloc_peak.c` now also interposes `mmap`/`mmap64`/`munmap` for `MAP_ANONYMOUS\|MAP_PRIVATE` and exposes a second peak — 16,384 B in the native request region and 0 B in each measured phase — and the gate requires `malloc peak + mmap peak ≤ HTTP_HEADROOM` (measured 195,184 + 16,384 = 211,568 ≤ 262,144). A.5.4 itemises every allocator that is and is not intercepted; A.5.7 proves the four-term constant bounds each consumer independently of which allocator serves it, page-rounding included |
 
-### 1.0f V25 finding resolved in v2.6 (this revision)
+### 1.0f V25 finding resolved in v2.6 (retained)
 
 The v2.5 review accepted the launcher and found the same defect one layer deeper — in the STATEMENT ORDER of the file
 the launcher runs. `BOOTSTRAP` began by importing `builtins`, `hashlib`, `json`, `os`, `sys` and `types` and called
@@ -268,6 +280,24 @@ regressions with real children, and makes CI mutate the flags and the guard call
 | ID | Defect as reviewed | Where it is closed | Mechanism |
 |---|---|---|---|
 | V25-01 | `BOOTSTRAP` imported non-built-in modules before it validated the interpreter: it opened with `import builtins, hashlib, json, os, sys, types` and called `isolated()` afterwards, so with `-I` dropped a working-directory `hashlib.py` executed during `import hashlib` — the module the payload verification itself uses — ahead of every check V24-01 added | §A.7.1 (`probe_common.py`: `BOOTSTRAP` prelude, `refuse`, `isolated`, `cwd_free`), §A.7.10 (`run_all.py` self-test), §A.7.11 (`README.md`), §11 (G-V25-01), §12 | The bootstrap's prelude imports `sys` ALONE (a built-in: no `sys.path` search), refuses via `sys.stderr` + `SystemExit(86)` without importing `os`, calls `isolated()` as its FIRST executable statement, and only then imports `builtins`/`hashlib`/`json`/`os`/`types`. `isolated()` is import-free: it requires `sys.flags.isolated`, `no_site`, `ignore_environment`, `no_user_site` and `safe_path`, no startup hook in `sys.modules`, and no `''`/`'.'`/relative entry in `sys.path`; `cwd_free()` re-confirms the working-directory comparison after the imports, able to add a refusal but never to replace one. Five self-test cases prove it: the bootstrap is PARSED and `isolated()` must precede the first file-backed import with only `sys` ahead of it; `CHILD_FLAGS` and `child_command()` must be exactly `('-I', '-S')`; `-S` without `-I` in a directory whose `hashlib.py` records itself and raises exits 86 with the plant never running; `-I` without `-S` in a directory holding `sitecustomize.py` is rejected the same way; and a CONTROL shows the `hashlib.py` plant DOES execute once `-I` is removed. CI mutates `CHILD_FLAGS` (dropping each flag in turn) and deletes the `isolated()` call, failing the job if `--self-test` still passes |
+
+### 1.0g V26 finding resolved in v2.7 (this revision)
+
+The v2.6 review accepted the ordering fix and rejected its test. v2.6 ran a child with `-S` removed in a working
+directory holding `sitecustomize.py` and reported that no hook had executed — but `-I` still keeps the working directory
+off `sys.path` when `-S` is gone, so that child could never have imported the planted hook: the case exercised `-I`, not
+the absence of `site`, and passing it said nothing about system-level site initialization. The larger point is that the
+assertion was unachievable by construction. CPython runs `site` during interpreter STARTUP, before a byte of the `-c`
+bootstrap is compiled, so a missing `-S` cannot be prevented by any child code — `isolated()` can only OBSERVE
+`sys.flags.no_site` afterwards and refuse to measure. v2.7 therefore replaces a dynamic claim it cannot make with a
+static one it can: `-I`/`-S` are declared launcher invariants, `CHILD_FLAGS` is the only place they are spelled, and CI
+mutates each flag, the launcher's return value and the guard call and fails the build if `--self-test` survives. The
+flawed `sitecustomize` case is deleted, not relabelled; a `-S`-less child in an EMPTY directory replaces it, and its
+label says DETECTION. No measurement moved.
+
+| ID | Defect as reviewed | Where it is closed | Mechanism |
+|---|---|---|---|
+| V26-01 | the v2.6 self-test claimed to prove that a missing `-S` was harmless by planting `sitecustomize.py` in the child's working directory — a case `-I` had already neutralised, so it exercised isolation of the import path rather than the absence of `site`; and no child-side check can prevent a system site hook, because `site` runs before the bootstrap exists | §A.7.1 (`probe_common.py`: `CHILD_FLAGS`, `isolated`), §A.7.10 (`run_all.py` self-test), §A.7.11 (`README.md`), §A.8 (`ci.yml`), §11 (G-V27-01), §12 | `-I`/`-S` are documented as STATIC launcher invariants: the immutable `CHILD_FLAGS` tuple is the only place the flags are spelled and `child_command()` derives the command from it alone. The bootstrap states that its `no_site` clause is DETECTION ONLY — `site` has already run — and refuses the measurement instead of implying repair. The flawed case is DELETED; `--self-test` requires `CHILD_FLAGS` to be an immutable tuple equal to `('-I', '-S')`, requires `child_command()` to carry no `-I`/`-S` literal of its own, launches a `-S`-less child in an EMPTY directory only to prove the post-hoc detection fires, and parses `.github/workflows/ci.yml` to require the mutation step. CI mutates the tuple to each single flag, narrows `child_command()` to `-I` and deletes the `isolated()` call, failing the job if the self-test survives any mutation |
 
 ### 1.2 V17 findings resolved in v1.8 (retained)
 
@@ -1967,7 +1997,7 @@ and is the second admissible independent egress source (§10.1(1b), V15-03).
 free-form `error` string (records) or the receipt's `reason`/`diagnostics` (protocol §0/§3.3 alignment: record shapes stay
 frozen under `obs-run-manifest/1`).
 
-## 11. Gates and decisions (v1.9 adds G-V18-01–03 and D43–D45; v1.8 adds G-V17-01–04 and D38–D42; v1.7 adds G-V16-01–07 and D31–D37; v1.6 adds G-V15-01–07 and D24–D30; v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable; v2.6 adds G-V25-01)
+## 11. Gates and decisions (v1.9 adds G-V18-01–03 and D43–D45; v1.8 adds G-V17-01–04 and D38–D42; v1.7 adds G-V16-01–07 and D31–D37; v1.6 adds G-V15-01–07 and D24–D30; v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable; v2.6 adds G-V25-01; v2.7 adds G-V27-01)
 
 | Gate | Assertion | Killer-test sketch |
 |---|---|---|
@@ -2018,6 +2048,7 @@ frozen under `obs-run-manifest/1`).
 | G-V20-03 | the map live total cannot be clamped (V20-13) | (a) source gate: `map_live_sub` contains no clamp (`cur > n ? ... : 0` is gone) and calls `map_fail_underflow(n, cur)`, which writes one diagnostic line with both figures and `abort()`s; (b) demonstrated with a FAULT-INJECTED build (one 4 MiB range silently removed from the table): `SIGABRT` (−6) and the byte-exact line `alloc_peak: FATAL: mmap accounting underflow: 4202496 B to subtract, 2121728 B tracked (regions 3): refusing to clamp to zero`, while the shipped build runs the same child to `SURVIVED` with `live` back at its baseline; (c) the path is NOT reachable from a correct shim, so it is verified by fault injection in review rather than shipped as a test hook — stated as a limit, not hidden: CI cannot provoke a lost range without a deliberate bug in the instrument; (d) mutation: restore the clamp → the injected build exits 0 with a silently reduced total instead of aborting |
 | G-V21-01 | the suite's inventory is IDENTITY-based, not name-based (V21-01) | (a) `suite_files()` enumerates with `os.scandir` + `lstat` semantics and REFUSES any entry that is not a regular file; `check_manifest()` hashes each file through ONE `O_NOFOLLOW` descriptor and requires `os.path.samestat(lstat, fstat)` plus an unchanged size, so the bytes compared belong to the inode inspected; (b) `--self-test` runs fourteen cases and exits non-zero if ANY refusal is missing: post-enumeration substitution by a link to a file inside the suite, a link to a file outside it, a link added after the inventory, a dangling link, a link to `/dev/null`, a directory, a FIFO, a real character device, a direct `opened_regular` call on a link, `open(O_NOFOLLOW)` refusing with `ELOOP`, a modified file still refused — plus a CONTROL that an honest tree validates and that a regular file still hashes to its own bytes; (c) CI runs `--self-test` before the gate and archives `self-test.log`; (d) mutation: restore `os.listdir` + `os.path.isfile` → the link cases are ACCEPTED and (b) fails |
 | G-V21-02 | the reported counts are three distinct counts, correctly named (V21-02) | (a) the success line names inventoried (14), pinned-by-`expected.json` (13) and `expected.json`-pinned-by-A.0 separately, and prints `expected.json`'s digest; (b) `report.json` carries `coverage.{inventoried, pinned_by_expected_json, self_path, self_sha256, self_pinned_by}` and those values EQUAL `len(manifest.files)` (14) and `len(expected.manifest.files)` (13); (c) demonstrated twice on the working tree this appendix pins, and v2.1's single-number line is recorded as wrong in §1.0c rather than silently replaced; (d) mutation: print one number for both → (a) fails |
+| G-V27-01 | `-I` and `-S` are STATIC launcher invariants, and the suite never claims a runtime check can replace them (V26-01) | (a) `probe_common.CHILD_FLAGS` is an immutable tuple of exactly `('-I', '-S')` and the ONLY place the flags are spelled; `child_command()` derives the command from it with no flag literal of its own, so narrowing either flag requires editing the invariant itself; (b) the bootstrap's `no_site` refusal is worded and documented as DETECTION ONLY — `site` runs during interpreter startup, before a `-c` bootstrap is compiled, so a system hook cannot be prevented by child code, only detected afterwards and refused, and the child is then never measured; (c) `--self-test` fails unless `CHILD_FLAGS` is a tuple equal to `('-I','-S')`, item assignment raises `TypeError`, `child_command()` contains no `-I`/`-S` literal and still opens `-I -S`, and a `-S`-less child in an EMPTY directory exits 86 with `DETECTION ONLY` on stderr — no case plants a working-directory `sitecustomize.py` and calls that site initialization; (d) `--self-test` parses `.github/workflows/ci.yml` and fails unless the mutation step is present, exercises all four mutations (drop `-I`, drop `-S`, narrow the launcher, remove the guard call) and fails the job on a survivor; (e) CI runs that step before the gate, so a stripped flag, a narrowed launcher or a removed guard call turns the build red |
 | G-V25-01 | the bootstrap validates the interpreter BEFORE it imports anything file-backed (V25-01) | (a) `BOOTSTRAP` imports `sys` alone ahead of the guard, calls `isolated()` as its first executable statement, and imports `builtins`/`hashlib`/`json`/`os`/`types` only afterwards; `refuse()` uses `sys.stderr` + `SystemExit(86)`, so refusing needs no import at all; (b) `isolated()` is import-free — `sys.flags.isolated/no_site/ignore_environment/no_user_site/safe_path`, no `site`/`sitecustomize`/`usercustomize` in `sys.modules`, no `''`/`'.'`/`..`/relative `sys.path` entry — and `cwd_free()` re-checks the working directory after the imports without being able to rescue a failure above it; (c) `--self-test` PARSES the bootstrap and fails unless `isolated()` precedes the first file-backed import with only `sys` imported ahead of it, requires `CHILD_FLAGS == ('-I', '-S')` and `child_command() == [sys.executable, '-I', '-S', '-c', BOOTSTRAP]`, and launches BOTH partial variants for real: `-S` without `-I` in a directory whose `hashlib.py` writes a marker and raises (exit 86, marker absent) and `-I` without `-S` in a directory holding `sitecustomize.py` (rejected, marker absent), beside a CONTROL that the marker IS written when `-I` is removed; (d) CI mutates `CHILD_FLAGS` to each single flag and deletes the `isolated()` call, requiring `--self-test` to FAIL each time — a surviving mutation fails the job |
 | G-V24-01 | every child interpreter starts ISOLATED and SITE-FREE (V24-01) | (a) `probe_common.child_command()` is `[sys.executable, '-I', '-S', '-c', BOOTSTRAP]` for EVERY child — probe6's server/stage/`--realloc`, probe8's mmap child and capacity program, the `--interpose` driver — and no spawn site passes `-m` or a path; (b) the bootstrap's `isolated()` runs before it reads the parent's request and exits 86 unless `sys.flags.isolated`, `no_site`, `ignore_environment` and `no_user_site` are set, `site`/`sitecustomize`/`usercustomize` are absent from `sys.modules`, and no `sys.path` entry is the working directory; (c) `--self-test` proves it with REAL children in a working directory holding a hostile `sitecustomize.py`, `hashlib.py` and `ssl.py`: the hook does not run, `hashlib.__file__` is the standard library's, the payload digest still verifies, a child started without the flags is refused, and a CONTROL shows the same plant DOES run when the flags are removed; (d) mutation: drop `-I`, `-S` or the `isolated()` call → (b) and (c) fail (`a child started WITHOUT -I -S is refused`) |
 | G-V23-01 | every child interpreter executes only manifest-verified bytes (V23-01) | (a) no mode of the driver and neither probe starts a child with `-m` or from a path: probe6's server, stage and `--realloc` children, probe8's mmap child and probe8's capacity program all start through `probe_common`, which sends the source over a pipe from the buffers `check_manifest(keep=…)` accepted, one frame per module carrying the SHA-256 `expected.json` promises for that file, and the child recomputes it before `compile()`; (b) the child's bootstrap is bound by digest (`sys.orig_argv` against the parent's `sha256(BOOTSTRAP)`) and its `tools.obs.probes` package is closed (`__path__ = []`), so a module the parent did not send cannot be imported from disk there; (c) `--self-test` demonstrates the properties with REAL children: a frame whose digest does not match is refused (exit 86) and never executed, a child runs the bytes it was sent while the path it names holds different source, a swapped bootstrap and a truncated payload are refused, and an unverified sibling cannot be imported; (d) the measurement semantics are unchanged and stated — fresh interpreter counted from exec, same `cwd`, same `sys.argv[0]`, same resets, module run as `__main__` — and the two figures the bootstrap moved are re-pinned with their reason; (e) mutation: restore `-m` at any spawn site → (a) fails and the substitution case (c) executes the disk copy |
@@ -2239,10 +2270,10 @@ PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check      # exit 0 pass /
 
 | Path | Role | Bytes | SHA-256 |
 |---|---|---|---|
-| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 19,170 | `f3d3f6f546eb3d46df3ce775e6d587c9c1255e824ec0a786df085fcd8bcdb513` |
+| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 20,862 | `1e73a76636ce7637af502eb2a6793fa22e36affe70e3ea559deab12fe21ee28e` |
 | `tools/obs/probes/__init__.py` | package marker (empty file; `touch tools/obs/probes/__init__.py`) | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 | `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` dual-channel peak shim: malloc family AND a locked, range-aware direct anonymous `mmap` (A.5.4/A.5.7) | 19,327 | `19064773bb13436d9386ac896fa9ab3021f01afe0e5bf05a03b1bfdca210efa3` |
-| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 7,001 | `31ef9dde1fd9e06ed8c8349ff8ce5e1cf42f8042c3fcfa68cb8da5fe2b2283b8` |
+| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 7,456 | `b697aa629cc75e9076067ac071e37bbfdc1cd5992ac987618340d7c68afa0159` |
 | `tools/obs/probes/probe1_phase1.py` | phase 1 — the §6.4 request path (chunked scratch + `bytes(scratch)`) | 1,358 | `1f63e461fb71836d78c718d0f0ac98c64c46f4c64e99852c0afaf9e83fab38d2` |
 | `tools/obs/probes/probe2_seal.py` | phase 2 — §5.1.1 seal fragments, plus the banned retain-the-chunk variant | 2,326 | `455ef7b384c0057ea50a1e6ed711538bfa5ca6e904e22590a576be4bf4c7a20f` |
 | `tools/obs/probes/probe3_decode.py` | phase 3 — §5.1.2 `decode_pass` release order on a `MAX_LINE` line | 1,699 | `4320fbe9044b7bd4d9b70238d8d5731832e6348d28a710fe8f92368f1ae66066` |
@@ -2251,9 +2282,9 @@ PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check      # exit 0 pass /
 | `tools/obs/probes/probe6_native.py` | native term: `mallinfo2` samples, both interposed channels, the A.5.8 stage inventory (server in its own process) and the `--realloc` regression; children bootstrapped from verified bytes (V23-01) | 22,236 | `6f630fc3646f06794dcd98513d0dd3cfe20ebb89c59334b62089a5738936dbb4` |
 | `tools/obs/probes/probe7_structure.py` | phase 3 — §5.1.2 `scan_structure` (parse + key check + discard) | 780 | `d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4` |
 | `tools/obs/probes/probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort; children and the capacity program bootstrapped from verified bytes (V23-01) | 19,110 | `f802508e3bcbb97d4973edc712a9c86fd124cf2cade195d4a4dbdaa5f973c601` |
-| `tools/obs/probes/probe_common.py` | §12 constants, deterministic worst-case fixtures, `measure()`, the shim's getters, and the verified child transport: bootstrap with an import-free prelude and a guard that runs before any file-backed import, payload framing, `run_suite_child`, launched `-I -S` (V23-01, V24-01, V25-01) | 28,147 | `67fe2b48714ff1ae58f742bb5c2b544e2fbfe90e327bbd3b9622979792ae0ee2` |
-| `tools/obs/probes/run_all.py` | driver: `--check` / `--self-test` / `--record` / `--manifest` / `--update-manifest` / `--report` / `--interpose`; verified-byte module execution and child binding (V22-01/V23-01), the three counts (V21-02), the V25-01 pre-import ordering and partial-flag cases | 77,478 | `e2166004f5b5132ce514b85a65a5500389e7f3207bba538bfbe57da3ae94c77f` |
-| **14 files** | **total** | **202,094** | `python -m tools.obs.probes.run_all --manifest` prints this table |
+| `tools/obs/probes/probe_common.py` | §12 constants, deterministic worst-case fixtures, `measure()`, the shim's getters, and the verified child transport: static launcher invariant, bootstrap with an import-free prelude and a guard that runs before any file-backed import, payload framing, `run_suite_child` (V23-01, V24-01, V25-01, V26-01) | 29,909 | `9c46127004c5ff36a8721241805f8826224a1661048805068c407ded3d718dbd` |
+| `tools/obs/probes/run_all.py` | driver: `--check` / `--self-test` / `--record` / `--manifest` / `--update-manifest` / `--report` / `--interpose`; verified-byte module execution and child binding (V22-01/V23-01), the three counts (V21-02), the V25-01 ordering and the V26-01 static-invariant/CI-mutation cases | 83,535 | `03a109579dc4d16a0f0076b54ac985f46ff07121674a43a4b0a371876911cca2` |
+| **14 files** | **total** | **212,060** | `python -m tools.obs.probes.run_all --manifest` prints this table |
 
 **A file is its INODE, not its name (V21-01).** This table pins BODIES, and the driver is what makes that true: the
 inventory refuses any entry in this directory that is not a regular file, and every comparison hashes through a single
@@ -2917,6 +2948,15 @@ CHILD_REFUSED = 86          # a child refusal is never confused with a measureme
 # V24-01: isolated (-I: no PYTHON* environment, no user site, no working directory on sys.path) and site-free (-S: no
 # sitecustomize/usercustomize import at startup). V25-01: the bootstrap verifies BOTH flags before it imports anything
 # that could be resolved from disk, and refuses (exit 86) when either one was dropped.
+#
+# V26-01: THIS TUPLE IS THE ISOLATION BOUNDARY, AND IT IS STATIC. CPython runs `site` during interpreter STARTUP, before
+# a byte of the `-c` bootstrap is compiled, so if a system-level `sitecustomize` exists, a missing `-S` has already
+# imported it by the time any child code can look at `sys.flags.no_site`: the bootstrap can DETECT that state and refuse
+# the measurement, but no script can un-run a hook that executed before it. `-I` is preventable rather than merely
+# detectable only because V25-01 moved the refusal ahead of the file-backed imports. The boundary is therefore this
+# immutable tuple plus `child_command()`, which is the ONLY place the flags are spelled and derives the command from
+# nothing else; .github/workflows/ci.yml mutates each flag, the launcher's return value and the `isolated()` call and
+# fails the build if `--self-test` survives any of them. Nothing inside the bootstrap claims to substitute for that.
 CHILD_FLAGS = ("-I", "-S")
 
 BOOTSTRAP = r'''# V25-01: THIS PRELUDE IMPORTS NOTHING BUT `sys`. `sys` is a BUILT-IN module: it comes from the interpreter's static
@@ -2948,9 +2988,18 @@ def isolated():
     of `os.getcwd()`/`os.path.abspath()`, which would need `os`.
     """
     flags = sys.flags
-    if not (flags.isolated and flags.no_site and flags.ignore_environment and flags.no_user_site):
-        refuse("the child interpreter was not started isolated and site-free (-I -S): its startup hooks, "
-               "PYTHONPATH or working directory were not protected (V24-01, V25-01)")
+    if not (flags.isolated and flags.ignore_environment and flags.no_user_site):
+        refuse("the child interpreter was not started isolated (-I): its PYTHONPATH, user site directory or working "
+               "directory were not protected (V24-01, V25-01)")
+    # V26-01: this clause is DETECTION, not protection. Without `-S`, `site` has ALREADY run (and may already have
+    # imported a system `sitecustomize`) before this function was compiled, so refusing here can only stop the
+    # measurement — it cannot undo a hook. The guarantee is the static launcher invariant `CHILD_FLAGS` and the CI
+    # mutation step that fails the build if either flag is removed; this check exists so a mis-launched child is never
+    # MEASURED, not so that a mis-launched interpreter is repaired.
+    if not flags.no_site:
+        refuse("the child interpreter was not started site-free (-S): `site` runs BEFORE this bootstrap, so this "
+               "refusal is DETECTION ONLY — a startup hook may already have executed. Protection is the static "
+               "launcher invariant, not this check (V26-01)")
     # -P (implied by -I on 3.11+) is what keeps the working directory out of sys.path for a `-c` command.
     if not getattr(flags, "safe_path", False):
         refuse("the child interpreter ran WITHOUT a safe path (-P, implied by -I), so the working directory may have "
@@ -4493,7 +4542,7 @@ __attribute__((destructor)) static void report(void) {
 #### A.7.10 `tools/obs/probes/run_all.py`
 
 ```
-"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01; v2.5 V24-01; v2.6 V25-01).
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01; v2.5 V24-01; v2.6 V25-01; v2.7 V26-01).
 
   python -m tools.obs.probes.run_all --check             # CI gate: exit 0 pass / 1 mismatch / 2 integrity or environment
   python -m tools.obs.probes.run_all --self-test         # CI gate: the integrity REFUSALS, proven by negative cases
@@ -4576,10 +4625,22 @@ from `sys.stderr` with `SystemExit(86)` (no `os._exit()`, since `os` must not be
 `isolated()` is import-free: it uses `sys.flags` and the form of each `sys.path` entry instead of `os.getcwd()`, and
 `cwd_free()` re-confirms the path claim after the imports as defence in depth. `--self-test` parses the bootstrap it is
 about to run and fails unless `isolated()` is executed before the first file-backed import with only `sys` ahead of it,
-and it launches the child twice with ONE FLAG REMOVED: `-S` without `-I` in a working directory whose `hashlib.py`
-records itself and raises, and `-I` without `-S` in a working directory holding `sitecustomize.py`. Both must exit 86
-with nothing planted ever executing, and a CONTROL shows the same `hashlib.py` plant DOES run once `-I` is removed, so
-the two refusals cannot pass vacuously.
+and it launches the child with `-I` REMOVED in a working directory whose `hashlib.py` records itself and raises: the
+child must exit 86 with the plant never executing, and a CONTROL shows the same plant DOES run once `-I` is removed, so
+that refusal cannot pass vacuously.
+
+THE FLAGS ARE A STATIC LAUNCHER INVARIANT, NOT A RUNTIME CHECK (V26-01). v2.6 also ran a child with `-S` removed in a
+working directory holding `sitecustomize.py` and reported that no hook executed — which proved less than it appeared to.
+`-I` keeps the working directory off `sys.path` even when `-S` is gone, so that child could never have imported the
+planted hook: the case exercised `-I`, not the absence of `site`. And CPython runs `site` during interpreter STARTUP,
+before a byte of the `-c` bootstrap is compiled, so a SYSTEM site hook cannot be prevented by any script — `isolated()`
+can only observe `sys.flags.no_site` afterwards and refuse to measure. v2.7 states that boundary instead of implying it
+is covered. `-I`/`-S` are static launcher invariants: the immutable `CHILD_FLAGS` tuple is the only place they are
+spelled, `child_command()` derives the command from it and nothing else, and .github/workflows/ci.yml mutates each flag,
+the launcher's return value and the guard call, failing the build if `--self-test` survives any of them. `--self-test`
+now proves the invariant statically (tuple type, immutability, no flag literal outside the tuple, the CI step's own
+text), keeps the V25-01 ordering proof, and launches a `-S`-less child only to show the post-hoc DETECTION fires — it no
+longer plants a working-directory `sitecustomize.py` and pretends that tests system site initialization.
 
 COUNTS ARE THREE DIFFERENT NUMBERS (V21-02). v2.1 printed "14 files pinned by expected.json", which is false:
 `expected.json` pins 13 files, the suite ships 14, and `expected.json` itself is pinned by §A.0 of the document. The run
@@ -4951,9 +5012,19 @@ def self_test() -> int:
     be executed before the first file-backed import, with `sys` the only module imported ahead of it — a comment cannot
     satisfy that and a reordering cannot pass it. The launcher's `CHILD_FLAGS` must be exactly `('-I', '-S')` and
     `child_command()` exactly `[sys.executable, '-I', '-S', '-c', BOOTSTRAP]`, so neither flag can be dropped silently.
-    Then each flag is removed ON ITS OWN in a hostile working directory: `-S` kept but `-I` gone (where a planted
-    `hashlib.py` would win) and `-I` kept but `-S` gone (where `site` runs again). Both partial launches must be REFUSED
-    with nothing planted executing, and a CONTROL runs the same plant with no isolation at all to show it is live.
+    `-I` is then removed in a hostile working directory (where a planted `hashlib.py` would win): the child must be
+    REFUSED with nothing planted executing, and a CONTROL runs the same plant with no isolation at all to show it is live.
+
+    V26-01's cases (added in v2.7) test what can honestly be verified and stop testing what cannot. `-I`/`-S` are STATIC
+    launcher invariants: CPython runs `site` during startup, before any `-c` code is compiled, so a child script cannot
+    prevent a system site hook — it can only DETECT the missing flag afterwards and refuse the measurement. The cases
+    therefore require `CHILD_FLAGS` to be an immutable tuple of exactly the two flags and `child_command()` to derive the
+    command from it with no flag literal of its own, prove that a `-S`-less child in an EMPTY directory is detected and
+    refused (with nothing to plant, so the case cannot be read as prevention), and parse .github/workflows/ci.yml and
+    require the mutation step that fails the build when either flag, the launcher's return value or the guard call is
+    tampered with. The v2.6 case that planted `sitecustomize.py` in the child's working directory with `-S` removed is
+    GONE: `-I` still kept that directory off `sys.path`, so it exercised `-I`, never system site initialization, and
+    passing it proved nothing about the case V26-01 raised.
     """
     counts = {"passed": 0, "failed": 0, "skipped": 0}
 
@@ -5234,6 +5305,55 @@ def self_test() -> int:
                     tuple(transport.CHILD_FLAGS) == ("-I", "-S")
                     and transport.child_command() == [sys.executable, "-I", "-S", "-c", transport.BOOTSTRAP],
                     f"CHILD_FLAGS={tuple(transport.CHILD_FLAGS)!r}, command opens {transport.child_command()[:3]!r}")
+
+        # V26-01: the flags are a STATIC invariant, so prove the shape a mutation would have to break. `CHILD_FLAGS` must
+        # be an immutable tuple and `child_command()` must derive the command from it with no flag literal of its own —
+        # a second place the flags are spelled is a second place that can drift.
+        launcher_uses_tuple = False
+        launcher_literals: list = []
+        try:
+            for node in ast.walk(ast.parse(common_data.decode("utf-8"), "<probe_common.py>")):
+                if isinstance(node, ast.FunctionDef) and node.name == "child_command":
+                    launcher_uses_tuple = "CHILD_FLAGS" in ast.dump(node)
+                    launcher_literals = [n.value for n in ast.walk(node)
+                                         if isinstance(n, ast.Constant) and n.value in ("-I", "-S")]
+        except (UnicodeDecodeError, SyntaxError):
+            launcher_uses_tuple = False
+        try:
+            transport.CHILD_FLAGS[0] = "-S"   # type: ignore[index]  # the mutation this case exists to rule out
+            immutable = False
+        except TypeError:
+            immutable = True
+        report_case("CHILD_FLAGS is an immutable tuple and the only place the flags are spelled (V26-01)",
+                    isinstance(transport.CHILD_FLAGS, tuple) and tuple(transport.CHILD_FLAGS) == ("-I", "-S")
+                    and immutable and launcher_uses_tuple and not launcher_literals
+                    and transport.child_command()[1:3] == ["-I", "-S"],
+                    f"{type(transport.CHILD_FLAGS).__name__} {tuple(transport.CHILD_FLAGS)!r}, item assignment "
+                    f"{'refused' if immutable else 'ACCEPTED'}, launcher literals {launcher_literals or 'none'}")
+
+        # V26-01: the enforcement that closes the gap a runtime check cannot. CI mutates the flags, the launcher and the
+        # guard call and REQUIRES `--self-test` to fail, so the workflow text is part of the claim and is checked here.
+        ci_path = os.path.join(ROOT, ".github", "workflows", "ci.yml")
+        try:
+            with open(ci_path, "r", encoding="utf-8") as handle:
+                ci_text = handle.read()
+        except OSError as exc:
+            report_case("CI fails closed when a flag, the launcher or the guard call is tampered with (V26-01)", False,
+                        f"no CI workflow beside this suite ({exc.__class__.__name__}) to inspect", skipped=True)
+        else:
+            required = {
+                "a mutation step": "Mutation:",
+                "-I removed": """mutate 'CHILD_FLAGS = ("-I", "-S")' 'CHILD_FLAGS = ("-I",)' no-I""",
+                "-S removed": """mutate 'CHILD_FLAGS = ("-I", "-S")' 'CHILD_FLAGS = ("-S",)' no-S""",
+                "launcher narrowed": "no-command-S",
+                "guard call removed": "no-guard",
+                "a survivor fails the job": "MUTATION SURVIVED",
+                "it runs the self-test": "--self-test",
+            }
+            missing = [name for name, marker in required.items() if marker not in ci_text]
+            report_case("CI fails closed when a flag, the launcher or the guard call is tampered with (V26-01)",
+                        not missing, "missing from ci.yml: " + ", ".join(missing) if missing else
+                        "all four mutations present; a surviving mutation fails the job")
         with tempfile.TemporaryDirectory() as tmp:
             frames = {"__init__.py": b"",
                       "probe_common.py": b"MARK = 'common'\n",
@@ -5414,18 +5534,21 @@ def self_test() -> int:
                             f"exit {no_isolation.returncode}, plants that ran {ran_without_i!r}: "
                             f"{(no_isolation_err[-1] if no_isolation_err else 'no stderr')[:110]}")
 
-                # (b) `-S` removed, `-I` kept: `site` runs again at startup, so the interpreter is not site-free even
-                # though its path is clean. The child is REJECTED; `-I` still keeps the cwd hook out of reach.
-                no_site_flag = subprocess.run([sys.executable, "-I", "-c", transport.BOOTSTRAP],
-                                              input=transport.payload(probe_frames), env=dict(startup_env),
-                                              cwd=hostile, capture_output=True, timeout=120)
+                # (b) `-S` removed, `-I` kept, and NEITHER a plant nor `PYTHONPATH` in reach (V26-01). This is the honest
+                # case: `site` has already run by the time the bootstrap starts, so the only thing left to demonstrate is
+                # that the child DETECTS the missing flag and refuses to be measured. Nothing here claims to have
+                # prevented a system hook — that is the static invariant's job, checked above and in CI.
+                with tempfile.TemporaryDirectory() as neutral:
+                    neutral_env = {key: value for key, value in startup_env.items() if key != "PYTHONPATH"}
+                    no_site_flag = subprocess.run([sys.executable, "-I", "-c", transport.BOOTSTRAP],
+                                                  input=transport.payload(probe_frames), env=neutral_env,
+                                                  cwd=neutral, capture_output=True, timeout=120)
                 no_site_err = no_site_flag.stderr.decode().strip().splitlines()
-                ran_without_s = startup_ran()
-                report_case("-S removed, -I kept: the child is REJECTED and no cwd hook executes (V25-01)",
+                no_site_text = no_site_err[-1] if no_site_err else ""
+                report_case("-S removed: the child DETECTS the missing flag and refuses — prevention is static (V26-01)",
                             no_site_flag.returncode == transport.CHILD_REFUSED and no_site_flag.stdout == b""
-                            and ran_without_s == "",
-                            f"exit {no_site_flag.returncode}, plants that ran {ran_without_s!r}: "
-                            f"{(no_site_err[-1] if no_site_err else 'no stderr')[:110]}")
+                            and "DETECTION ONLY" in no_site_text,
+                            f"exit {no_site_flag.returncode}: {no_site_text[:130]}")
 
     with tempfile.TemporaryDirectory() as tmp:
         tree(tmp)
@@ -5801,10 +5924,10 @@ code a reviewer verified. Nothing the driver executes is re-read from disk and n
 that fails the check contributes no executable source at all, and the interposed child (`--interpose`) verifies and
 binds the same tree by the same route before it measures. One path is deliberately outside this binding and is named
 instead of implied: `run_all.py` itself, which the interpreter imports before any check can run (A.0 pins it;
-`--manifest` prints its digest). The CHILDREN are inside it as of v2.4, their interpreter STARTUP as of v2.5 and their bootstrap's ORDERING as of
-v2.6 — see the next section.
+`--manifest` prints its digest). The CHILDREN are inside it as of v2.4, their interpreter STARTUP as of v2.5, their bootstrap's ORDERING as of
+v2.6 and their flag invariant as STATIC as of v2.7 — see the next section.
 
-## A child starts from the same bytes, in an isolated interpreter (V23-01, V24-01, V25-01)
+## A child starts from the same bytes, in an isolated interpreter (V23-01, V24-01, V25-01, V26-01)
 
 Under v2.3 the measured children (probe6's server, stage and `--realloc` children, probe8's mmap child) were started
 with `python -m tools.obs.probes.<probe>`: the parent had verified the bytes, but the CHILD opened the file, in a
@@ -5851,21 +5974,35 @@ not be imported in order to refuse), calls `isolated()` as its first executable 
 `sys.flags.safe_path` and the FORM of each `sys.path` entry instead of `os.getcwd()` — and a post-import
 `cwd_free()` re-confirms the path claim as defence in depth, able to add a refusal but never to replace one.
 `--self-test` PARSES the bootstrap and requires `isolated()` to be executed before the first file-backed import with
-only `sys` ahead of it, then removes each flag on its own: `-S` without `-I` in a directory whose `hashlib.py`
-records itself and raises, and `-I` without `-S` in a directory holding `sitecustomize.py`. Both exit 86 with
-nothing planted ever executing, next to a CONTROL that the `hashlib.py` plant DOES run once `-I` is removed.
+only `sys` ahead of it, then removes `-I` in a directory whose `hashlib.py` records itself and raises: exit 86 with
+nothing planted ever executing, next to a CONTROL that the same plant DOES run once `-I` is removed.
 
-`--self-test` counts outcomes separately (V22-03): `33 passed, 0 failed, 1 skipped (34 cases)` rather than folding
-skips into passes (`34 passed` where the device-node case can run). A case this host cannot run (no `CAP_MKNOD`, no
+The flags are a STATIC launcher invariant, not a runtime check (V26-01). v2.6 also removed `-S` in a working directory
+holding `sitecustomize.py` and reported that no hook ran — which proved less than it looked: `-I` keeps the working
+directory off `sys.path` even without `-S`, so that child could never have imported the planted hook, and the case
+exercised `-I` rather than the absence of `site`. The assertion was also impossible in principle. CPython runs `site`
+during interpreter STARTUP, before a byte of the `-c` bootstrap is compiled, so if a SYSTEM site hook exists, no child
+code can prevent it: `isolated()` can only observe `sys.flags.no_site` afterwards and refuse the measurement, and its
+refusal now says so (`DETECTION ONLY`). The guarantee is static and lives in three places: the immutable
+`CHILD_FLAGS = ("-I", "-S")` tuple is the only place the flags are spelled, `child_command()` derives the command from
+it and nothing else, and `.github/workflows/ci.yml` mutates each flag, the launcher's return value and the `isolated()`
+call and FAILS THE BUILD if `--self-test` survives any of them. `--self-test` checks exactly that shape — tuple type,
+item assignment refused, no flag literal inside `child_command()`, the CI step's own text present — and launches a
+`-S`-less child in an EMPTY directory only to show the post-hoc detection fires. The flawed `sitecustomize` case is
+deleted, not relabelled.
+
+`--self-test` counts outcomes separately (V22-03): `35 passed, 0 failed, 1 skipped (36 cases)` rather than folding
+skips into passes (`36 passed` where the device-node case can run). A case this host cannot run (no `CAP_MKNOD`, no
 `O_NOFOLLOW`) prints as `skip` and never counts as a pass; the exit status depends only on failures. Its cases
 include a real inode swapped between `lstat()` and `open()` (V22-02), so `samestat`'s refusal is demonstrated rather
-than argued, and these cases start REAL children (V23-01, V24-01, V25-01): a frame whose digest does not match is refused instead of
+than argued, and these cases start REAL children (V23-01, V24-01, V25-01, V26-01): a frame whose digest does not match is refused instead of
 executed, a child runs the bytes it was sent while the path it names holds different source, a swapped bootstrap and
 a truncated payload are refused, and an unverified sibling cannot be imported from disk. Four of them (V24-01)
 start a child in a working directory holding a hostile `sitecustomize.py` plus `hashlib.py` / `ssl.py` shadows:
 the hook never runs, `hashlib` is still the standard library's, the payload digest still verifies, a child started
 without `-I -S` is refused — and a CONTROL shows the same plant DOES run when the flags are removed, so the cases
-cannot pass vacuously.
+cannot pass vacuously. The rest of the V26-01 cases start no plant at all: they prove the launcher's static shape and
+require the CI mutations, because that — not a child-side check — is what makes a stripped flag fail closed.
 
 After a REVIEWED change: `--update-manifest` (this directory), then regenerate A.0/A.7 from the document (D44).
 
@@ -5873,7 +6010,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 
 | File | Role |
 |---|---|
-| `probe_common.py` | constants (mirroring §12), the deterministic worst-case fixtures, the shim's getters, and the verified child transport — bootstrap, payload framing, `run_suite_child`, launched `-I -S`, guard before any file-backed import (V23-01, V24-01, V25-01) |
+| `probe_common.py` | constants (mirroring §12), the deterministic worst-case fixtures, the shim's getters, and the verified child transport — bootstrap, payload framing, `run_suite_child`, the static launcher invariant `CHILD_FLAGS`, guard before any file-backed import (V23-01, V24-01, V25-01, V26-01) |
 | `probe1_phase1.py` | phase 1 — request path: 64 KiB chunked scratch accumulation, then `bytes(scratch)` |
 | `probe2_seal.py` | phase 2 — §5.1.1 seal order, plus the BANNED retain-the-chunk variant (must fail its bound) |
 | `probe3_decode.py` | phase 3 — the §5.1.2 `decode_pass` release order on ONE line at `MAX_LINE` |
@@ -5883,7 +6020,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
-| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution and child binding and the V25-01 pre-import/partial-flag cases (V22-01, V23-01, V24-01, V25-01) |
+| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution and child binding, the V25-01 pre-import/partial-flag cases and the V26-01 static-invariant and CI-mutation cases (V22-01, V23-01, V24-01, V25-01, V26-01) |
 | `expected.json` | the file manifest (size + SHA-256) AND the recorded values, bounds and inventory derivations |
 | `README.md` | this file |
 
@@ -5973,11 +6110,11 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
 ```
 {
   "env": {
-    "isolation": "every child runs python -I -S -c <bootstrap> and refuses (exit 86) unless sys.flags.isolated/no_site/ignore_environment/no_user_site/safe_path are set, no site/sitecustomize/usercustomize is imported and sys.path holds no working-directory or relative entry; the bootstrap imports ONLY sys (a built-in) and calls isolated() BEFORE builtins/hashlib/json/os/types, so no file-backed module can run ahead of the guard (V24-01, V25-01)",
+    "isolation": "every child runs python -I -S -c <bootstrap> and refuses (exit 86) unless sys.flags.isolated/no_site/ignore_environment/no_user_site/safe_path are set, no site/sitecustomize/usercustomize is imported and sys.path holds no working-directory or relative entry; the bootstrap imports ONLY sys (a built-in) and calls isolated() BEFORE builtins/hashlib/json/os/types, so no file-backed module can run ahead of the guard (V24-01, V25-01); -I and -S are STATIC launcher invariants, because CPython runs site during interpreter startup before any -c code is compiled, a missing -S can only be detected and refused after the fact (never prevented by the child), so the boundary is the immutable CHILD_FLAGS tuple, the child_command() derived from it alone, and the CI mutation step that fails the build if either flag, the launcher's return value or the isolated() call is tampered with (V26-01)",
     "openssl": "3.0.13",
     "platform": "Linux x86-64",
     "python": "3.12.3",
-    "updated": "v2.6"
+    "updated": "v2.7"
   },
   "inventory": {
     "items": [
@@ -6034,358 +6171,5 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 19170,
-        "path": "tools/obs/probes/README.md",
-        "sha256": "f3d3f6f546eb3d46df3ce775e6d587c9c1255e824ec0a786df085fcd8bcdb513"
-      },
-      {
-        "bytes": 0,
-        "path": "tools/obs/probes/__init__.py",
-        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-      },
-      {
-        "bytes": 19327,
-        "path": "tools/obs/probes/alloc_peak.c",
-        "sha256": "19064773bb13436d9386ac896fa9ab3021f01afe0e5bf05a03b1bfdca210efa3"
-      },
-      {
-        "bytes": 1358,
-        "path": "tools/obs/probes/probe1_phase1.py",
-        "sha256": "1f63e461fb71836d78c718d0f0ac98c64c46f4c64e99852c0afaf9e83fab38d2"
-      },
-      {
-        "bytes": 2326,
-        "path": "tools/obs/probes/probe2_seal.py",
-        "sha256": "455ef7b384c0057ea50a1e6ed711538bfa5ca6e904e22590a576be4bf4c7a20f"
-      },
-      {
-        "bytes": 1699,
-        "path": "tools/obs/probes/probe3_decode.py",
-        "sha256": "4320fbe9044b7bd4d9b70238d8d5731832e6348d28a710fe8f92368f1ae66066"
-      },
-      {
-        "bytes": 815,
-        "path": "tools/obs/probes/probe4_decode_fresh.py",
-        "sha256": "e72afb89e85274c90db48ec32d03435b32dae6ffa1577adc0f83d0b68e4129eb"
-      },
-      {
-        "bytes": 2647,
-        "path": "tools/obs/probes/probe5_byte_equality.py",
-        "sha256": "61278c289c1ab2cb10ed7305e3e572e63debed8f1a9b6997a2a440b5c0572a47"
-      },
-      {
-        "bytes": 22236,
-        "path": "tools/obs/probes/probe6_native.py",
-        "sha256": "6f630fc3646f06794dcd98513d0dd3cfe20ebb89c59334b62089a5738936dbb4"
-      },
-      {
-        "bytes": 780,
-        "path": "tools/obs/probes/probe7_structure.py",
-        "sha256": "d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4"
-      },
-      {
-        "bytes": 19110,
-        "path": "tools/obs/probes/probe8_mmap_threads.py",
-        "sha256": "f802508e3bcbb97d4973edc712a9c86fd124cf2cade195d4a4dbdaa5f973c601"
-      },
-      {
-        "bytes": 28147,
-        "path": "tools/obs/probes/probe_common.py",
-        "sha256": "67fe2b48714ff1ae58f742bb5c2b544e2fbfe90e327bbd3b9622979792ae0ee2"
-      },
-      {
-        "bytes": 77478,
-        "path": "tools/obs/probes/run_all.py",
-        "sha256": "e2166004f5b5132ce514b85a65a5500389e7f3207bba538bfbe57da3ae94c77f"
-      }
-    ]
-  },
-  "measurements": [
-    {
-      "bound": 8781824,
-      "instrument": "tracemalloc",
-      "interposed": 8400920,
-      "interposed_map_peak": 0,
-      "peak": 8396983,
-      "probe": "phase1_request",
-      "tolerance": 0.02,
-      "v17_campaign": 8462496
-    },
-    {
-      "bound": 151552,
-      "instrument": "tracemalloc",
-      "interposed": 147848,
-      "interposed_map_peak": 0,
-      "peak": 148004,
-      "probe": "phase2_seal",
-      "tolerance": 0.02,
-      "v17_campaign": 148113
-    },
-    {
-      "bound": 151552,
-      "expected_fail": true,
-      "instrument": "tracemalloc",
-      "peak": 5656528,
-      "probe": "phase2_seal_no_del",
-      "tolerance": 0.02,
-      "v17_campaign": 5656645
-    },
-    {
-      "bound": 11202224,
-      "instrument": "tracemalloc",
-      "interposed": 11186544,
-      "interposed_map_peak": 0,
-      "peak": 11188520,
-      "probe": "phase3_decode",
-      "tolerance": 0.02,
-      "v17_campaign": 11188261
-    },
-    {
-      "bound": 11202224,
-      "instrument": "tracemalloc",
-      "peak": 11188600,
-      "probe": "phase3_decode_fresh",
-      "tolerance": 0.02,
-      "v17_campaign": 11188197
-    },
-    {
-      "bound": 11202224,
-      "instrument": "tracemalloc",
-      "peak": 11188520,
-      "probe": "phase3_structure",
-      "tolerance": 0.02,
-      "v17_campaign": 11188197
-    },
-    {
-      "bound": null,
-      "bytes": 8511232,
-      "peak": 0,
-      "probe": "byte_equality",
-      "records": 1020
-    },
-    {
-      "bound": 262144,
-      "end_delta": 52192,
-      "instrument": "mallinfo2 sample max (LOWER BOUND); the gate uses the interposed client-only region",
-      "interposed": 217072,
-      "interposed_map_peak": 0,
-      "peak": 105072,
-      "probe": "native_headroom",
-      "tolerance": 0.2
-    },
-    {
-      "bound": null,
-      "instrument": "alloc_peak.so direct-mmap channel under concurrency, partial unmap and mremap (A.5.9)",
-      "iterations": 64,
-      "peak": 8519680,
-      "probe": "mmap_accounting",
-      "threads": 8
-    },
-    {
-      "bound": 12582912,
-      "instrument": "alloc_peak.so malloc channel, one child: 4 MiB, a failed realloc(p, SIZE_MAX), a second 4 MiB (A.5.4, V20-11/V20-12)",
-      "peak": 8398528,
-      "probe": "realloc_accounting",
-      "tolerance": 0.02
-    }
-  ],
-  "schema": "obs-probes/2"
-}
-```
-
-#### A.7.13 `tools/obs/probes/__init__.py`
-
-```python
-
-```
-
-#### A.7.14 `tools/obs/probes/probe8_mmap_threads.py`
-
-```python
-"""Probe 8 - the mmap channel under concurrency, partial unmapping and mremap (V19-01/V19-02).
-
-v1.9's shim tracked mappings in a bare array with no lock and subtracted a bare length, so it could not answer the
-question this probe asks: is the second channel still exact when several threads map and unmap at once, when an unmap
-covers only PART of a mapping, and when `mremap` moves or grows one?  Four properties, each measured here rather than
-argued:
-
-  A. PARTIAL UNMAP is range-aware: a hole punched in the middle of a mapping subtracts only the hole, splits the
-     tracked range in two, and the remaining pieces keep their exact byte count.
-  B. MREMAP is accounted as remove(old) + add(new): a grow from 8 KiB to 32 KiB raises live by exactly 32 KiB (not by
-     40 KiB, and not by 24 KiB), and the following unmap returns the total to the baseline.
-  C. CONCURRENCY does not lose updates: THREADS threads map 1 MiB each and meet at a barrier, so their mappings are
-     live at the same instant; the recorded peak must be at least the sum (a lost update makes it smaller) and the
-     phase must END at exactly the baseline, with the range table back to its starting size (an entry leaked per
-     iteration would grow the table, and the shim aborts rather than drop one).
-  D. CAPACITY EXHAUSTION fails closed, and is proven to happen WHERE INTENDED. The interpreter itself maps anonymous
-     memory before any probe code runs (its arenas are part of the tracked table), so a fixed `ALLOC_PEAK_MAP_SLOTS=1`
-     aborts during startup - the v2.0 form of this check passed for exactly that reason, having never reached its own
-     mapping. This probe therefore measures the child's own baseline first, sets the capacity relative to it
-     (PRESSURE_SLOTS, comfortably above startup), and requires all four of:
-       D1. the child prints a flushed MAPPED line before dying, so the abort is known to have happened AFTER the
-           explicit test mapping - and that line must report tracked == capacity and live == baseline + the bytes the
-           child itself mapped;
-       D2. the child fills the table EXACTLY (capacity - baseline regions successful mappings, no more, no fewer);
-       D3. the child dies with SIGABRT, not an exit code, and its stderr carries the exact diagnostic string with the
-           exact tracked/capacity/live numbers the same child just printed - one line, byte for byte, not a substring;
-       D4. a NEGATIVE CONTROL - the identical program, identical preload, capacity left at the compiled default and only
-           a handful of explicit mappings - completes, prints SURVIVED, exits 0, and emits no diagnostic. Without it,
-           an abort caused by anything else (a bad argument, a preload failure) would look like a pass.
-
-     Mapping addresses are MAP_FIXED_NOREPLACE and 1 GiB apart so no two explicit mappings can coalesce, which would
-     otherwise make the table fill later than capacity predicts.
-
-The probe runs its measurements in a child process with `alloc_peak.so` preloaded. Exits 0 when every property holds.
-
-CHILDREN ARE STARTED FROM THE PARENT'S VERIFIED BYTES (V23-01). v2.3 started the mmap child with
-`python -m tools.obs.probes.probe8_mmap_threads --child`, which re-opens this FILE in the child after the driver verified
-it, and the capacity program was handed to `python -c` with no binding at all. Both now travel through
-`probe_common.run_suite_child` / `run_program`: the source goes over a pipe from the parent's manifest-checked buffers,
-each frame is checked against the digest the manifest promises, the child's bootstrap is bound by its own digest, and
-the child's `tools.obs.probes` package is closed (`__path__ = []`) so an unverified sibling cannot be imported there.
-WHAT IS PRESERVED: the same fresh interpreter per child, still counted by the shim from exec (the baseline line is
-printed by the program itself, exactly as before), the same `cwd` and `LD_PRELOAD`, the same `sys.argv` (`-c` plus the
-mapping count, which is what the inline program used to see), and the same resets. Run this file on its own and it
-refuses to start a child rather than fall back to `-m`.
-"""
-from __future__ import annotations
-
-import ctypes
-import itertools
-import json
-import os
-import re
-import signal
-import sys
-import threading
-
-from tools.obs.probes import probe_common as C
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
-SHIM = os.path.join(HERE, "alloc_peak.so")
-
-PROT_READ_WRITE = 0x1 | 0x2
-MAP_PRIVATE_ANON = 0x02 | 0x20
-MAP_FIXED_NOREPLACE = 0x10 | 0x100000
-MREMAP_MAYMOVE = 1
-
-# Every mapping this probe makes is placed explicitly and 1 GiB from its neighbour. A kernel-chosen address can land
-# flush against an existing tracked range; the shim coalesces adjacent ranges (correctly, to keep the table bounded), and
-# the region-count assertions of property A would then depend on where the kernel happened to put the mapping. Fixed,
-# isolated addresses remove that degree of freedom, so "+1 range per mapping, +2 after a hole" is a property of the
-# bookkeeping rather than of the address layout.
-ISOLATION_BASE = 0x300000000000
-ISOLATION_STRIDE = 0x40000000
-THREADS = 8
-ITERATIONS = 64
-THREAD_MAPPING = 1024 * 1024
-
-PAGE = 4096
-ISOLATION_SLOT = itertools.count()   # process-wide: unique isolated address per explicit mapping
-
-CONTROL_MAPPINGS = 4          # negative control: a handful of explicit mappings, capacity left at its default
-PRESSURE_SLOTS = 64           # abort run: capacity well above the interpreter's own startup table
-FILL_MAPPINGS = 4096          # "map until the table refuses" - the loop never reaches this number
-DIAGNOSTIC_PREFIX = "alloc_peak: FATAL:"
-
-STAGE = re.compile(r"^(BASELINE|MAPPED|SURVIVED) live=(\d+) regions=(\d+)$")
-CAPACITY = re.compile(r"^CAPACITY (\d+)$")
-
-# The probed program. Its stdout is the evidence: every line is flushed BEFORE the next mapping is attempted, so a
-# MAPPED line on stdout proves the interposer recorded that mapping while the process was still alive.
-CHILD_PROGRAM = """\
-import ctypes, sys
-
-lib = ctypes.CDLL(None)
-mmap = lib.mmap
-mmap.restype = ctypes.c_void_p
-mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-for name in ("alloc_peak_map_live", "alloc_peak_map_regions", "alloc_peak_map_capacity"):
-    getattr(lib, name).restype = ctypes.c_size_t
-
-PAGE = 4096
-STRIDE = 0x40000000                     # 1 GiB apart: two explicit mappings can never be coalesced into one range
-BASE_ADDRESS = 0x200000000000
-MAP_FIXED_NOREPLACE = 0x10 | 0x100000
-
-
-def state(label):
-    print("%s live=%d regions=%d" % (label, lib.alloc_peak_map_live(), lib.alloc_peak_map_regions()), flush=True)
-
-
-state("BASELINE")
-print("CAPACITY %d" % lib.alloc_peak_map_capacity(), flush=True)
-
-for index in range(int(sys.argv[1])):
-    address = BASE_ADDRESS + index * STRIDE
-    p = mmap(ctypes.c_void_p(address), PAGE, 3, 0x02 | 0x20 | MAP_FIXED_NOREPLACE, -1, 0)
-    if p in (None, ctypes.c_void_p(-1).value):
-        raise SystemExit("MAP_FIXED_NOREPLACE rejected at %#x" % address)
-    state("MAPPED")
-
-state("SURVIVED")
-"""
-
-
-def api():
-    """ctypes bindings for the shim's getters and the libc mapping calls (which the shim interposes)."""
-    lib = ctypes.CDLL(None)
-    for name in ("alloc_peak_reset", "alloc_peak_peak", "alloc_peak_map_peak", "alloc_peak_map_live",
-                 "alloc_peak_map_regions", "alloc_peak_map_capacity"):
-        getattr(lib, name).restype = ctypes.c_size_t
-    lib.mmap.restype = ctypes.c_void_p
-    lib.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-    lib.munmap.restype = ctypes.c_int
-    lib.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-    lib.mremap.restype = ctypes.c_void_p
-    lib.mremap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p]
-    lib.alloc_peak_map_live.restype = ctypes.c_size_t
-    return lib
-
-
-def mapped(lib, size: int) -> int:
-    """Map `size` bytes at an isolated address: address `SLOT.next()` × 1 GiB from its neighbours, so no two explicit
-    mappings can ever be coalesced into one tracked range (the shim would coalesce adjacent ones, correctly)."""
-    address = ISOLATION_BASE + next(ISOLATION_SLOT) * ISOLATION_STRIDE
-    p = lib.mmap(ctypes.c_void_p(address), size, PROT_READ_WRITE, MAP_PRIVATE_ANON | MAP_FIXED_NOREPLACE, -1, 0)
-    if p in (None, ctypes.c_void_p(-1).value):
-        raise SystemExit(f"mmap at {address:#x} ({size} B) failed: the isolated slot is occupied")
-    if int(p) != address:
-        raise SystemExit(f"mmap at {address:#x} returned {int(p):#x}: MAP_FIXED_NOREPLACE not honoured")
-    return address
-
-
-def unmap(lib, address: int, size: int) -> None:
-    if lib.munmap(ctypes.c_void_p(address), size) != 0:
-        raise SystemExit(f"munmap({address:#x}, {size}) failed")
-
-
-def partial_and_mremap(lib) -> dict[str, int | bool]:
-    """Properties A and B, single-threaded, so every byte is attributable."""
-    lib.alloc_peak_reset()
-    base_live, base_regions = int(lib.alloc_peak_map_live()), int(lib.alloc_peak_map_regions())
-
-    first = mapped(lib, 3 * PAGE)
-    after_map = int(lib.alloc_peak_map_live()) - base_live
-    unmap(lib, first + PAGE, PAGE)                       # hole in the middle: 8 KiB left, two ranges
-    after_hole = int(lib.alloc_peak_map_live()) - base_live
-    hole_regions = int(lib.alloc_peak_map_regions()) - base_regions
-    unmap(lib, first, PAGE)
-    unmap(lib, first + 2 * PAGE, PAGE)
-    after_free = int(lib.alloc_peak_map_live()) - base_live
-
-    second = mapped(lib, 2 * PAGE)
-    after_second = int(lib.alloc_peak_map_live()) - base_live
-    moved = lib.mremap(ctypes.c_void_p(second), 2 * PAGE, 8 * PAGE, MREMAP_MAYMOVE, None)
-    if moved in (None, ctypes.c_void_p(-1).value):
-        raise SystemExit("mremap failed")
-    after_mremap = int(lib.alloc_peak_map_live()) - base_live
-    unmap(lib, int(moved), 8 * PAGE)
-    after_remap_free = int(lib.alloc_peak_map_live()) - base_live
-    peak = int(lib.alloc_peak_map_peak())
-
-    return {
-        "map": after_map, "hole": after_hole, "hole_regions": hole_regions, "freed": after_free,
-        "remap_before": after_second, "remap_after": after_mremap, "remap_freed": after_remap_free, "peak": peak,
-        "ok": (after_map == 3 * PAGE and after
+        "bytes": 20862,
+        "path": "tools/obs/probes/REA
