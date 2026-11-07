@@ -1,4 +1,4 @@
-# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v2.5 (NORMATIVE)
+# OBS-01/02 Session Runner and Evidence Writer — Architectural Blueprint v2.6 (NORMATIVE)
 
 Status: design only. No live request is authorized by this document. Milestone 1 remains **BLOCKED** until the reviewer
 accepts the protocol and a separately reviewed Step-2 implementation commit. This revision **supersedes v1.9**: it resolves
@@ -22,7 +22,20 @@ v2.1 collapsed into one wrong sentence — 14 inventoried, 13 pinned by `expecte
 (V21-02); and the lineage claim is now an exact-SHA, exact-run statement rather than a working-tree disclaimer
 (V21-03).
 
-**v2.5 status (this revision).** v2.5 supersedes v2.4 and closes the v2.4 review's single blocking finding (V24-01,
+**v2.6 status (this revision).** v2.6 supersedes v2.5 and closes the v2.5 review's
+single blocking finding (V25-01, §1.0f). v2.5 launched every child `python -I -S -c <bootstrap>` and made the bootstrap
+verify `sys.flags` — but the bootstrap's FIRST LINE was `import builtins, hashlib, json, os, sys, types`, so the
+verification ran after the imports it exists to protect: with `-I` dropped, a working-directory `hashlib.py` executes
+during `import hashlib`, which is the module the payload verification itself calls. The prelude now imports `sys`
+alone — a built-in, resolved without a `sys.path` search — refuses from `sys.stderr` with `SystemExit(86)` (no
+`os._exit()`, because `os` must not be imported in order to refuse), calls `isolated()` as its first executable
+statement, and only then imports `builtins`, `hashlib`, `json`, `os` and `types`; `isolated()` is import-free (it
+reads `sys.flags` and the form of each `sys.path` entry instead of `os.getcwd()`) and a post-import `cwd_free()`
+re-confirms the path claim as defence in depth. Five new self-test cases prove the ordering and both partial launches
+with REAL children, and CI mutates each flag and the guard call and REQUIRES the self-test to fail. No measurement
+moved: all ten gated readings are unchanged.
+
+**v2.5 status (retained).** v2.5 supersedes v2.4 and closes the v2.4 review's single blocking finding (V24-01,
 §1.0e). v2.4 bound a child's PAYLOAD — every byte a child executes is a frame the parent verified against
 `expected.json` — but the child INTERPRETER itself was still started `python -c <bootstrap>`, so its STARTUP was
 unprotected: `site` imports `sitecustomize` from the environment, `PYTHONPATH` entries are searched, and for `-c` the
@@ -223,7 +236,7 @@ named in the row that moved it, and re-pinned in `expected.json` rather than in 
 Retained verbatim: these rows describe what v1.9 did. Where a FIGURE changed in v2.0 (the native request region is now
 client-only and measures 214,120 B with a 0 B direct-`mmap` channel, A.5.8), §1.0 and the section it cites govern.
 
-### 1.0e V24 finding resolved in v2.5 (this revision)
+### 1.0e V24 finding resolved in v2.5 (retained)
 
 The v2.4 review accepted the payload binding of V23-01 and found the remaining hole one layer down: the child PROCESS
 was bound to verified bytes, the child's INTERPRETER STARTUP was not. v2.4 launched `python -c <bootstrap>` with no
@@ -241,6 +254,20 @@ at the launcher and again inside the child, and changes no measurement.
 | V18-01 | §5.1.2 called the over-long-line class "impossible under the frozen schema" and "proved unreachable for schema-valid artifacts". That claim is unproven and false in the general case: Step-1 validates NO string length — `_jsonl` splits on `b"\\n"` with no upper bound (runstore.py:279–286), `_record_from_json` bounds only three integer ranges (348–357), and `_req_str`/`_req_headers` accept arbitrarily long strings (304–331) — so a Step-1-ACCEPTED legacy artifact can exceed `MAX_LINE`, and `/2` would reject it silently as a side effect of a budget constant rather than as a stated policy | §5.1.2.6 (new: rejection policy), §5.1.2.0 R-1/R-6, §5.1.2.1 (predicate split), §5.1.2.4 (D-21…D-23), §5.1.2.5 (rewritten), §0.2, §11 (G-V18-01), D43 | `obs-loader/2` now states an EXPLICIT REJECTION POLICY: a line whose CONTENT exceeds `MAX_LINE` is rejected BY DESIGN with the deterministic P-6 message, whatever `/1` would have done with it. The impossibility claim is WITHDRAWN and replaced by two named predicates — CONFORMING (written by §5.1.1: the bound is a theorem) and LEGACY-ADMITTED (accepted by `/1`: the bound is NOT a theorem, and the artifact is refused with its line number) — the reachability evidence is cited line by line, and the corpus now ASSERTS reachability: the frozen `/1` oracle must ACCEPT fixture D-21 and `/2` must REJECT it with the cap message, so the case fails if it ever becomes vacuous. No flag, no tolerance, no truncation, no silent skip; verifying oversize legacy evidence requires a reviewed `obs-loader/3` |
 | V18-02 | The Appendix A probe suite existed only as listings inside A.7: a reviewer could read it but not RUN it, nothing bound the printed numbers to bytes that exist, and a drift between a listing and the code it claims to be was undetectable | §A.0 (file manifest: path, role, size, SHA-256), §A.1, §A.2/A.3 (values from this run), §A.7 (mirrors regenerated from the files), `tools/obs/probes/` (13 files), §11 (G-V18-02), D44 | The suite is repository code at the paths the appendix names — `run_all.py`, `alloc_peak.c`, `expected.json`, `README.md` and `probe6_native.py`, plus the six other probe modules, `probe_common.py` and `__init__.py` that they import — and was executed from the repository root for this revision (`python -m tools.obs.probes.run_all --check` exits 0, twice). A.0 records size + SHA-256 per file, `run_all --manifest` prints the same table (G-V18-02 diffs them), the driver REFUSES to run when a file is missing, and A.7 is generated from the files, so a listing can no longer drift from the code it documents |
 | V18-03 | A.5.4 asserted that `alloc_peak.c` "sees every arena and every thread" — but it wrapped only `malloc`/`calloc`/`realloc`/`free`. CPython's object allocator obtains its 1 MiB arenas with a DIRECT `mmap` that the shim never sees, and A.5 offered no argument bounding what an uninstrumented path could hide, so the headroom constant rested on an unexamined channel | §A.5.4 (interception inventory + fenced limits), §A.5.7 (new: direct-`mmap` fence and the allocator-independence proof), §A.2/A.3 (measured channels), §6.6, §11 (G-V18-03), D45 | The over-claim is withdrawn and the channel is closed by MEASUREMENT: `alloc_peak.c` now also interposes `mmap`/`mmap64`/`munmap` for `MAP_ANONYMOUS\|MAP_PRIVATE` and exposes a second peak — 16,384 B in the native request region and 0 B in each measured phase — and the gate requires `malloc peak + mmap peak ≤ HTTP_HEADROOM` (measured 195,184 + 16,384 = 211,568 ≤ 262,144). A.5.4 itemises every allocator that is and is not intercepted; A.5.7 proves the four-term constant bounds each consumer independently of which allocator serves it, page-rounding included |
+
+### 1.0f V25 finding resolved in v2.6 (this revision)
+
+The v2.5 review accepted the launcher and found the same defect one layer deeper — in the STATEMENT ORDER of the file
+the launcher runs. `BOOTSTRAP` began by importing `builtins`, `hashlib`, `json`, `os`, `sys` and `types` and called
+`isolated()` afterwards, so every interpreter-state check executed AFTER the module imports it exists to protect, and
+`hashlib` is precisely the module the payload verification goes on to call: with `-I` dropped, a working-directory
+`hashlib.py` ran during `import hashlib`, ahead of every check V24-01 added. v2.6 makes the guard the first
+executable statement of the bootstrap, imports only the built-in `sys` ahead of it, adds the two PARTIAL-flag
+regressions with real children, and makes CI mutate the flags and the guard call. It changes no measurement.
+
+| ID | Defect as reviewed | Where it is closed | Mechanism |
+|---|---|---|---|
+| V25-01 | `BOOTSTRAP` imported non-built-in modules before it validated the interpreter: it opened with `import builtins, hashlib, json, os, sys, types` and called `isolated()` afterwards, so with `-I` dropped a working-directory `hashlib.py` executed during `import hashlib` — the module the payload verification itself uses — ahead of every check V24-01 added | §A.7.1 (`probe_common.py`: `BOOTSTRAP` prelude, `refuse`, `isolated`, `cwd_free`), §A.7.10 (`run_all.py` self-test), §A.7.11 (`README.md`), §11 (G-V25-01), §12 | The bootstrap's prelude imports `sys` ALONE (a built-in: no `sys.path` search), refuses via `sys.stderr` + `SystemExit(86)` without importing `os`, calls `isolated()` as its FIRST executable statement, and only then imports `builtins`/`hashlib`/`json`/`os`/`types`. `isolated()` is import-free: it requires `sys.flags.isolated`, `no_site`, `ignore_environment`, `no_user_site` and `safe_path`, no startup hook in `sys.modules`, and no `''`/`'.'`/relative entry in `sys.path`; `cwd_free()` re-confirms the working-directory comparison after the imports, able to add a refusal but never to replace one. Five self-test cases prove it: the bootstrap is PARSED and `isolated()` must precede the first file-backed import with only `sys` ahead of it; `CHILD_FLAGS` and `child_command()` must be exactly `('-I', '-S')`; `-S` without `-I` in a directory whose `hashlib.py` records itself and raises exits 86 with the plant never running; `-I` without `-S` in a directory holding `sitecustomize.py` is rejected the same way; and a CONTROL shows the `hashlib.py` plant DOES execute once `-I` is removed. CI mutates `CHILD_FLAGS` (dropping each flag in turn) and deletes the `isolated()` call, failing the job if `--self-test` still passes |
 
 ### 1.2 V17 findings resolved in v1.8 (retained)
 
@@ -1940,7 +1967,7 @@ and is the second admissible independent egress source (§10.1(1b), V15-03).
 free-form `error` string (records) or the receipt's `reason`/`diagnostics` (protocol §0/§3.3 alignment: record shapes stay
 frozen under `obs-run-manifest/1`).
 
-## 11. Gates and decisions (v1.9 adds G-V18-01–03 and D43–D45; v1.8 adds G-V17-01–04 and D38–D42; v1.7 adds G-V16-01–07 and D31–D37; v1.6 adds G-V15-01–07 and D24–D30; v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable)
+## 11. Gates and decisions (v1.9 adds G-V18-01–03 and D43–D45; v1.8 adds G-V17-01–04 and D38–D42; v1.7 adds G-V16-01–07 and D31–D37; v1.6 adds G-V15-01–07 and D24–D30; v1.4 additions; v1.3 G-R1–G-R12, D1–D10 remain in force where still applicable; v2.6 adds G-V25-01)
 
 | Gate | Assertion | Killer-test sketch |
 |---|---|---|
@@ -1991,6 +2018,7 @@ frozen under `obs-run-manifest/1`).
 | G-V20-03 | the map live total cannot be clamped (V20-13) | (a) source gate: `map_live_sub` contains no clamp (`cur > n ? ... : 0` is gone) and calls `map_fail_underflow(n, cur)`, which writes one diagnostic line with both figures and `abort()`s; (b) demonstrated with a FAULT-INJECTED build (one 4 MiB range silently removed from the table): `SIGABRT` (−6) and the byte-exact line `alloc_peak: FATAL: mmap accounting underflow: 4202496 B to subtract, 2121728 B tracked (regions 3): refusing to clamp to zero`, while the shipped build runs the same child to `SURVIVED` with `live` back at its baseline; (c) the path is NOT reachable from a correct shim, so it is verified by fault injection in review rather than shipped as a test hook — stated as a limit, not hidden: CI cannot provoke a lost range without a deliberate bug in the instrument; (d) mutation: restore the clamp → the injected build exits 0 with a silently reduced total instead of aborting |
 | G-V21-01 | the suite's inventory is IDENTITY-based, not name-based (V21-01) | (a) `suite_files()` enumerates with `os.scandir` + `lstat` semantics and REFUSES any entry that is not a regular file; `check_manifest()` hashes each file through ONE `O_NOFOLLOW` descriptor and requires `os.path.samestat(lstat, fstat)` plus an unchanged size, so the bytes compared belong to the inode inspected; (b) `--self-test` runs fourteen cases and exits non-zero if ANY refusal is missing: post-enumeration substitution by a link to a file inside the suite, a link to a file outside it, a link added after the inventory, a dangling link, a link to `/dev/null`, a directory, a FIFO, a real character device, a direct `opened_regular` call on a link, `open(O_NOFOLLOW)` refusing with `ELOOP`, a modified file still refused — plus a CONTROL that an honest tree validates and that a regular file still hashes to its own bytes; (c) CI runs `--self-test` before the gate and archives `self-test.log`; (d) mutation: restore `os.listdir` + `os.path.isfile` → the link cases are ACCEPTED and (b) fails |
 | G-V21-02 | the reported counts are three distinct counts, correctly named (V21-02) | (a) the success line names inventoried (14), pinned-by-`expected.json` (13) and `expected.json`-pinned-by-A.0 separately, and prints `expected.json`'s digest; (b) `report.json` carries `coverage.{inventoried, pinned_by_expected_json, self_path, self_sha256, self_pinned_by}` and those values EQUAL `len(manifest.files)` (14) and `len(expected.manifest.files)` (13); (c) demonstrated twice on the working tree this appendix pins, and v2.1's single-number line is recorded as wrong in §1.0c rather than silently replaced; (d) mutation: print one number for both → (a) fails |
+| G-V25-01 | the bootstrap validates the interpreter BEFORE it imports anything file-backed (V25-01) | (a) `BOOTSTRAP` imports `sys` alone ahead of the guard, calls `isolated()` as its first executable statement, and imports `builtins`/`hashlib`/`json`/`os`/`types` only afterwards; `refuse()` uses `sys.stderr` + `SystemExit(86)`, so refusing needs no import at all; (b) `isolated()` is import-free — `sys.flags.isolated/no_site/ignore_environment/no_user_site/safe_path`, no `site`/`sitecustomize`/`usercustomize` in `sys.modules`, no `''`/`'.'`/`..`/relative `sys.path` entry — and `cwd_free()` re-checks the working directory after the imports without being able to rescue a failure above it; (c) `--self-test` PARSES the bootstrap and fails unless `isolated()` precedes the first file-backed import with only `sys` imported ahead of it, requires `CHILD_FLAGS == ('-I', '-S')` and `child_command() == [sys.executable, '-I', '-S', '-c', BOOTSTRAP]`, and launches BOTH partial variants for real: `-S` without `-I` in a directory whose `hashlib.py` writes a marker and raises (exit 86, marker absent) and `-I` without `-S` in a directory holding `sitecustomize.py` (rejected, marker absent), beside a CONTROL that the marker IS written when `-I` is removed; (d) CI mutates `CHILD_FLAGS` to each single flag and deletes the `isolated()` call, requiring `--self-test` to FAIL each time — a surviving mutation fails the job |
 | G-V24-01 | every child interpreter starts ISOLATED and SITE-FREE (V24-01) | (a) `probe_common.child_command()` is `[sys.executable, '-I', '-S', '-c', BOOTSTRAP]` for EVERY child — probe6's server/stage/`--realloc`, probe8's mmap child and capacity program, the `--interpose` driver — and no spawn site passes `-m` or a path; (b) the bootstrap's `isolated()` runs before it reads the parent's request and exits 86 unless `sys.flags.isolated`, `no_site`, `ignore_environment` and `no_user_site` are set, `site`/`sitecustomize`/`usercustomize` are absent from `sys.modules`, and no `sys.path` entry is the working directory; (c) `--self-test` proves it with REAL children in a working directory holding a hostile `sitecustomize.py`, `hashlib.py` and `ssl.py`: the hook does not run, `hashlib.__file__` is the standard library's, the payload digest still verifies, a child started without the flags is refused, and a CONTROL shows the same plant DOES run when the flags are removed; (d) mutation: drop `-I`, `-S` or the `isolated()` call → (b) and (c) fail (`a child started WITHOUT -I -S is refused`) |
 | G-V23-01 | every child interpreter executes only manifest-verified bytes (V23-01) | (a) no mode of the driver and neither probe starts a child with `-m` or from a path: probe6's server, stage and `--realloc` children, probe8's mmap child and probe8's capacity program all start through `probe_common`, which sends the source over a pipe from the buffers `check_manifest(keep=…)` accepted, one frame per module carrying the SHA-256 `expected.json` promises for that file, and the child recomputes it before `compile()`; (b) the child's bootstrap is bound by digest (`sys.orig_argv` against the parent's `sha256(BOOTSTRAP)`) and its `tools.obs.probes` package is closed (`__path__ = []`), so a module the parent did not send cannot be imported from disk there; (c) `--self-test` demonstrates the properties with REAL children: a frame whose digest does not match is refused (exit 86) and never executed, a child runs the bytes it was sent while the path it names holds different source, a swapped bootstrap and a truncated payload are refused, and an unverified sibling cannot be imported; (d) the measurement semantics are unchanged and stated — fresh interpreter counted from exec, same `cwd`, same `sys.argv[0]`, same resets, module run as `__main__` — and the two figures the bootstrap moved are re-pinned with their reason; (e) mutation: restore `-m` at any spawn site → (a) fails and the substitution case (c) executes the disk copy |
 | G-V21-03 | the lineage claim names its commit and its run (V21-03) | (a) the preamble names commit `e30ef37011af7cc073fa13c8ee5384ae080995b5`, run `42208989835`, job `127862655167`, conclusion `success`, the exact command and the exact printed lines; (b) A.0's fourteen digests equal the digests that run's `--manifest` step printed, so the claim is about those bytes and not about a nearby tree — independently checkable from the `probe-suite-evidence` artifact or `gh run view 42208989835 --log`; (c) the claim is SCOPED — it covers the ten measurements at that SHA, and says the v2.2 reporting line is a working-tree result until the next run prints it; (d) mutation: delete the run id, or widen the claim to "all output at e30ef37", → the sentence then contradicts that run's `gate.log` and fails review |
@@ -2211,10 +2239,10 @@ PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check      # exit 0 pass /
 
 | Path | Role | Bytes | SHA-256 |
 |---|---|---|---|
-| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 17,538 | `8221b076d19e005b8c684e6e2f22f4f2bf51596aa2a776ef6cc8eea4a25f5227` |
+| `tools/obs/probes/README.md` | run instructions, manifest policy, TLS fixture policy, instrument limits, what needs a doc revision | 19,170 | `f3d3f6f546eb3d46df3ce775e6d587c9c1255e824ec0a786df085fcd8bcdb513` |
 | `tools/obs/probes/__init__.py` | package marker (empty file; `touch tools/obs/probes/__init__.py`) | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 | `tools/obs/probes/alloc_peak.c` | `LD_PRELOAD` dual-channel peak shim: malloc family AND a locked, range-aware direct anonymous `mmap` (A.5.4/A.5.7) | 19,327 | `19064773bb13436d9386ac896fa9ab3021f01afe0e5bf05a03b1bfdca210efa3` |
-| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 6,814 | `8e062a4421f09771941430b663eb0470e6ecbd7dfcaa313d951df2fd0fbb03b6` |
+| `tools/obs/probes/expected.json` | the manifest (size + SHA-256 of every other file) AND the recorded values, bounds and inventory derivations (§6.5, A.2/A.3/A.5.8) | 7,001 | `31ef9dde1fd9e06ed8c8349ff8ce5e1cf42f8042c3fcfa68cb8da5fe2b2283b8` |
 | `tools/obs/probes/probe1_phase1.py` | phase 1 — the §6.4 request path (chunked scratch + `bytes(scratch)`) | 1,358 | `1f63e461fb71836d78c718d0f0ac98c64c46f4c64e99852c0afaf9e83fab38d2` |
 | `tools/obs/probes/probe2_seal.py` | phase 2 — §5.1.1 seal fragments, plus the banned retain-the-chunk variant | 2,326 | `455ef7b384c0057ea50a1e6ed711538bfa5ca6e904e22590a576be4bf4c7a20f` |
 | `tools/obs/probes/probe3_decode.py` | phase 3 — §5.1.2 `decode_pass` release order on a `MAX_LINE` line | 1,699 | `4320fbe9044b7bd4d9b70238d8d5731832e6348d28a710fe8f92368f1ae66066` |
@@ -2223,9 +2251,9 @@ PYTHONPATH=$PWD python3 -m tools.obs.probes.run_all --check      # exit 0 pass /
 | `tools/obs/probes/probe6_native.py` | native term: `mallinfo2` samples, both interposed channels, the A.5.8 stage inventory (server in its own process) and the `--realloc` regression; children bootstrapped from verified bytes (V23-01) | 22,236 | `6f630fc3646f06794dcd98513d0dd3cfe20ebb89c59334b62089a5738936dbb4` |
 | `tools/obs/probes/probe7_structure.py` | phase 3 — §5.1.2 `scan_structure` (parse + key check + discard) | 780 | `d1e1e15712c3cdbe0693b278e421da048680ba33e7dc264b8c746029341a58e4` |
 | `tools/obs/probes/probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort; children and the capacity program bootstrapped from verified bytes (V23-01) | 19,110 | `f802508e3bcbb97d4973edc712a9c86fd124cf2cade195d4a4dbdaa5f973c601` |
-| `tools/obs/probes/probe_common.py` | §12 constants, deterministic worst-case fixtures, `measure()`, the shim's getters, and the verified child transport (V23-01) | 24,373 | `6559ba0c7e309ef35368df0c7f0a27206dcccb792924476f4689bf0faccbe437` |
-| `tools/obs/probes/run_all.py` | driver: `--check` / `--self-test` / `--record` / `--manifest` / `--update-manifest` / `--report` / `--interpose`; verified-byte module execution and child binding (V22-01/V23-01), the three counts (V21-02) | 69,422 | `2106d2a2c2214962131e54beeefc2d486cc43064151fbb9647dcaf84782d0682` |
-| **14 files** | **total** | **188,445** | `python -m tools.obs.probes.run_all --manifest` prints this table |
+| `tools/obs/probes/probe_common.py` | §12 constants, deterministic worst-case fixtures, `measure()`, the shim's getters, and the verified child transport: bootstrap with an import-free prelude and a guard that runs before any file-backed import, payload framing, `run_suite_child`, launched `-I -S` (V23-01, V24-01, V25-01) | 28,147 | `67fe2b48714ff1ae58f742bb5c2b544e2fbfe90e327bbd3b9622979792ae0ee2` |
+| `tools/obs/probes/run_all.py` | driver: `--check` / `--self-test` / `--record` / `--manifest` / `--update-manifest` / `--report` / `--interpose`; verified-byte module execution and child binding (V22-01/V23-01), the three counts (V21-02), the V25-01 pre-import ordering and partial-flag cases | 77,478 | `e2166004f5b5132ce514b85a65a5500389e7f3207bba538bfbe57da3ae94c77f` |
+| **14 files** | **total** | **202,094** | `python -m tools.obs.probes.run_all --manifest` prints this table |
 
 **A file is its INODE, not its name (V21-01).** This table pins BODIES, and the driver is what makes that true: the
 inventory refuses any entry in this directory that is not a regular file, and every comparison hashes through a single
@@ -2703,7 +2731,7 @@ than renumbering the twelve files a reviewer already knows. If a listing and a f
 
 #### A.7.1 `tools/obs/probes/probe_common.py`
 
-```python
+```
 """Shared harness for the Appendix A memory protocol. Deterministic, stdlib only, no network.
 
 A CHILD PROCESS STARTS FROM THE PARENT'S VERIFIED BYTES (V23-01). Two probes measure in child interpreters —
@@ -2732,6 +2760,20 @@ take that on trust: its first action is `isolated()`, which refuses (exit 86) un
 the working directory. Dropping a flag therefore FAILS CLOSED instead of quietly re-opening the hole, and `--self-test`
 runs a child whose working directory holds a hostile `sitecustomize.py`, `hashlib.py` and `ssl.py` to prove that none
 of them executes.
+
+THE BOOTSTRAP'S OWN PRELUDE IS IMPORT-FREE (V25-01). v2.5 launched the child correctly but the bootstrap opened with
+`import builtins, hashlib, json, os, sys, types` and only THEN called `isolated()`, so the validation ran after the
+imports it exists to protect: with `-I` dropped, a working-directory `hashlib.py` executes during `import hashlib`,
+before the first check, and the payload verification itself would be the thing that ran it. The prelude now imports
+`sys` alone — a BUILT-IN, taken from the interpreter's static table and never searched for on `sys.path` — defines
+`refuse()` on `sys.stderr` + `SystemExit(86)` (no `os._exit()`, because `os` must not be imported in order to refuse),
+CALLS `isolated()`, and only then imports `builtins`, `hashlib`, `json`, `os` and `types`. `isolated()` is import-free by
+construction: it reads `sys.flags` and the form of each `sys.path` entry rather than `os.getcwd()`, and a post-import
+`cwd_free()` re-confirms the same claim as defence in depth, able to add a refusal but never to replace one.
+`--self-test` parses the bootstrap it is about to run and requires `isolated()` to be executed before the first
+file-backed import with `sys` the only module ahead of it, then launches the child with `-I` removed (a plant
+`hashlib.py` in its working directory) and with `-S` removed (`sitecustomize.py` present) and requires exit 86 with
+nothing planted ever executing.
 
 What is preserved is the measurement: the child is still a fresh interpreter whose startup is inside the shim's window
 (the shim counts from exec, before this code runs), it still gets `cwd` = repository root and the same `sys.argv[0]`
@@ -2873,10 +2915,16 @@ def measure(name: str, fn, **detail) -> dict:
 TRANSPORT_MAGIC = b"OBS-PROBE/1\n"
 CHILD_REFUSED = 86          # a child refusal is never confused with a measurement failure (1) or an abort (SIGABRT)
 # V24-01: isolated (-I: no PYTHON* environment, no user site, no working directory on sys.path) and site-free (-S: no
-# sitecustomize/usercustomize import at startup). The bootstrap refuses to run when it was not started with both.
+# sitecustomize/usercustomize import at startup). V25-01: the bootstrap verifies BOTH flags before it imports anything
+# that could be resolved from disk, and refuses (exit 86) when either one was dropped.
 CHILD_FLAGS = ("-I", "-S")
 
-BOOTSTRAP = r'''import builtins, hashlib, json, os, sys, types
+BOOTSTRAP = r'''# V25-01: THIS PRELUDE IMPORTS NOTHING BUT `sys`. `sys` is a BUILT-IN module: it comes from the interpreter's static
+# table and is never searched for on sys.path, so this line cannot execute a file from the directory the child was
+# started in. Every interpreter-state check below therefore runs BEFORE the first file-backed import (builtins,
+# hashlib, json, os, types), because that import is itself the attack surface: with `-I` dropped, a working-directory
+# `hashlib.py` executes during `import hashlib` — the very module the payload verification goes on to call.
+import sys
 
 REFUSED = 86
 MAGIC = b"OBS-PROBE/1\n"
@@ -2884,24 +2932,52 @@ PACKAGE = "tools.obs.probes"
 
 
 def refuse(why):
+    # `SystemExit` rather than `os._exit()`: refusing must not require importing `os`, so the pre-import guard refuses
+    # with no file-backed module in the picture at all. The status is still 86, the code every refusal uses.
     sys.stderr.write("obs-child: REFUSED: " + why + "\n")
     sys.stderr.flush()
-    os._exit(REFUSED)
+    raise SystemExit(REFUSED)
 
 
 def isolated():
+    """Interpreter state, checked with NOTHING imported but `sys` (V25-01).
+
+    This is the first executable statement of the bootstrap, so it runs before `builtins`, `hashlib`, `json`, `os` and
+    `types` are imported: a plant that `-I`/`-S` removed cannot execute during validation. Every clause is import-free
+    on purpose — the working-directory test uses `-P`'s `safe_path` flag and the FORM of each `sys.path` entry instead
+    of `os.getcwd()`/`os.path.abspath()`, which would need `os`.
+    """
     flags = sys.flags
     if not (flags.isolated and flags.no_site and flags.ignore_environment and flags.no_user_site):
         refuse("the child interpreter was not started isolated and site-free (-I -S): its startup hooks, "
-               "PYTHONPATH or working directory were not protected (V24-01)")
+               "PYTHONPATH or working directory were not protected (V24-01, V25-01)")
+    # -P (implied by -I on 3.11+) is what keeps the working directory out of sys.path for a `-c` command.
+    if not getattr(flags, "safe_path", False):
+        refuse("the child interpreter ran WITHOUT a safe path (-P, implied by -I), so the working directory may have "
+               "been prepended to sys.path: V25-01")
     hooks = [name for name in ("site", "sitecustomize", "usercustomize") if name in sys.modules]
     if hooks:
         refuse("a startup hook ran before the bootstrap (%s): V24-01" % ", ".join(hooks))
+    for entry in sys.path:
+        if entry in ("", ".", ".."):
+            refuse("the child's sys.path contains a working-directory entry (%r): a shadow module could be imported "
+                   "ahead of the standard library (V24-01, V25-01)" % (entry,))
+        if not entry.startswith("/"):
+            refuse("the child's sys.path contains a relative entry (%r): it would resolve against the working "
+                   "directory (V25-01)" % (entry,))
+
+
+isolated()          # V25-01: FIRST. No module importable from disk has been imported at this point.
+
+import builtins, hashlib, json, os, types
+
+
+def cwd_free():
+    """The same claim, re-confirmed with `os` AFTER the guard: it can only add a refusal, never replace one (V25-01)."""
     here = os.getcwd()
     for entry in sys.path:
-        if entry in ("", ".") or (entry and os.path.abspath(entry) == here):
-            refuse("the child's sys.path contains the working directory (%r): a shadow module could be imported "
-                   "ahead of the standard library (V24-01)" % (entry,))
+        if entry and os.path.abspath(entry) == here:
+            refuse("the child's sys.path contains the working directory (%r): V24-01" % (entry,))
 
 
 def settings():
@@ -2986,7 +3062,7 @@ def execute(name, chunk, path, into):
 
 
 def main():
-    isolated()                                # V24-01: before anything reads the parent's request
+    cwd_free()                                # V25-01: the post-import confirmation of `isolated()` above
     expect, origin, target, mode, argv = settings()
     sent = receive(expect)
     package = packages()
@@ -4416,8 +4492,8 @@ __attribute__((destructor)) static void report(void) {
 
 #### A.7.10 `tools/obs/probes/run_all.py`
 
-```python
-"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01; v2.5 V24-01).
+```
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01; v2.5 V24-01; v2.6 V25-01).
 
   python -m tools.obs.probes.run_all --check             # CI gate: exit 0 pass / 1 mismatch / 2 integrity or environment
   python -m tools.obs.probes.run_all --self-test         # CI gate: the integrity REFUSALS, proven by negative cases
@@ -4491,6 +4567,20 @@ working directory — so an edit that drops a flag fails closed instead of silen
 proves it with a child whose working directory holds a hostile `sitecustomize.py`, `hashlib.py` and `ssl.py`: none of
 them runs, `hashlib` still resolves to the real standard library, and a child started without the flags is refused.
 
+THE BOOTSTRAP CHECKS THE INTERPRETER BEFORE IT IMPORTS ANYTHING (V25-01). v2.5 launched the child correctly, but the
+bootstrap's first line imported `builtins`, `hashlib`, `json`, `os`, `sys` and `types`, so `isolated()` ran AFTER the
+imports it exists to protect: with `-I` dropped, a working-directory `hashlib.py` executes during `import hashlib`,
+ahead of the first check. The prelude now imports `sys` alone — built in, never searched for on `sys.path` — refuses
+from `sys.stderr` with `SystemExit(86)` (no `os._exit()`, since `os` must not be imported in order to refuse), CALLS
+`isolated()` as its first executable statement, and only then imports `builtins`/`hashlib`/`json`/`os`/`types`.
+`isolated()` is import-free: it uses `sys.flags` and the form of each `sys.path` entry instead of `os.getcwd()`, and
+`cwd_free()` re-confirms the path claim after the imports as defence in depth. `--self-test` parses the bootstrap it is
+about to run and fails unless `isolated()` is executed before the first file-backed import with only `sys` ahead of it,
+and it launches the child twice with ONE FLAG REMOVED: `-S` without `-I` in a working directory whose `hashlib.py`
+records itself and raises, and `-I` without `-S` in a working directory holding `sitecustomize.py`. Both must exit 86
+with nothing planted ever executing, and a CONTROL shows the same `hashlib.py` plant DOES run once `-I` is removed, so
+the two refusals cannot pass vacuously.
+
 COUNTS ARE THREE DIFFERENT NUMBERS (V21-02). v2.1 printed "14 files pinned by expected.json", which is false:
 `expected.json` pins 13 files, the suite ships 14, and `expected.json` itself is pinned by §A.0 of the document. The run
 line and the report's `coverage` block name all three, so no reader has to infer which count a number is.
@@ -4508,6 +4598,7 @@ gate instead of being absorbed by a tolerance.
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import errno
 import hashlib
@@ -4855,6 +4946,14 @@ def self_test() -> int:
     shadow `hashlib.py` / `ssl.py` modules, and prove the interpreter is isolated and site-free before any child code
     runs: the hook never executes, the shadow modules never win, `hashlib` is still the real standard-library module,
     and a child launched WITHOUT `-I -S` is refused by the bootstrap rather than measured.
+
+    V25-01's cases (added in v2.6) check the ORDER v2.5 left implicit. The bootstrap text is PARSED and `isolated()` must
+    be executed before the first file-backed import, with `sys` the only module imported ahead of it — a comment cannot
+    satisfy that and a reordering cannot pass it. The launcher's `CHILD_FLAGS` must be exactly `('-I', '-S')` and
+    `child_command()` exactly `[sys.executable, '-I', '-S', '-c', BOOTSTRAP]`, so neither flag can be dropped silently.
+    Then each flag is removed ON ITS OWN in a hostile working directory: `-S` kept but `-I` gone (where a planted
+    `hashlib.py` would win) and `-I` kept but `-S` gone (where `site` runs again). Both partial launches must be REFUSED
+    with nothing planted executing, and a CONTROL runs the same plant with no isolation at all to show it is live.
     """
     counts = {"passed": 0, "failed": 0, "skipped": 0}
 
@@ -5099,6 +5198,42 @@ def self_test() -> int:
     else:
         sys.modules.pop("obs_selftest_common", None)
     if transport is not None:
+        # V25-01: the guard must come FIRST, and it must be in the SOURCE the child runs. Parsed, not pattern-matched:
+        # a reordering fails, and a comment mentioning the ordering cannot satisfy it.
+        try:
+            parsed = ast.parse(transport.BOOTSTRAP, "<bootstrap>")
+        except SyntaxError as exc:
+            report_case("the bootstrap validates the interpreter BEFORE importing hashlib/json/os/types (V25-01)",
+                        False, f"the bootstrap does not parse: {exc}")
+        else:
+            guard_at: int | None = None
+            first_backed: int | None = None
+            prelude: list[str] = []
+            for node in parsed.body:
+                if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) \
+                        and getattr(node.value.func, "id", None) == "isolated":
+                    guard_at = node.lineno
+                    continue
+                if isinstance(node, ast.Import):
+                    names = [alias.name.split(".")[0] for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    names = [(node.module or "").split(".")[0]]
+                else:
+                    continue
+                if guard_at is None:
+                    prelude.extend(names)
+                if first_backed is None and set(names) & {"builtins", "hashlib", "json", "os", "types"}:
+                    first_backed = node.lineno
+            ordered = guard_at is not None and first_backed is not None and guard_at < first_backed \
+                and set(prelude) <= {"sys"}
+            report_case("the bootstrap validates the interpreter BEFORE importing hashlib/json/os/types (V25-01)",
+                        ordered,
+                        f"isolated() at line {guard_at}, first file-backed import at line {first_backed}, "
+                        f"imported ahead of the guard: {sorted(set(prelude)) or ['none']}")
+        report_case("the child launcher carries BOTH -I and -S, in that order (V25-01)",
+                    tuple(transport.CHILD_FLAGS) == ("-I", "-S")
+                    and transport.child_command() == [sys.executable, "-I", "-S", "-c", transport.BOOTSTRAP],
+                    f"CHILD_FLAGS={tuple(transport.CHILD_FLAGS)!r}, command opens {transport.child_command()[:3]!r}")
         with tempfile.TemporaryDirectory() as tmp:
             frames = {"__init__.py": b"",
                       "probe_common.py": b"MARK = 'common'\n",
@@ -5249,6 +5384,48 @@ def self_test() -> int:
                             bare.returncode == transport.CHILD_REFUSED and bare.stdout == b""
                             and "not started isolated" in bare.stderr.decode(),
                             f"exit {bare.returncode}: {(bare_err[-1] if bare_err else 'no stderr')[:110]}")
+
+                # V25-01: each flag REMOVED ON ITS OWN, in the same hostile directory. Its `hashlib.py` records itself
+                # and raises, so "did the plant run" is a file on disk, not an opinion about the source.
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(marker)
+                # CONTROL: with `-I` gone, `PYTHONPATH` and the child's cwd are importable again, so a plain
+                # `import hashlib` DOES execute the plant. Without this, "nothing ran" below would prove nothing.
+                subprocess.run([sys.executable, "-S", "-c", "import hashlib"], cwd=hostile,
+                               env={**os.environ, "PYTHONPATH": hostile}, capture_output=True, timeout=120)
+                shadow_ran = startup_ran()
+                report_case("control: the planted hashlib.py DOES execute once -I is removed (V25-01)",
+                            "hashlib" in shadow_ran,
+                            f"plants that ran without -I: {shadow_ran!r}")
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(marker)
+
+                # (a) `-I` removed, `-S` kept: nothing protects the import path, so the guard has to refuse BEFORE
+                # `import hashlib` is reached. The plant must never execute and no payload byte may be read.
+                no_isolation = subprocess.run([sys.executable, "-S", "-c", transport.BOOTSTRAP],
+                                              input=transport.payload(probe_frames),
+                                              env={**startup_env, "PYTHONPATH": hostile}, cwd=hostile,
+                                              capture_output=True, timeout=120)
+                no_isolation_err = no_isolation.stderr.decode().strip().splitlines()
+                ran_without_i = startup_ran()
+                report_case("-I removed, -S kept: the child FAILS CLOSED and no shadow hashlib.py runs (V25-01)",
+                            no_isolation.returncode == transport.CHILD_REFUSED and no_isolation.stdout == b""
+                            and ran_without_i == "",
+                            f"exit {no_isolation.returncode}, plants that ran {ran_without_i!r}: "
+                            f"{(no_isolation_err[-1] if no_isolation_err else 'no stderr')[:110]}")
+
+                # (b) `-S` removed, `-I` kept: `site` runs again at startup, so the interpreter is not site-free even
+                # though its path is clean. The child is REJECTED; `-I` still keeps the cwd hook out of reach.
+                no_site_flag = subprocess.run([sys.executable, "-I", "-c", transport.BOOTSTRAP],
+                                              input=transport.payload(probe_frames), env=dict(startup_env),
+                                              cwd=hostile, capture_output=True, timeout=120)
+                no_site_err = no_site_flag.stderr.decode().strip().splitlines()
+                ran_without_s = startup_ran()
+                report_case("-S removed, -I kept: the child is REJECTED and no cwd hook executes (V25-01)",
+                            no_site_flag.returncode == transport.CHILD_REFUSED and no_site_flag.stdout == b""
+                            and ran_without_s == "",
+                            f"exit {no_site_flag.returncode}, plants that ran {ran_without_s!r}: "
+                            f"{(no_site_err[-1] if no_site_err else 'no stderr')[:110]}")
 
     with tempfile.TemporaryDirectory() as tmp:
         tree(tmp)
@@ -5624,9 +5801,10 @@ code a reviewer verified. Nothing the driver executes is re-read from disk and n
 that fails the check contributes no executable source at all, and the interposed child (`--interpose`) verifies and
 binds the same tree by the same route before it measures. One path is deliberately outside this binding and is named
 instead of implied: `run_all.py` itself, which the interpreter imports before any check can run (A.0 pins it;
-`--manifest` prints its digest). The CHILDREN are inside it as of v2.4 and their interpreter STARTUP as of v2.5 — see the next section.
+`--manifest` prints its digest). The CHILDREN are inside it as of v2.4, their interpreter STARTUP as of v2.5 and their bootstrap's ORDERING as of
+v2.6 — see the next section.
 
-## A child starts from the same bytes, in an isolated interpreter (V23-01, V24-01)
+## A child starts from the same bytes, in an isolated interpreter (V23-01, V24-01, V25-01)
 
 Under v2.3 the measured children (probe6's server, stage and `--realloc` children, probe8's mmap child) were started
 with `python -m tools.obs.probes.<probe>`: the parent had verified the bytes, but the CHILD opened the file, in a
@@ -5663,11 +5841,25 @@ unless `sys.flags.isolated`, `no_site`, `ignore_environment` and `no_user_site` 
 re-opening the hole, and the measurement is unchanged: the child is still counted by the shim from exec, so Python
 startup remains inside the native peak exactly as before, and no gated reading moved.
 
-`--self-test` counts outcomes separately (V22-03): `28 passed, 0 failed, 1 skipped (29 cases)` rather than folding
-skips into passes (`29 passed` where the device-node case can run). A case this host cannot run (no `CAP_MKNOD`, no
+The bootstrap checks the interpreter BEFORE it imports anything (V25-01). v2.5 launched the child correctly, but the
+bootstrap opened with `import builtins, hashlib, json, os, sys, types` and only then called `isolated()`, so the
+validation ran after the imports it exists to protect: with `-I` dropped, a working-directory `hashlib.py` executes
+during `import hashlib` — the module the payload verification itself calls. The prelude now imports `sys` alone (a
+built-in: no `sys.path` search), refuses from `sys.stderr` with `SystemExit(86)` (no `os._exit()`, because `os` must
+not be imported in order to refuse), calls `isolated()` as its first executable statement, and only then imports
+`builtins` / `hashlib` / `json` / `os` / `types`. `isolated()` is import-free by construction — it reads
+`sys.flags.safe_path` and the FORM of each `sys.path` entry instead of `os.getcwd()` — and a post-import
+`cwd_free()` re-confirms the path claim as defence in depth, able to add a refusal but never to replace one.
+`--self-test` PARSES the bootstrap and requires `isolated()` to be executed before the first file-backed import with
+only `sys` ahead of it, then removes each flag on its own: `-S` without `-I` in a directory whose `hashlib.py`
+records itself and raises, and `-I` without `-S` in a directory holding `sitecustomize.py`. Both exit 86 with
+nothing planted ever executing, next to a CONTROL that the `hashlib.py` plant DOES run once `-I` is removed.
+
+`--self-test` counts outcomes separately (V22-03): `33 passed, 0 failed, 1 skipped (34 cases)` rather than folding
+skips into passes (`34 passed` where the device-node case can run). A case this host cannot run (no `CAP_MKNOD`, no
 `O_NOFOLLOW`) prints as `skip` and never counts as a pass; the exit status depends only on failures. Its cases
 include a real inode swapped between `lstat()` and `open()` (V22-02), so `samestat`'s refusal is demonstrated rather
-than argued, and ten of them start REAL children (V23-01, V24-01): a frame whose digest does not match is refused instead of
+than argued, and these cases start REAL children (V23-01, V24-01, V25-01): a frame whose digest does not match is refused instead of
 executed, a child runs the bytes it was sent while the path it names holds different source, a swapped bootstrap and
 a truncated payload are refused, and an unverified sibling cannot be imported from disk. Four of them (V24-01)
 start a child in a working directory holding a hostile `sitecustomize.py` plus `hashlib.py` / `ssl.py` shadows:
@@ -5681,7 +5873,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 
 | File | Role |
 |---|---|
-| `probe_common.py` | constants (mirroring §12), the deterministic worst-case fixtures, the shim's getters, and the verified child transport — bootstrap, payload framing, `run_suite_child`, launched `-I -S` (V23-01, V24-01) |
+| `probe_common.py` | constants (mirroring §12), the deterministic worst-case fixtures, the shim's getters, and the verified child transport — bootstrap, payload framing, `run_suite_child`, launched `-I -S`, guard before any file-backed import (V23-01, V24-01, V25-01) |
 | `probe1_phase1.py` | phase 1 — request path: 64 KiB chunked scratch accumulation, then `bytes(scratch)` |
 | `probe2_seal.py` | phase 2 — §5.1.1 seal order, plus the BANNED retain-the-chunk variant (must fail its bound) |
 | `probe3_decode.py` | phase 3 — the §5.1.2 `decode_pass` release order on ONE line at `MAX_LINE` |
@@ -5691,7 +5883,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
-| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution and child binding (V22-01, V23-01, V24-01) |
+| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution and child binding and the V25-01 pre-import/partial-flag cases (V22-01, V23-01, V24-01, V25-01) |
 | `expected.json` | the file manifest (size + SHA-256) AND the recorded values, bounds and inventory derivations |
 | `README.md` | this file |
 
@@ -5778,14 +5970,14 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
 
 #### A.7.12 `tools/obs/probes/expected.json`
 
-```json
+```
 {
   "env": {
-    "isolation": "every child runs python -I -S -c <bootstrap> and refuses (exit 86) unless sys.flags.isolated/no_site/ignore_environment/no_user_site are set, no site/sitecustomize/usercustomize is imported and sys.path holds no working-directory entry (V24-01)",
+    "isolation": "every child runs python -I -S -c <bootstrap> and refuses (exit 86) unless sys.flags.isolated/no_site/ignore_environment/no_user_site/safe_path are set, no site/sitecustomize/usercustomize is imported and sys.path holds no working-directory or relative entry; the bootstrap imports ONLY sys (a built-in) and calls isolated() BEFORE builtins/hashlib/json/os/types, so no file-backed module can run ahead of the guard (V24-01, V25-01)",
     "openssl": "3.0.13",
     "platform": "Linux x86-64",
     "python": "3.12.3",
-    "updated": "v2.5"
+    "updated": "v2.6"
   },
   "inventory": {
     "items": [
@@ -5842,9 +6034,9 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
     "algorithm": "sha256",
     "files": [
       {
-        "bytes": 17538,
+        "bytes": 19170,
         "path": "tools/obs/probes/README.md",
-        "sha256": "8221b076d19e005b8c684e6e2f22f4f2bf51596aa2a776ef6cc8eea4a25f5227"
+        "sha256": "f3d3f6f546eb3d46df3ce775e6d587c9c1255e824ec0a786df085fcd8bcdb513"
       },
       {
         "bytes": 0,
@@ -5897,14 +6089,14 @@ value: re-run `--record` inside a REVIEWED revision and record the numbers in A.
         "sha256": "f802508e3bcbb97d4973edc712a9c86fd124cf2cade195d4a4dbdaa5f973c601"
       },
       {
-        "bytes": 24373,
+        "bytes": 28147,
         "path": "tools/obs/probes/probe_common.py",
-        "sha256": "6559ba0c7e309ef35368df0c7f0a27206dcccb792924476f4689bf0faccbe437"
+        "sha256": "67fe2b48714ff1ae58f742bb5c2b544e2fbfe90e327bbd3b9622979792ae0ee2"
       },
       {
-        "bytes": 69422,
+        "bytes": 77478,
         "path": "tools/obs/probes/run_all.py",
-        "sha256": "2106d2a2c2214962131e54beeefc2d486cc43064151fbb9647dcaf84782d0682"
+        "sha256": "e2166004f5b5132ce514b85a65a5500389e7f3207bba538bfbe57da3ae94c77f"
       }
     ]
   },
@@ -6196,183 +6388,4 @@ def partial_and_mremap(lib) -> dict[str, int | bool]:
     return {
         "map": after_map, "hole": after_hole, "hole_regions": hole_regions, "freed": after_free,
         "remap_before": after_second, "remap_after": after_mremap, "remap_freed": after_remap_free, "peak": peak,
-        "ok": (after_map == 3 * PAGE and after_hole == 2 * PAGE and hole_regions == 2 and after_free == 0
-               and after_second == 2 * PAGE and after_mremap == 8 * PAGE and after_remap_free == 0
-               and peak == 8 * PAGE),
-    }
-
-
-def churn(lib, barrier: threading.Barrier | None = None, hold: int = 0) -> None:
-    """One thread's workload: map, map, partial unmap, mremap, then unmap everything."""
-    first = mapped(lib, 16 * PAGE)
-    second = mapped(lib, 4 * PAGE)
-    if barrier is not None:
-        barrier.wait(timeout=30)
-        if hold:
-            threading.Event().wait(hold)
-    unmap(lib, first + 8 * PAGE, 8 * PAGE)               # PARTIAL: keep the lower half
-    moved = lib.mremap(ctypes.c_void_p(second), 4 * PAGE, 12 * PAGE, MREMAP_MAYMOVE, None)
-    if moved in (None, ctypes.c_void_p(-1).value):
-        raise SystemExit("mremap failed in churn")
-    unmap(lib, first, 8 * PAGE)
-    unmap(lib, int(moved), 12 * PAGE)
-
-
-def concurrency(lib) -> dict[str, int | bool]:
-    """Property C: simultaneous mappings are all counted, and nothing is left behind."""
-    barrier = threading.Barrier(THREADS)
-    errors: list[BaseException] = []
-
-    def worker() -> None:
-        try:
-            mapped_share = mapped(lib, THREAD_MAPPING)
-            barrier.wait(timeout=60)                      # every thread's 1 MiB is live at this instant
-            unmap(lib, mapped_share, THREAD_MAPPING)
-            for _ in range(ITERATIONS):
-                churn(lib)
-        except BaseException as exc:                      # noqa: BLE001 - reported, not swallowed
-            errors.append(exc)
-
-    threads = [threading.Thread(target=worker, daemon=True) for _ in range(THREADS)]
-    churn(lib)                                            # warm-up: settles the interpreter's own arenas
-    lib.alloc_peak_reset()
-    base_live, base_regions = int(lib.alloc_peak_map_live()), int(lib.alloc_peak_map_regions())
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=300)
-    if errors:
-        raise SystemExit(f"worker failed: {errors[0]!r}")
-    peak = int(lib.alloc_peak_map_peak())
-    end_live = int(lib.alloc_peak_map_live()) - base_live
-    end_regions = int(lib.alloc_peak_map_regions()) - base_regions
-    expected = THREADS * THREAD_MAPPING
-    return {
-        "threads": THREADS, "iterations": ITERATIONS, "expected_floor": expected, "peak": peak,
-        "end_live": end_live, "end_regions": end_regions,
-        # no lost update: the peak saw all THREADS mappings at once. The ceiling admits the interpreter's own
-        # arena growth during the phase (a few pages per thread), which is not one of our mappings.
-        "ok": peak >= expected and peak <= expected + THREADS * 64 * PAGE and end_live == 0 and end_regions == 0,
-    }
-
-
-def _run_stages(slots: int | None, mappings: int) -> dict[str, object]:
-    """Run the probed program once and return what it printed: its own baseline, its mappings, and how it died.
-
-    V23-01: the program is a literal of THIS file's verified source, and it reaches the child through the same
-    digest-checked pipe as everything else — `sys.argv` is still `['-c', '<mappings>']`, so the program's own
-    interface did not change.
-    """
-    env = {key: value for key, value in os.environ.items() if key != "ALLOC_PEAK_MAP_SLOTS"}
-    env.update(LD_PRELOAD=SHIM, PYTHONPATH=ROOT)
-    if slots is not None:
-        env["ALLOC_PEAK_MAP_SLOTS"] = str(slots)
-    done = C.run_program(CHILD_PROGRAM, [str(mappings)], env=env, timeout=180, cwd=ROOT)
-    stdout = done.stdout.decode("utf-8", "replace")
-    stderr = done.stderr.decode("utf-8", "replace")
-    stages = [(match.group(1), int(match.group(2)), int(match.group(3)))
-              for line in stdout.splitlines() if (match := STAGE.match(line))]
-    capacity = next((int(match.group(1)) for line in stdout.splitlines()
-                     if (match := CAPACITY.match(line))), None)
-    return {
-        "returncode": done.returncode,
-        "baseline": next(((live, regions) for label, live, regions in stages if label == "BASELINE"), None),
-        "capacity": capacity,
-        "mapped": [(live, regions) for label, live, regions in stages if label == "MAPPED"],
-        "survived": any(label == "SURVIVED" for label, _, _ in stages),
-        "fatal": [line for line in stderr.splitlines() if line.startswith(DIAGNOSTIC_PREFIX)],
-        "stderr_tail": stderr[-400:],
-    }
-
-
-def fail_closed() -> dict[str, object]:
-    """Property D: the table cannot grow past its capacity, so the shim must abort - where the test intends, with the
-    exact diagnostic, and not at all when the capacity is not exceeded."""
-    control = _run_stages(None, CONTROL_MAPPINGS)
-    control_baseline = control["baseline"] or (0, 0)
-    control_ok = (
-        control["returncode"] == 0
-        and control["baseline"] is not None and control["capacity"] is not None
-        and control["mapped"] == [(control_baseline[0] + PAGE * (step + 1), control_baseline[1] + (step + 1))
-                                 for step in range(CONTROL_MAPPINGS)]
-        and control["survived"] and not control["fatal"]
-    )
-
-    pressure = _run_stages(PRESSURE_SLOTS, FILL_MAPPINGS)
-    base_live, base_regions = pressure["baseline"] or (0, 0)
-    capacity = int(pressure["capacity"] or 0)
-    slots_left = capacity - base_regions
-    last = pressure["mapped"][-1] if pressure["mapped"] else None
-    aborted = pressure["returncode"] < 0 and -pressure["returncode"] == signal.SIGABRT
-    expected_diagnostic = (
-        f"{DIAGNOSTIC_PREFIX} range table capacity exhausted "
-        f"(tracked {capacity}, capacity {capacity}, live {base_live + PAGE * slots_left}): "
-        f"refusing to under-report")
-    reached_mapping = (slots_left >= 1 and len(pressure["mapped"]) == slots_left
-                       and last == (base_live + PAGE * slots_left, capacity))
-    return {
-        "control": {
-            "mappings": CONTROL_MAPPINGS, "baseline": {"live": control_baseline[0], "regions": control_baseline[1]},
-            "capacity": control["capacity"], "filled": len(control["mapped"]), "survived": control["survived"],
-            "returncode": control["returncode"], "fatal": control["fatal"],
-            "stderr_tail": control["stderr_tail"], "ok": control_ok,
-        },
-        "pressure": {
-            "baseline": {"live": base_live, "regions": base_regions}, "capacity": capacity, "filled": len(pressure["mapped"]),
-            "last": {"live": last[0], "regions": last[1]} if last else None,
-            "aborted_by_sigabrt": aborted, "returncode": pressure["returncode"], "reached_mapping": reached_mapping,
-            "diagnostic": pressure["fatal"][0] if pressure["fatal"] else None,
-            "diagnostic_expected": expected_diagnostic,
-            "diagnostic_exact": pressure["fatal"] == [expected_diagnostic],
-            "survived": pressure["survived"], "stderr_tail": pressure["stderr_tail"],
-        },
-        "ok": bool(control_ok and aborted and reached_mapping and pressure["fatal"] == [expected_diagnostic]
-                   and not pressure["survived"]),
-    }
-
-
-def child() -> int:
-    lib = api()
-    result = {
-        "partial_mremap": partial_and_mremap(lib),
-        "concurrency": concurrency(lib),
-        "fail_closed": fail_closed(),
-        "capacity": int(lib.alloc_peak_map_capacity()),
-    }
-    result["ok"] = all(result[key]["ok"] for key in ("partial_mremap", "concurrency", "fail_closed"))
-    print(json.dumps(result, sort_keys=True))
-    return 0
-
-
-def main() -> list[dict]:
-    """Run the child under the interposer and turn its report into one gated measurement."""
-    if not os.path.exists(SHIM):
-        raise SystemExit("probe8: alloc_peak.so is missing; build it first (A.7.9)")
-    done = C.run_suite_child("probe8_mmap_threads", ["--child"], env={"LD_PRELOAD": SHIM}, timeout=600, cwd=ROOT)
-    if done.returncode != 0:
-        raise SystemExit(f"probe8: child failed ({done.returncode}): {done.stderr.decode()[-600:]}")
-    data = json.loads(done.stdout.decode())
-    concurrency = data["concurrency"]
-    return [{
-        "probe": "mmap_accounting",
-        "peak": int(concurrency["peak"]),
-        "bound": None,
-        "pass": bool(data["ok"]),
-        "detail": {
-            "instrument": "alloc_peak.so direct-mmap channel, concurrency + range bookkeeping (A.5.9)",
-            "partial_mremap": data["partial_mremap"],
-            "concurrency": concurrency,
-            "fail_closed": data["fail_closed"],
-            "capacity": data["capacity"],
-        },
-    }]
-
-
-if __name__ == "__main__":
-    if "--child" in sys.argv[1:]:
-        raise SystemExit(child())
-    print(json.dumps(main()))
-```
-
-End of v2.2. Step-2 implementation SHALL implement §3–§10 literally; any deviation requires a new reviewed revision of this
-document, not an implementation choice.
+        "ok": (after_map == 3 * PAGE and after
