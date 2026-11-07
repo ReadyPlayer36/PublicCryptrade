@@ -32,6 +32,17 @@ argued:
      otherwise make the table fill later than capacity predicts.
 
 The probe runs its measurements in a child process with `alloc_peak.so` preloaded. Exits 0 when every property holds.
+
+CHILDREN ARE STARTED FROM THE PARENT'S VERIFIED BYTES (V23-01). v2.3 started the mmap child with
+`python -m tools.obs.probes.probe8_mmap_threads --child`, which re-opens this FILE in the child after the driver verified
+it, and the capacity program was handed to `python -c` with no binding at all. Both now travel through
+`probe_common.run_suite_child` / `run_program`: the source goes over a pipe from the parent's manifest-checked buffers,
+each frame is checked against the digest the manifest promises, the child's bootstrap is bound by its own digest, and
+the child's `tools.obs.probes` package is closed (`__path__ = []`) so an unverified sibling cannot be imported there.
+WHAT IS PRESERVED: the same fresh interpreter per child, still counted by the shim from exec (the baseline line is
+printed by the program itself, exactly as before), the same `cwd` and `LD_PRELOAD`, the same `sys.argv` (`-c` plus the
+mapping count, which is what the inline program used to see), and the same resets. Run this file on its own and it
+refuses to start a child rather than fall back to `-m`.
 """
 from __future__ import annotations
 
@@ -41,9 +52,10 @@ import json
 import os
 import re
 import signal
-import subprocess
 import sys
 import threading
+
+from tools.obs.probes import probe_common as C
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
@@ -233,13 +245,17 @@ def concurrency(lib) -> dict[str, int | bool]:
 
 
 def _run_stages(slots: int | None, mappings: int) -> dict[str, object]:
-    """Run the probed program once and return what it printed: its own baseline, its mappings, and how it died."""
+    """Run the probed program once and return what it printed: its own baseline, its mappings, and how it died.
+
+    V23-01: the program is a literal of THIS file's verified source, and it reaches the child through the same
+    digest-checked pipe as everything else — `sys.argv` is still `['-c', '<mappings>']`, so the program's own
+    interface did not change.
+    """
     env = {key: value for key, value in os.environ.items() if key != "ALLOC_PEAK_MAP_SLOTS"}
     env.update(LD_PRELOAD=SHIM, PYTHONPATH=ROOT)
     if slots is not None:
         env["ALLOC_PEAK_MAP_SLOTS"] = str(slots)
-    done = subprocess.run([sys.executable, "-c", CHILD_PROGRAM, str(mappings)],
-                          env=env, capture_output=True, timeout=180, cwd=ROOT)
+    done = C.run_program(CHILD_PROGRAM, [str(mappings)], env=env, timeout=180, cwd=ROOT)
     stdout = done.stdout.decode("utf-8", "replace")
     stderr = done.stderr.decode("utf-8", "replace")
     stages = [(match.group(1), int(match.group(2)), int(match.group(3)))
@@ -320,9 +336,7 @@ def main() -> list[dict]:
     """Run the child under the interposer and turn its report into one gated measurement."""
     if not os.path.exists(SHIM):
         raise SystemExit("probe8: alloc_peak.so is missing; build it first (A.7.9)")
-    env = dict(os.environ, LD_PRELOAD=SHIM, PYTHONPATH=ROOT)
-    done = subprocess.run([sys.executable, "-m", "tools.obs.probes.probe8_mmap_threads", "--child"],
-                          env=env, capture_output=True, timeout=600, cwd=ROOT)
+    done = C.run_suite_child("probe8_mmap_threads", ["--child"], env={"LD_PRELOAD": SHIM}, timeout=600, cwd=ROOT)
     if done.returncode != 0:
         raise SystemExit(f"probe8: child failed ({done.returncode}): {done.stderr.decode()[-600:]}")
     data = json.loads(done.stdout.decode())
