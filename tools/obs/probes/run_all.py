@@ -1,4 +1,4 @@
-"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02).
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03).
 
   python -m tools.obs.probes.run_all --check             # CI gate: exit 0 pass / 1 mismatch / 2 integrity or environment
   python -m tools.obs.probes.run_all --self-test         # CI gate: the integrity REFUSALS, proven by negative cases
@@ -20,9 +20,35 @@ measurement), and is then opened ONCE with `O_NOFOLLOW`, `fstat`ed and compared 
 for a link after the inventory is refused instead of hashed. The bytes that are compared are the bytes of the inode that
 was checked. `--self-test` demonstrates each refusal as a negative regression case.
 
+THE CODE THAT RUNS IS THE BYTES THAT WERE HASHED (V22-01). The check above is worthless if the module that produces a
+number is imported from the PATH afterwards: an import re-opens the file (or a `.pyc` built from another version of it),
+so the digest a reviewer verified would describe bytes other than the ones that ran. Nothing the driver executes is
+imported by path. `--check` reads each suite file ONCE through `opened_regular`, hashes that buffer against
+`expected.json`, and KEEPS it; the probe modules, `probe_common` and the package itself are then built from those buffers
+— `compile(data, path, "exec")` into a fresh `types.ModuleType` registered in `sys.modules` — and executed, after every
+manifest check has passed and never before. A file that fails the check contributes no executable source at all, a tree
+that passes cannot execute a byte that was not hashed, and no `.pyc` is consulted for any module the driver runs. The
+interposed child (`--interpose`, one phase under `alloc_peak.so`) verifies and binds the tree by the same route before it
+measures.
+
+WHAT THAT BINDING DOES NOT COVER, STATED RATHER THAN IMPLIED (V22-01). Two paths stay outside it, and neither is hidden.
+First, the DRIVER ITSELF: `python -m tools.obs.probes.run_all` is imported by the interpreter before any of this code can
+run, so `run_all.py` is the trust root and cannot verify itself; A.0 pins it, and `--manifest` prints the digest a
+reviewer compares. Second, the three CHILD interpreters that probe6 and probe8 start (`-m tools.obs.probes.probe6_native`
+for the stage and `--realloc` children, `-m tools.obs.probes.probe8_mmap_threads --child` for the mmap child) are
+launched with `-m` on the tree the parent has just verified, not from the retained buffers. That is deliberate: the shim
+counts a process from exec, so a child's Python startup is part of the native peak it reports, and rebinding it through a
+bootstrap would move the recorded numbers (A.5.4/A.5.8) — the parent's check runs immediately before the spawn, the child
+reports its own failure, and the values it returns are gated. A child of a `-m` import also leaves a `__pycache__` entry,
+which the inventory ignores by design (G-V18-02 d).
+
 COUNTS ARE THREE DIFFERENT NUMBERS (V21-02). v2.1 printed "14 files pinned by expected.json", which is false:
 `expected.json` pins 13 files, the suite ships 14, and `expected.json` itself is pinned by §A.0 of the document. The run
 line and the report's `coverage` block name all three, so no reader has to infer which count a number is.
+
+A SKIP IS NOT A PASS (V22-03). The self-test reports passed, failed and skipped SEPARATELY: a case this host could not
+run (no `CAP_MKNOD`, no `O_NOFOLLOW`) is printed as `skip` and never contributes to the passed count. The exit status
+depends only on failures, so an environment that skips a case cannot manufacture a green run without saying so.
 
 Instruments per phase: `tracemalloc` (Python-object attribution), the interposer's malloc counter (every malloc arena
 and thread, including allocations that live and die inside the region) and, when the request region is measured, the
@@ -36,7 +62,8 @@ from __future__ import annotations
 import contextlib
 import errno
 import hashlib
-import importlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import platform
@@ -45,12 +72,12 @@ import stat
 import subprocess
 import sys
 import tempfile
-
-from tools.obs.probes import probe_common as C
+import types
 
 PROBES = ("probe1_phase1", "probe2_seal", "probe3_decode", "probe4_decode_fresh", "probe5_byte_equality",
           "probe6_native", "probe7_structure", "probe8_mmap_threads")
 BY_MEASUREMENT = {"phase1_request": "probe1_phase1", "phase2_seal": "probe2_seal", "phase3_decode": "probe3_decode"}
+PACKAGE = "tools.obs.probes"
 PINNED_PYTHON = "3.12.3"          # A.1: another interpreter invalidates every recorded value
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
@@ -63,6 +90,10 @@ CANONICAL_PREFIX = "tools/obs/probes/"     # A.0 paths are repository-relative a
 ROW_FIELDS = {"path", "bytes", "sha256"}
 BLOCK_FIELDS = {"algorithm", "files"}
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+# V22-01: the order the suite executes in. `__init__.py` first (it is the package the others are registered under),
+# then `probe_common`, then the probes in the order they are measured, so a probe that imports a function from another
+# probe (probe4 <- probe3) finds it already defined.
+LOAD_ORDER = ("__init__.py", "probe_common.py") + tuple(f"{name}.py" for name in PROBES)
 # V21-01: O_NOFOLLOW turns "is this a link?" into an OPEN-TIME fact rather than a check the caller must win a race to
 # use. It exists on Linux/POSIX; where it does not, the lstat/ fstat identity comparison below still refuses a link,
 # because a followed link's inode cannot equal the inode lstat named.
@@ -130,18 +161,25 @@ def opened_regular(path: str, label: str):
         os.close(fd)
 
 
-def read_regular(path: str, label: str) -> tuple[int, str]:
-    """Return `(bytes, sha256)` for a suite file, hashed from ONE no-follow descriptor (V21-01)."""
+def read_regular(path: str, label: str) -> tuple[bytes, int, str]:
+    """Return `(data, bytes, sha256)` for a suite file, read and hashed through ONE no-follow descriptor (V21-01).
+
+    V22-01: the buffer is returned, not just its digest. It is the only copy of the source this process will ever have:
+    the module is compiled from it after the manifest check, so the bytes executed are the bytes hashed, and a rewrite
+    of the path between the two cannot take effect.
+    """
     digest = hashlib.sha256()
+    chunks: list[bytes] = []
     total = 0
     with opened_regular(path, label) as (handle, opened):
         for chunk in iter(lambda: handle.read(READ_CHUNK), b""):
             total += len(chunk)
             digest.update(chunk)
+            chunks.append(chunk)
         if total != opened.st_size:
             raise SuiteIntegrityError(f"{label}: read {total} B from an inode of {opened.st_size} B: modified while "
                                       f"being hashed (V21-01)")
-    return total, digest.hexdigest()
+    return b"".join(chunks), total, digest.hexdigest()
 
 
 def suite_files(here: str = HERE) -> list[str]:
@@ -190,14 +228,14 @@ def manifest(include_self: bool = True, here: str = HERE) -> dict:
     for name in suite_files(here):
         if name == SELF and not include_self:
             continue
-        size, digest = read_regular(os.path.join(here, name), f"{CANONICAL_PREFIX}{name}")
+        _data, size, digest = read_regular(os.path.join(here, name), f"{CANONICAL_PREFIX}{name}")
         rows.append({"path": f"{CANONICAL_PREFIX}{name}", "bytes": size, "sha256": digest})
     return {"algorithm": "sha256", "files": rows}
 
 
-def check_manifest(expected: dict, here: str = HERE) -> list[str]:
-    """V19-05/V20-14/V21-01: the manifest is the reviewed code, so it is checked as DATA before it is trusted, and a
-    modification, an addition or a deletion is a refusal, never a warning.
+def check_manifest(expected: dict, here: str = HERE, keep: dict[str, bytes] | None = None) -> list[str]:
+    """V19-05/V20-14/V21-01/V22-01: the manifest is the reviewed code, so it is checked as DATA before it is trusted,
+    and a modification, an addition or a deletion is a refusal, never a warning.
 
     v2.0 matched its rows by BASENAME (`os.path.basename(row["path"])`) after indexing them into a dict, which made
     every structural question about the manifest unanswerable: two rows could share a basename with one silently
@@ -209,6 +247,10 @@ def check_manifest(expected: dict, here: str = HERE) -> list[str]:
     v2.2 adds IDENTITY (V21-01): the inventory refuses any entry that is not a regular file, and each compared file is
     read through `read_regular`, so a symlink — to a file inside the suite, to one outside it, dangling, or swapped in
     after the inventory — cannot be hashed in place of the file the manifest pinned.
+
+    v2.3 adds BINDING (V22-01): with `keep` supplied, the exact buffer that was hashed for a file that MATCHED its row is
+    stored in it. `load_verified_modules` executes those buffers and nothing else, so a file that fails here contributes
+    no source to be run, and a file that passes cannot be re-read afterwards.
     """
     failures: list[str] = []
     declared = expected.get("manifest")
@@ -279,7 +321,7 @@ def check_manifest(expected: dict, here: str = HERE) -> list[str]:
     for name in sorted(present & set(by_name)):
         row = listed[CANONICAL_PREFIX + name]
         try:
-            size, digest = read_regular(os.path.join(here, name), f"{CANONICAL_PREFIX}{name}")
+            data, size, digest = read_regular(os.path.join(here, name), f"{CANONICAL_PREFIX}{name}")
         except SuiteIntegrityError as exc:
             failures.append(f"manifest: {exc}")
             continue
@@ -288,22 +330,85 @@ def check_manifest(expected: dict, here: str = HERE) -> list[str]:
             continue
         if digest != row["sha256"]:
             failures.append(f"manifest: {name} sha256 {digest[:16]}… != {row['sha256'][:16]}… (modified)")
+            continue
+        if keep is not None:
+            keep[name] = data                 # V22-01: the ONLY source that may be executed
     return failures
 
 
+def _execute_module(qualified: str, path: str, data: bytes, parent: types.ModuleType | None = None,
+                    is_package: bool = False) -> types.ModuleType:
+    """Build a module from `data` and execute it, with no path, no loader and no `.pyc` in the picture (V22-01).
+
+    `compile()` runs on the bytes that `check_manifest` hashed; the module object is created here, registered in
+    `sys.modules` before execution (so a module that imports itself, or a `from ... import name` inside it, sees this
+    object and not a fresh file read), and its parent package gets the attribute, because the import system only sets
+    that attribute when IT loads a submodule. If execution raises, the half-built module is removed again.
+    """
+    code = compile(data, path, "exec", dont_inherit=True)
+    spec = importlib.machinery.ModuleSpec(qualified, loader=None, origin=path, is_package=is_package)
+    if is_package:
+        spec.submodule_search_locations = [os.path.dirname(path)]
+    module = importlib.util.module_from_spec(spec)
+    module.__file__ = path
+    sys.modules[qualified] = module
+    short = qualified.rpartition(".")[2]
+    if parent is not None:
+        setattr(parent, short, module)
+    try:
+        exec(code, module.__dict__)           # noqa: S102 — executing verified source is the point of this function
+    except BaseException:
+        sys.modules.pop(qualified, None)
+        if parent is not None:
+            with contextlib.suppress(AttributeError):
+                delattr(parent, short)
+        raise
+    return module
+
+
+def load_verified_modules(sources: dict[str, bytes], here: str = HERE) -> dict[str, types.ModuleType]:
+    """Execute the suite FROM the bytes that matched `expected.json`, in dependency order (V22-01).
+
+    `sources` is filled by `check_manifest(keep=...)` and holds a file name only if that file's size and SHA-256 matched
+    its row. A name that is missing here is a refusal, not a reason to read the path: falling back to the filesystem is
+    exactly the defect this function exists to remove. `tools.obs.probes` itself is rebuilt from its verified
+    `__init__.py` (the interpreter imported the real package to start this module, which is why the package is replaced
+    rather than trusted), `probe_common` is executed next, and each probe follows in measurement order.
+    """
+    missing = [name for name in LOAD_ORDER if name not in sources]
+    if missing:
+        raise SuiteIntegrityError(f"no VERIFIED bytes for {', '.join(missing)}: a module is never re-read from disk "
+                                  f"after the manifest check (V22-01)")
+    package = _execute_module(PACKAGE, os.path.join(here, "__init__.py"), sources["__init__.py"],
+                             parent=sys.modules.get("tools.obs"), is_package=True)
+    modules: dict[str, types.ModuleType] = {"__init__": package}
+    for name in ("probe_common",) + PROBES:
+        modules[name] = _execute_module(f"{PACKAGE}.{name}", os.path.join(here, f"{name}.py"), sources[f"{name}.py"],
+                                        parent=package)
+    return modules
+
+
 def self_test() -> int:
-    """V21-01 negative regressions: a suite entry that is a link or not a regular file must be REFUSED, not hashed.
+    """Negative regressions for the integrity checks, with passed / failed / skipped counted separately (V22-03).
 
     Every case builds a throw-away suite tree in a temporary directory, so nothing here reads or writes the real one.
     CI runs this (`--self-test`) ahead of the gate, so the refusals are demonstrated on every revision instead of being
     described in prose. The first case is a CONTROL: the same harness must ACCEPT an honest tree, or "everything is
-    refused" would pass this file.
+    refused" would pass this file. A case this host cannot run is printed as `skip` and counted as skipped, never as
+    passed (V22-03): the summary says how many of each, and only failures affect the exit status.
     """
-    results: list[tuple[str, bool]] = []
+    counts = {"passed": 0, "failed": 0, "skipped": 0}
 
     def report_case(label: str, ok: bool, detail: str = "", skipped: bool = False) -> None:
-        results.append((label, ok))
-        mark = "skip" if skipped else ("ok  " if ok else "FAIL")
+        if skipped:
+            counts["skipped"] += 1
+            mark = "skip"
+        elif ok:
+            counts["passed"] += 1
+            mark = "ok  "
+        else:
+            counts["failed"] += 1
+            mark = "FAIL"
         print(f"{mark}  {label}{(' — ' + detail) if detail else ''}")
 
     def tree(root: str) -> None:
@@ -323,6 +428,37 @@ def self_test() -> int:
                 failures = [f"raised: {exc}"]
             text = " | ".join(failures)
             report_case(label, bool(failures) and needle in text, text or "no failure reported")
+
+    @contextlib.contextmanager
+    def swapped_before_open(path: str, payload: bytes):
+        """Arm a one-shot `os.open` hook that REPLACES `path` with a NEW INODE immediately before it is opened.
+
+        V22-02: this is the race `samestat` exists for, injected deterministically rather than argued about. The hook
+        fires on the next `open(O_RDONLY|O_NOFOLLOW)` of exactly this path, writes a different file beside it and
+        `os.replace`s it into place — so `lstat` has already named inode A and the `open` that follows resolves inode B.
+        The hook is disarmed after one shot and `os.open` is always restored.
+        """
+        real_open = os.open
+        state = {"armed": True}
+
+        def hooked(target, flags, *args, **kwargs):
+            if (state["armed"] and flags == OPEN_REGULAR
+                    and os.path.abspath(target) == os.path.abspath(path)):
+                state["armed"] = False
+                staging = path + ".race"
+                fd = real_open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                try:
+                    os.write(fd, payload)
+                finally:
+                    os.close(fd)
+                os.replace(staging, path)         # a DIFFERENT inode is what the following open() will see
+            return real_open(target, flags, *args, **kwargs)
+
+        os.open = hooked
+        try:
+            yield state
+        finally:
+            os.open = real_open
 
     with tempfile.TemporaryDirectory() as tmp:
         tree(tmp)
@@ -388,6 +524,30 @@ def self_test() -> int:
             text = " | ".join(failures)
             report_case("a DEVICE node in place of a suite file is refused", bool(failures) and "device" in text,
                         text or "no failure reported")
+
+    # V22-02: the ACTIVE race. lstat() names one inode, a new file is renamed over the path, open() gets the other.
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        path = os.path.join(tmp, "probe1_phase1.py")
+        before = os.lstat(path)
+        with swapped_before_open(path, b"# substituted between lstat and open\n" * 3) as state:
+            try:
+                with opened_regular(path, "probe1_phase1.py"):
+                    pass
+            except SuiteIntegrityError as exc:
+                message = str(exc)
+                after = os.lstat(path)
+                moved = (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+                report_case("TOCTOU: an inode swapped between lstat() and open() is CAUGHT by samestat (V22-02)",
+                            "identity changed between lstat and open" in message and moved and not state["armed"],
+                            f"{message} [inode {before.st_ino} -> {after.st_ino}]")
+            else:
+                report_case("TOCTOU: an inode swapped between lstat() and open() is CAUGHT by samestat (V22-02)", False,
+                            "opened_regular ACCEPTED the substituted inode")
+        if state["armed"]:
+            report_case("TOCTOU: the fault-injection hook actually fired (V22-02)", False,
+                        "the hook never matched the open, so the case above proved nothing")
+
     if os.path.exists("/dev/null"):                      # a real character device, no privileges needed
         try:
             with opened_regular("/dev/null", "/dev/null"):
@@ -424,23 +584,71 @@ def self_test() -> int:
         report_case("open(..., O_NOFOLLOW) refuses a link at open time (ELOOP)", True,
                     "skipped: O_NOFOLLOW is unavailable on this platform (lstat + fstat identity still applies)",
                     skipped=True)
+
+    # V22-01: the executed source is the buffer that was hashed, even when the path says something else entirely.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "probe_common.py")
+        with open(path, "wb") as handle:
+            handle.write(b"# module under test\nVALUE = 'verified bytes'\n")
+        try:
+            data, size, digest = read_regular(path, "probe_common.py")
+        except SuiteIntegrityError as exc:
+            report_case("a module executes the HASHED bytes, not the file that replaced them (V22-01)", False, str(exc))
+        else:
+            with open(path, "wb") as handle:           # what a rewrite between check and import would leave behind
+                handle.write(b"# module under test\nVALUE = 'rewritten after the hash'\n")
+            module = _execute_module("obs_verified_demo", path, data)
+            value = getattr(module, "VALUE", None)
+            sys.modules.pop("obs_verified_demo", None)
+            report_case("a module executes the HASHED bytes, not the file that replaced them (V22-01)",
+                        value == "verified bytes",
+                        f"executed VALUE={value!r} from the {size} B buffer hashed as {digest[:16]}…")
+    with tempfile.TemporaryDirectory() as tmp:
+        tree(tmp)
+        block = manifest(include_self=False, here=tmp)
+        sources: dict[str, bytes] = {}
+        check_manifest({"manifest": block}, here=tmp, keep=sources)
+        try:
+            load_verified_modules(sources, here=tmp)
+        except SuiteIntegrityError as exc:
+            report_case("a probe with no VERIFIED bytes is refused, never fetched from the path (V22-01)",
+                        "no VERIFIED bytes" in str(exc), str(exc))
+        else:
+            report_case("a probe with no VERIFIED bytes is refused, never fetched from the path (V22-01)", False,
+                        "load_verified_modules executed a module whose bytes were never verified")
+    driver = os.path.join(HERE, "run_all.py")
+    try:
+        with open(driver, "rb") as handle:
+            text = handle.read()
+    except OSError as exc:
+        report_case("the driver contains no path-based import of a suite module (V22-01)", False,
+                    f"cannot read {driver}: {exc}")
+    else:
+        # assembled at run time so this case's own text cannot satisfy it
+        needle = b"import" + b"_module("
+        report_case("the driver contains no path-based import of a suite module (V22-01)", needle not in text,
+                    "no path-based import found" if needle not in text else "a path-based import is still present")
     with tempfile.TemporaryDirectory() as tmp:
         tree(tmp)
         path = os.path.join(tmp, "run_all.py")
-        size, digest = read_regular(path, "run_all.py")
-        with open(path, "rb") as handle:
-            want = hashlib.sha256(handle.read()).hexdigest()
+        data, size, digest = read_regular(path, "run_all.py")
+        want = hashlib.sha256(data).hexdigest()
         report_case("a regular file still hashes to its own bytes", (size, digest) == (os.path.getsize(path), want),
                     f"{size} B, {digest[:16]}…")
-    failed = [label for label, ok in results if not ok]
-    print(f"{'PASS' if not failed else 'FAIL'}: {len(results) - len(failed)}/{len(results)} integrity regression cases")
-    return 0 if not failed else 1
+
+    total = counts["passed"] + counts["failed"] + counts["skipped"]
+    print(f"{'PASS' if not counts['failed'] else 'FAIL'}: {counts['passed']} passed, {counts['failed']} failed, "
+          f"{counts['skipped']} skipped ({total} cases)")
+    if counts["skipped"]:
+        print("      skipped cases are NOT passes: each names the capability this host lacked")
+    return 0 if not counts["failed"] else 1
 
 
-def collect() -> list[dict]:
+def collect(modules: dict[str, types.ModuleType]) -> list[dict]:
+    """Run every probe module that was built from verified bytes (V22-01): no import, no path, no cache."""
     results: list[dict] = []
     for name in PROBES:
-        produced = importlib.import_module(f"tools.obs.probes.{name}").main()
+        produced = modules[name].main()
         results.extend(produced if isinstance(produced, list) else [produced])
     return results
 
@@ -459,7 +667,7 @@ def interposed(measurement: str) -> dict[str, int] | None:
     return {"peak": int(data["peak"]), "map_peak": int(data.get("map_peak", 0))}
 
 
-def compare_inventory(expected: dict, detail: dict) -> list[str]:
+def compare_inventory(expected: dict, detail: dict, common: types.ModuleType) -> list[str]:
     """A.5.8: every inventory item must sit inside the bound DERIVED for it, and the request region must fit A.5.5."""
     failures: list[str] = []
     spec = expected.get("inventory") or {}
@@ -483,12 +691,13 @@ def compare_inventory(expected: dict, detail: dict) -> list[str]:
         elif value > bound:
             failures.append(f"inventory: {name}: {value} B exceeds its derived bound {bound} B ({item['derivation']})")
     per_request = int(spec.get("per_request_bound") or 0)
-    if per_request > C.HTTP_HEADROOM:
-        failures.append(f"inventory: the per-request item bounds sum to {per_request} B > HTTP_HEADROOM {C.HTTP_HEADROOM}")
+    if per_request > common.HTTP_HEADROOM:
+        failures.append(f"inventory: the per-request item bounds sum to {per_request} B > HTTP_HEADROOM "
+                        f"{common.HTTP_HEADROOM}")
     return failures
 
 
-def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]:
+def compare(expected: dict, measured: list[dict], probe_interposed, common: types.ModuleType) -> list[str]:
     failures: list[str] = []
     by_name = {m["probe"]: m for m in measured}
     for want in expected["measurements"]:
@@ -525,9 +734,9 @@ def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]
             # the direct-mmap channel is bounded by the headroom constant for phases too (A.5.7): arena reservations
             # are not live Domain B bytes, so no sum is taken, but a measurement-region mapping larger than the
             # constant would mean the malloc figure is under-reporting and must be reviewed before it is trusted.
-            if want.get("interposed_map_peak") is not None and instrument["map_peak"] > C.HTTP_HEADROOM:
+            if want.get("interposed_map_peak") is not None and instrument["map_peak"] > common.HTTP_HEADROOM:
                 failures.append(f"{name}: direct-mmap channel {instrument['map_peak']} > HTTP_HEADROOM "
-                                f"{C.HTTP_HEADROOM} (A.5.7: the malloc figure is no longer a usable bound)")
+                                f"{common.HTTP_HEADROOM} (A.5.7: the malloc figure is no longer a usable bound)")
         if name == "native_headroom":
             detail = got.get("detail") or {}
             instrument = detail.get("interposed") or {}
@@ -535,13 +744,14 @@ def compare(expected: dict, measured: list[dict], probe_interposed) -> list[str]
             if peak is None or map_peak is None:
                 failures.append("native_headroom: interposer unavailable (the analytic term cannot be checked)")
                 continue
-            if peak > C.HTTP_HEADROOM:
-                failures.append(f"native_headroom: request-region malloc peak {peak} > HTTP_HEADROOM {C.HTTP_HEADROOM}")
+            if peak > common.HTTP_HEADROOM:
+                failures.append(f"native_headroom: request-region malloc peak {peak} > HTTP_HEADROOM "
+                                f"{common.HTTP_HEADROOM}")
             # V18-03 fence: the direct-mmap channel is added to the malloc channel, so the SUM must fit the constant.
-            if peak + map_peak > C.HTTP_HEADROOM:
+            if peak + map_peak > common.HTTP_HEADROOM:
                 failures.append(f"native_headroom: malloc {peak} + direct mmap {map_peak} > "
-                                f"HTTP_HEADROOM {C.HTTP_HEADROOM} (A.5.7 fence)")
-            failures.extend(compare_inventory(expected, detail))
+                                f"HTTP_HEADROOM {common.HTTP_HEADROOM} (A.5.7 fence)")
+            failures.extend(compare_inventory(expected, detail, common))
             # the mallinfo2 figure is a LOWER BOUND and is deliberately NOT compared to a recorded value
         if name == "realloc_accounting":
             detail = got.get("detail") or {}
@@ -609,14 +819,6 @@ def main(argv: list[str]) -> int:
             return 2
         print(json.dumps(block, indent=2, sort_keys=True))
         return 0
-    if mode == "--interpose":
-        module = importlib.import_module(f"tools.obs.probes.{argv[2]}")
-        if hasattr(module, "interposed_pair"):
-            pair = module.interposed_pair()
-        else:
-            pair = {"peak": int(module.interposed()), "map_peak": 0}
-        print(json.dumps({"peak": int(pair["peak"]), "map_peak": int(pair.get("map_peak", 0))}))
-        return 0
     expected_path = os.path.join(HERE, SELF)
     try:
         with opened_regular(expected_path, SELF) as (handle, _info):
@@ -643,7 +845,8 @@ def main(argv: list[str]) -> int:
         print(f"manifest updated: {len(expected['manifest']['files'])} files pinned "
               f"(expected.json excluded: it cannot hash itself; A.0 pins it instead)")
         return 0
-    integrity = check_manifest(expected)
+    sources: dict[str, bytes] = {}
+    integrity = check_manifest(expected, keep=sources)     # V22-01: the hashed buffers are retained here
     if integrity:
         for line in integrity:
             print(line, file=sys.stderr)
@@ -653,12 +856,33 @@ def main(argv: list[str]) -> int:
     if sys.version.split()[0] != PINNED_PYTHON:
         print(f"refused: interpreter {sys.version.split()[0]} != {PINNED_PYTHON} (A.1)", file=sys.stderr)
         return 2
-    measured = collect()
+    # V22-01: only now, after every check, is suite code turned into objects — and only from the bytes that passed.
+    try:
+        modules = load_verified_modules(sources)
+    except SuiteIntegrityError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    except SyntaxError as exc:
+        print(f"refused: {exc.filename}:{exc.lineno}: {exc.msg} (V22-01)", file=sys.stderr)
+        return 2
+    if mode == "--interpose":
+        name = argv[2] if len(argv) > 2 else ""
+        module = modules.get(name)
+        if module is None:
+            print(f"refused: {name!r} is not a probe of this suite (V22-01)", file=sys.stderr)
+            return 2
+        if hasattr(module, "interposed_pair"):
+            pair = module.interposed_pair()
+        else:
+            pair = {"peak": int(module.interposed()), "map_peak": 0}
+        print(json.dumps({"peak": int(pair["peak"]), "map_peak": int(pair.get("map_peak", 0))}))
+        return 0
     if mode == "--record":
         print(json.dumps({"env": {"python": sys.version.split()[0], "platform": platform.platform()},
-                          "measurements": measured}, indent=2))
+                          "measurements": collect(modules)}, indent=2))
         return 0
-    failures = compare(expected, measured, interposed)
+    measured = collect(modules)
+    failures = compare(expected, measured, interposed, modules["probe_common"])
     try:
         block = manifest(include_self=True)
     except SuiteIntegrityError as exc:
