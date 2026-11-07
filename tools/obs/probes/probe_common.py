@@ -27,6 +27,20 @@ the working directory. Dropping a flag therefore FAILS CLOSED instead of quietly
 runs a child whose working directory holds a hostile `sitecustomize.py`, `hashlib.py` and `ssl.py` to prove that none
 of them executes.
 
+THE BOOTSTRAP'S OWN PRELUDE IS IMPORT-FREE (V25-01). v2.5 launched the child correctly but the bootstrap opened with
+`import builtins, hashlib, json, os, sys, types` and only THEN called `isolated()`, so the validation ran after the
+imports it exists to protect: with `-I` dropped, a working-directory `hashlib.py` executes during `import hashlib`,
+before the first check, and the payload verification itself would be the thing that ran it. The prelude now imports
+`sys` alone — a BUILT-IN, taken from the interpreter's static table and never searched for on `sys.path` — defines
+`refuse()` on `sys.stderr` + `SystemExit(86)` (no `os._exit()`, because `os` must not be imported in order to refuse),
+CALLS `isolated()`, and only then imports `builtins`, `hashlib`, `json`, `os` and `types`. `isolated()` is import-free by
+construction: it reads `sys.flags` and the form of each `sys.path` entry rather than `os.getcwd()`, and a post-import
+`cwd_free()` re-confirms the same claim as defence in depth, able to add a refusal but never to replace one.
+`--self-test` parses the bootstrap it is about to run and requires `isolated()` to be executed before the first
+file-backed import with `sys` the only module ahead of it, then launches the child with `-I` removed (a plant
+`hashlib.py` in its working directory) and with `-S` removed (`sitecustomize.py` present) and requires exit 86 with
+nothing planted ever executing.
+
 What is preserved is the measurement: the child is still a fresh interpreter whose startup is inside the shim's window
 (the shim counts from exec, before this code runs), it still gets `cwd` = repository root and the same `sys.argv[0]`
 (`-m` gives the module path, and that is what the parent passes), it still resets at the same points, and it still runs
@@ -167,10 +181,16 @@ def measure(name: str, fn, **detail) -> dict:
 TRANSPORT_MAGIC = b"OBS-PROBE/1\n"
 CHILD_REFUSED = 86          # a child refusal is never confused with a measurement failure (1) or an abort (SIGABRT)
 # V24-01: isolated (-I: no PYTHON* environment, no user site, no working directory on sys.path) and site-free (-S: no
-# sitecustomize/usercustomize import at startup). The bootstrap refuses to run when it was not started with both.
+# sitecustomize/usercustomize import at startup). V25-01: the bootstrap verifies BOTH flags before it imports anything
+# that could be resolved from disk, and refuses (exit 86) when either one was dropped.
 CHILD_FLAGS = ("-I", "-S")
 
-BOOTSTRAP = r'''import builtins, hashlib, json, os, sys, types
+BOOTSTRAP = r'''# V25-01: THIS PRELUDE IMPORTS NOTHING BUT `sys`. `sys` is a BUILT-IN module: it comes from the interpreter's static
+# table and is never searched for on sys.path, so this line cannot execute a file from the directory the child was
+# started in. Every interpreter-state check below therefore runs BEFORE the first file-backed import (builtins,
+# hashlib, json, os, types), because that import is itself the attack surface: with `-I` dropped, a working-directory
+# `hashlib.py` executes during `import hashlib` — the very module the payload verification goes on to call.
+import sys
 
 REFUSED = 86
 MAGIC = b"OBS-PROBE/1\n"
@@ -178,24 +198,52 @@ PACKAGE = "tools.obs.probes"
 
 
 def refuse(why):
+    # `SystemExit` rather than `os._exit()`: refusing must not require importing `os`, so the pre-import guard refuses
+    # with no file-backed module in the picture at all. The status is still 86, the code every refusal uses.
     sys.stderr.write("obs-child: REFUSED: " + why + "\n")
     sys.stderr.flush()
-    os._exit(REFUSED)
+    raise SystemExit(REFUSED)
 
 
 def isolated():
+    """Interpreter state, checked with NOTHING imported but `sys` (V25-01).
+
+    This is the first executable statement of the bootstrap, so it runs before `builtins`, `hashlib`, `json`, `os` and
+    `types` are imported: a plant that `-I`/`-S` removed cannot execute during validation. Every clause is import-free
+    on purpose — the working-directory test uses `-P`'s `safe_path` flag and the FORM of each `sys.path` entry instead
+    of `os.getcwd()`/`os.path.abspath()`, which would need `os`.
+    """
     flags = sys.flags
     if not (flags.isolated and flags.no_site and flags.ignore_environment and flags.no_user_site):
         refuse("the child interpreter was not started isolated and site-free (-I -S): its startup hooks, "
-               "PYTHONPATH or working directory were not protected (V24-01)")
+               "PYTHONPATH or working directory were not protected (V24-01, V25-01)")
+    # -P (implied by -I on 3.11+) is what keeps the working directory out of sys.path for a `-c` command.
+    if not getattr(flags, "safe_path", False):
+        refuse("the child interpreter ran WITHOUT a safe path (-P, implied by -I), so the working directory may have "
+               "been prepended to sys.path: V25-01")
     hooks = [name for name in ("site", "sitecustomize", "usercustomize") if name in sys.modules]
     if hooks:
         refuse("a startup hook ran before the bootstrap (%s): V24-01" % ", ".join(hooks))
+    for entry in sys.path:
+        if entry in ("", ".", ".."):
+            refuse("the child's sys.path contains a working-directory entry (%r): a shadow module could be imported "
+                   "ahead of the standard library (V24-01, V25-01)" % (entry,))
+        if not entry.startswith("/"):
+            refuse("the child's sys.path contains a relative entry (%r): it would resolve against the working "
+                   "directory (V25-01)" % (entry,))
+
+
+isolated()          # V25-01: FIRST. No module importable from disk has been imported at this point.
+
+import builtins, hashlib, json, os, types
+
+
+def cwd_free():
+    """The same claim, re-confirmed with `os` AFTER the guard: it can only add a refusal, never replace one (V25-01)."""
     here = os.getcwd()
     for entry in sys.path:
-        if entry in ("", ".") or (entry and os.path.abspath(entry) == here):
-            refuse("the child's sys.path contains the working directory (%r): a shadow module could be imported "
-                   "ahead of the standard library (V24-01)" % (entry,))
+        if entry and os.path.abspath(entry) == here:
+            refuse("the child's sys.path contains the working directory (%r): V24-01" % (entry,))
 
 
 def settings():
@@ -280,7 +328,7 @@ def execute(name, chunk, path, into):
 
 
 def main():
-    isolated()                                # V24-01: before anything reads the parent's request
+    cwd_free()                                # V25-01: the post-import confirmation of `isolated()` above
     expect, origin, target, mode, argv = settings()
     sent = receive(expect)
     package = packages()
