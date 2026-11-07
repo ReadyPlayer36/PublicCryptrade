@@ -175,7 +175,7 @@ jobs:
           set -euo pipefail
           PYTHONPATH=$PWD python -m tools.obs.probes.run_all --self-test 2>&1 | tee artifacts/probes/self-test.log
 
-      - name: "Mutation: dropping -I, -S or the guard call must FAIL the self-test (V25-01)"
+      - name: "Mutation: dropping -I, -S, narrowing the launcher or the guard call must FAIL the self-test (V25-01, V26-01)"
         shell: bash
         run: |
           set -euo pipefail
@@ -197,8 +197,9 @@ jobs:
           : > artifacts/probes/mutation.log
           mutate 'CHILD_FLAGS = ("-I", "-S")' 'CHILD_FLAGS = ("-I",)' no-I
           mutate 'CHILD_FLAGS = ("-I", "-S")' 'CHILD_FLAGS = ("-S",)' no-S
+          mutate 'return [sys.executable, *CHILD_FLAGS, "-c", BOOTSTRAP]' 'return [sys.executable, "-I", "-c", BOOTSTRAP]' no-command-S
           mutate $'\nisolated()          # V25-01' $'\npass  # guard removed' no-guard
-          echo "all three mutations killed: the self-test failed for each" | tee -a artifacts/probes/mutation.log
+          echo "all four mutations killed: the self-test failed for each" | tee -a artifacts/probes/mutation.log
 
       - name: Run the probe gate (fails on any mismatch, modified file, addition or deletion)
         id: gate
