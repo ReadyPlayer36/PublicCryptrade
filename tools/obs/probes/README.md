@@ -60,16 +60,41 @@ Nothing here is imported by PATH (V22-01). `--check` reads each suite file once,
 objects (`types.ModuleType`, registered in `sys.modules`) and execute them, so the code that produces a number is the
 code a reviewer verified. Nothing the driver executes is re-read from disk and no `.pyc` is consulted for it, a file
 that fails the check contributes no executable source at all, and the interposed child (`--interpose`) verifies and
-binds the same tree by the same route before it measures. Two paths are deliberately outside this binding and are
-named instead of implied: `run_all.py` itself, which the interpreter imports before any check can run (A.0 pins it;
-`--manifest` prints its digest), and the three measured children that probe6/probe8 start with `-m` on the tree the
-parent just verified — the shim counts a process from exec, so rebinding their startup would move the recorded
-native peaks (A.5.4/A.5.8). Those children leave a `__pycache__` entry, which the inventory ignores by design.
+binds the same tree by the same route before it measures. One path is deliberately outside this binding and is named
+instead of implied: `run_all.py` itself, which the interpreter imports before any check can run (A.0 pins it;
+`--manifest` prints its digest). The CHILDREN are inside it as of v2.4 — see the next section.
 
-`--self-test` counts outcomes separately (V22-03): `17 passed, 0 failed, 1 skipped` rather than folding skips into
-passes. A case this host cannot run (no `CAP_MKNOD`, no `O_NOFOLLOW`) prints as `skip` and never counts as a pass;
-the exit status depends only on failures. Its cases include a real inode swapped between `lstat()` and `open()`
-(V22-02), so `samestat`'s refusal is demonstrated rather than argued.
+## A child starts from the same bytes (V23-01)
+
+Under v2.3 the measured children (probe6's server, stage and `--realloc` children, probe8's mmap child) were started
+with `python -m tools.obs.probes.<probe>`: the parent had verified the bytes, but the CHILD opened the file, in a
+process that never read the manifest — the hole V23-01 reported, and the same defect V22-01 closed in the parent.
+Every child is now started from the parent's retained buffers through `probe_common.spawn_suite_child` /
+`run_suite_child` / `run_program`: the source goes over a PIPE, one frame per module carrying the SHA-256
+`expected.json` PROMISES for that file, and the child recomputes it and refuses (exit 86, `obs-child: REFUSED: …`)
+rather than execute a frame that does not match. The child's bootstrap is bound by its own digest — the parent passes
+`sha256(bootstrap)` and the child hashes the `-c` argument it was actually started with (`sys.orig_argv`) — and its
+`tools.obs.probes` package is CLOSED (`__path__ = []`), so a module the parent did not send cannot be imported from
+disk there even though the file exists. Dependencies are not assumed: the closure is read with `ast` from the verified
+sources, so `probe_common` travels ahead of every probe that imports it, and a child that starts its own children
+(every probe6 stage) hands on the same buffers and the same digests.
+
+What is preserved is what decides the numbers: a fresh interpreter per child, still counted by the shim from exec, so
+Python startup remains inside the native peak; the same `cwd`; the same `sys.argv[0]` (`-m` gives the module path and
+the parent passes that path); the same resets inside the measured regions; and the module still executed as
+`__main__`. What the bootstrap costs the child is allocator state before its reset, and it moved two recorded
+figures: `native_headroom.interposed` 214,120 → 217,072 B (against `HTTP_HEADROOM` 262,144) and `realloc_accounting`
+8,398,608 → 8,398,528 B. Both are re-pinned with that reason in `expected.json`; both remain inside their bounds.
+Running a probe on its own (`python -m tools.obs.probes.probe6_native`) has no registered suite and refuses to start
+a child, instead of silently falling back to `-m`.
+
+`--self-test` counts outcomes separately (V22-03): `23 passed, 0 failed, 1 skipped (24 cases)` rather than folding
+skips into passes (`24 passed` where the device-node case can run). A case this host cannot run (no `CAP_MKNOD`, no
+`O_NOFOLLOW`) prints as `skip` and never counts as a pass; the exit status depends only on failures. Its cases
+include a real inode swapped between `lstat()` and `open()` (V22-02), so `samestat`'s refusal is demonstrated rather
+than argued, and six of them start REAL children (V23-01): a frame whose digest does not match is refused instead of
+executed, a child runs the bytes it was sent while the path it names holds different source, a swapped bootstrap and
+a truncated payload are refused, and an unverified sibling cannot be imported from disk.
 
 After a REVIEWED change: `--update-manifest` (this directory), then regenerate A.0/A.7 from the document (D44).
 
@@ -77,7 +102,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 
 | File | Role |
 |---|---|
-| `probe_common.py` | constants (mirroring §12) and the deterministic worst-case fixtures; the shim's getters |
+| `probe_common.py` | constants (mirroring §12), the deterministic worst-case fixtures, the shim's getters, and the verified child transport — bootstrap, payload framing, `run_suite_child` (V23-01) |
 | `probe1_phase1.py` | phase 1 — request path: 64 KiB chunked scratch accumulation, then `bytes(scratch)` |
 | `probe2_seal.py` | phase 2 — §5.1.1 seal order, plus the BANNED retain-the-chunk variant (must fail its bound) |
 | `probe3_decode.py` | phase 3 — the §5.1.2 `decode_pass` release order on ONE line at `MAX_LINE` |
@@ -87,7 +112,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
-| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution (V22-01) |
+| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution and child binding (V22-01, V23-01) |
 | `expected.json` | the file manifest (size + SHA-256) AND the recorded values, bounds and inventory derivations |
 | `README.md` | this file |
 
