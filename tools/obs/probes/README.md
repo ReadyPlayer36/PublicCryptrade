@@ -62,9 +62,9 @@ code a reviewer verified. Nothing the driver executes is re-read from disk and n
 that fails the check contributes no executable source at all, and the interposed child (`--interpose`) verifies and
 binds the same tree by the same route before it measures. One path is deliberately outside this binding and is named
 instead of implied: `run_all.py` itself, which the interpreter imports before any check can run (A.0 pins it;
-`--manifest` prints its digest). The CHILDREN are inside it as of v2.4 — see the next section.
+`--manifest` prints its digest). The CHILDREN are inside it as of v2.4 and their interpreter STARTUP as of v2.5 — see the next section.
 
-## A child starts from the same bytes (V23-01)
+## A child starts from the same bytes, in an isolated interpreter (V23-01, V24-01)
 
 Under v2.3 the measured children (probe6's server, stage and `--realloc` children, probe8's mmap child) were started
 with `python -m tools.obs.probes.<probe>`: the parent had verified the bytes, but the CHILD opened the file, in a
@@ -88,13 +88,30 @@ figures: `native_headroom.interposed` 214,120 → 217,072 B (against `HTTP_HEADR
 Running a probe on its own (`python -m tools.obs.probes.probe6_native`) has no registered suite and refuses to start
 a child, instead of silently falling back to `-m`.
 
-`--self-test` counts outcomes separately (V22-03): `23 passed, 0 failed, 1 skipped (24 cases)` rather than folding
-skips into passes (`24 passed` where the device-node case can run). A case this host cannot run (no `CAP_MKNOD`, no
+The child's INTERPRETER STARTUP is isolated too (V24-01). v2.4 bound the payload but still launched the child as
+`python -c <bootstrap>`, so startup was outside every check: `site` imports a `sitecustomize` from the environment,
+`PYTHONPATH` entries are searched, and for `-c` the working directory is `sys.path[0]`, so a planted hook or a
+shadow `hashlib.py` — the module the payload verification itself calls — could run before the bootstrap's first
+line. Every child is now started `python -I -S -c <bootstrap>`: `-I` drops the `PYTHON*` environment, the user site
+directory and the working directory from `sys.path`, and `-S` skips `site`, so neither `sitecustomize` nor
+`usercustomize` is imported and nothing in the working directory can resolve ahead of the standard library. The
+bootstrap does not take that on trust: `isolated()` runs before it reads the parent's request and refuses (exit 86)
+unless `sys.flags.isolated`, `no_site`, `ignore_environment` and `no_user_site` are all set, no startup hook is in
+`sys.modules`, and no `sys.path` entry is the working directory. A dropped flag fails closed instead of quietly
+re-opening the hole, and the measurement is unchanged: the child is still counted by the shim from exec, so Python
+startup remains inside the native peak exactly as before, and no gated reading moved.
+
+`--self-test` counts outcomes separately (V22-03): `28 passed, 0 failed, 1 skipped (29 cases)` rather than folding
+skips into passes (`29 passed` where the device-node case can run). A case this host cannot run (no `CAP_MKNOD`, no
 `O_NOFOLLOW`) prints as `skip` and never counts as a pass; the exit status depends only on failures. Its cases
 include a real inode swapped between `lstat()` and `open()` (V22-02), so `samestat`'s refusal is demonstrated rather
-than argued, and six of them start REAL children (V23-01): a frame whose digest does not match is refused instead of
+than argued, and ten of them start REAL children (V23-01, V24-01): a frame whose digest does not match is refused instead of
 executed, a child runs the bytes it was sent while the path it names holds different source, a swapped bootstrap and
-a truncated payload are refused, and an unverified sibling cannot be imported from disk.
+a truncated payload are refused, and an unverified sibling cannot be imported from disk. Four of them (V24-01)
+start a child in a working directory holding a hostile `sitecustomize.py` plus `hashlib.py` / `ssl.py` shadows:
+the hook never runs, `hashlib` is still the standard library's, the payload digest still verifies, a child started
+without `-I -S` is refused — and a CONTROL shows the same plant DOES run when the flags are removed, so the cases
+cannot pass vacuously.
 
 After a REVIEWED change: `--update-manifest` (this directory), then regenerate A.0/A.7 from the document (D44).
 
@@ -102,7 +119,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 
 | File | Role |
 |---|---|
-| `probe_common.py` | constants (mirroring §12), the deterministic worst-case fixtures, the shim's getters, and the verified child transport — bootstrap, payload framing, `run_suite_child` (V23-01) |
+| `probe_common.py` | constants (mirroring §12), the deterministic worst-case fixtures, the shim's getters, and the verified child transport — bootstrap, payload framing, `run_suite_child`, launched `-I -S` (V23-01, V24-01) |
 | `probe1_phase1.py` | phase 1 — request path: 64 KiB chunked scratch accumulation, then `bytes(scratch)` |
 | `probe2_seal.py` | phase 2 — §5.1.1 seal order, plus the BANNED retain-the-chunk variant (must fail its bound) |
 | `probe3_decode.py` | phase 3 — the §5.1.2 `decode_pass` release order on ONE line at `MAX_LINE` |
@@ -112,7 +129,7 @@ After a REVIEWED change: `--update-manifest` (this directory), then regenerate A
 | `probe7_structure.py` | phase 3 — the `scan_structure` pass (parse, key-check, DISCARD) |
 | `probe8_mmap_threads.py` | A.5.9 — partial unmap, `mremap`, 8-thread concurrency and the fail-closed capacity abort |
 | `alloc_peak.c` | `LD_PRELOAD` shim: malloc-family peak and a locked, range-aware direct-`mmap` peak |
-| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution and child binding (V22-01, V23-01) |
+| `run_all.py` | driver: `--check`, `--self-test`, `--record`, `--manifest`, `--update-manifest`, `--report`, `--interpose`; verified-byte module execution and child binding (V22-01, V23-01, V24-01) |
 | `expected.json` | the file manifest (size + SHA-256) AND the recorded values, bounds and inventory derivations |
 | `README.md` | this file |
 
