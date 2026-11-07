@@ -1,4 +1,4 @@
-"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01; v2.5 V24-01; v2.6 V25-01).
+"""Driver for the Appendix A probe suite (V17-04; V18-02/V18-03; manifest and inventory v2.0, V19-03/V19-05; v2.2 V21-01/V21-02; v2.3 V22-01/V22-02/V22-03; v2.4 V23-01; v2.5 V24-01; v2.6 V25-01; v2.7 V26-01).
 
   python -m tools.obs.probes.run_all --check             # CI gate: exit 0 pass / 1 mismatch / 2 integrity or environment
   python -m tools.obs.probes.run_all --self-test         # CI gate: the integrity REFUSALS, proven by negative cases
@@ -81,10 +81,22 @@ from `sys.stderr` with `SystemExit(86)` (no `os._exit()`, since `os` must not be
 `isolated()` is import-free: it uses `sys.flags` and the form of each `sys.path` entry instead of `os.getcwd()`, and
 `cwd_free()` re-confirms the path claim after the imports as defence in depth. `--self-test` parses the bootstrap it is
 about to run and fails unless `isolated()` is executed before the first file-backed import with only `sys` ahead of it,
-and it launches the child twice with ONE FLAG REMOVED: `-S` without `-I` in a working directory whose `hashlib.py`
-records itself and raises, and `-I` without `-S` in a working directory holding `sitecustomize.py`. Both must exit 86
-with nothing planted ever executing, and a CONTROL shows the same `hashlib.py` plant DOES run once `-I` is removed, so
-the two refusals cannot pass vacuously.
+and it launches the child with `-I` REMOVED in a working directory whose `hashlib.py` records itself and raises: the
+child must exit 86 with the plant never executing, and a CONTROL shows the same plant DOES run once `-I` is removed, so
+that refusal cannot pass vacuously.
+
+THE FLAGS ARE A STATIC LAUNCHER INVARIANT, NOT A RUNTIME CHECK (V26-01). v2.6 also ran a child with `-S` removed in a
+working directory holding `sitecustomize.py` and reported that no hook executed — which proved less than it appeared to.
+`-I` keeps the working directory off `sys.path` even when `-S` is gone, so that child could never have imported the
+planted hook: the case exercised `-I`, not the absence of `site`. And CPython runs `site` during interpreter STARTUP,
+before a byte of the `-c` bootstrap is compiled, so a SYSTEM site hook cannot be prevented by any script — `isolated()`
+can only observe `sys.flags.no_site` afterwards and refuse to measure. v2.7 states that boundary instead of implying it
+is covered. `-I`/`-S` are static launcher invariants: the immutable `CHILD_FLAGS` tuple is the only place they are
+spelled, `child_command()` derives the command from it and nothing else, and .github/workflows/ci.yml mutates each flag,
+the launcher's return value and the guard call, failing the build if `--self-test` survives any of them. `--self-test`
+now proves the invariant statically (tuple type, immutability, no flag literal outside the tuple, the CI step's own
+text), keeps the V25-01 ordering proof, and launches a `-S`-less child only to show the post-hoc DETECTION fires — it no
+longer plants a working-directory `sitecustomize.py` and pretends that tests system site initialization.
 
 COUNTS ARE THREE DIFFERENT NUMBERS (V21-02). v2.1 printed "14 files pinned by expected.json", which is false:
 `expected.json` pins 13 files, the suite ships 14, and `expected.json` itself is pinned by §A.0 of the document. The run
@@ -456,9 +468,19 @@ def self_test() -> int:
     be executed before the first file-backed import, with `sys` the only module imported ahead of it — a comment cannot
     satisfy that and a reordering cannot pass it. The launcher's `CHILD_FLAGS` must be exactly `('-I', '-S')` and
     `child_command()` exactly `[sys.executable, '-I', '-S', '-c', BOOTSTRAP]`, so neither flag can be dropped silently.
-    Then each flag is removed ON ITS OWN in a hostile working directory: `-S` kept but `-I` gone (where a planted
-    `hashlib.py` would win) and `-I` kept but `-S` gone (where `site` runs again). Both partial launches must be REFUSED
-    with nothing planted executing, and a CONTROL runs the same plant with no isolation at all to show it is live.
+    `-I` is then removed in a hostile working directory (where a planted `hashlib.py` would win): the child must be
+    REFUSED with nothing planted executing, and a CONTROL runs the same plant with no isolation at all to show it is live.
+
+    V26-01's cases (added in v2.7) test what can honestly be verified and stop testing what cannot. `-I`/`-S` are STATIC
+    launcher invariants: CPython runs `site` during startup, before any `-c` code is compiled, so a child script cannot
+    prevent a system site hook — it can only DETECT the missing flag afterwards and refuse the measurement. The cases
+    therefore require `CHILD_FLAGS` to be an immutable tuple of exactly the two flags and `child_command()` to derive the
+    command from it with no flag literal of its own, prove that a `-S`-less child in an EMPTY directory is detected and
+    refused (with nothing to plant, so the case cannot be read as prevention), and parse .github/workflows/ci.yml and
+    require the mutation step that fails the build when either flag, the launcher's return value or the guard call is
+    tampered with. The v2.6 case that planted `sitecustomize.py` in the child's working directory with `-S` removed is
+    GONE: `-I` still kept that directory off `sys.path`, so it exercised `-I`, never system site initialization, and
+    passing it proved nothing about the case V26-01 raised.
     """
     counts = {"passed": 0, "failed": 0, "skipped": 0}
 
@@ -739,6 +761,55 @@ def self_test() -> int:
                     tuple(transport.CHILD_FLAGS) == ("-I", "-S")
                     and transport.child_command() == [sys.executable, "-I", "-S", "-c", transport.BOOTSTRAP],
                     f"CHILD_FLAGS={tuple(transport.CHILD_FLAGS)!r}, command opens {transport.child_command()[:3]!r}")
+
+        # V26-01: the flags are a STATIC invariant, so prove the shape a mutation would have to break. `CHILD_FLAGS` must
+        # be an immutable tuple and `child_command()` must derive the command from it with no flag literal of its own —
+        # a second place the flags are spelled is a second place that can drift.
+        launcher_uses_tuple = False
+        launcher_literals: list = []
+        try:
+            for node in ast.walk(ast.parse(common_data.decode("utf-8"), "<probe_common.py>")):
+                if isinstance(node, ast.FunctionDef) and node.name == "child_command":
+                    launcher_uses_tuple = "CHILD_FLAGS" in ast.dump(node)
+                    launcher_literals = [n.value for n in ast.walk(node)
+                                         if isinstance(n, ast.Constant) and n.value in ("-I", "-S")]
+        except (UnicodeDecodeError, SyntaxError):
+            launcher_uses_tuple = False
+        try:
+            transport.CHILD_FLAGS[0] = "-S"   # type: ignore[index]  # the mutation this case exists to rule out
+            immutable = False
+        except TypeError:
+            immutable = True
+        report_case("CHILD_FLAGS is an immutable tuple and the only place the flags are spelled (V26-01)",
+                    isinstance(transport.CHILD_FLAGS, tuple) and tuple(transport.CHILD_FLAGS) == ("-I", "-S")
+                    and immutable and launcher_uses_tuple and not launcher_literals
+                    and transport.child_command()[1:3] == ["-I", "-S"],
+                    f"{type(transport.CHILD_FLAGS).__name__} {tuple(transport.CHILD_FLAGS)!r}, item assignment "
+                    f"{'refused' if immutable else 'ACCEPTED'}, launcher literals {launcher_literals or 'none'}")
+
+        # V26-01: the enforcement that closes the gap a runtime check cannot. CI mutates the flags, the launcher and the
+        # guard call and REQUIRES `--self-test` to fail, so the workflow text is part of the claim and is checked here.
+        ci_path = os.path.join(ROOT, ".github", "workflows", "ci.yml")
+        try:
+            with open(ci_path, "r", encoding="utf-8") as handle:
+                ci_text = handle.read()
+        except OSError as exc:
+            report_case("CI fails closed when a flag, the launcher or the guard call is tampered with (V26-01)", False,
+                        f"no CI workflow beside this suite ({exc.__class__.__name__}) to inspect", skipped=True)
+        else:
+            required = {
+                "a mutation step": "Mutation:",
+                "-I removed": """mutate 'CHILD_FLAGS = ("-I", "-S")' 'CHILD_FLAGS = ("-I",)' no-I""",
+                "-S removed": """mutate 'CHILD_FLAGS = ("-I", "-S")' 'CHILD_FLAGS = ("-S",)' no-S""",
+                "launcher narrowed": "no-command-S",
+                "guard call removed": "no-guard",
+                "a survivor fails the job": "MUTATION SURVIVED",
+                "it runs the self-test": "--self-test",
+            }
+            missing = [name for name, marker in required.items() if marker not in ci_text]
+            report_case("CI fails closed when a flag, the launcher or the guard call is tampered with (V26-01)",
+                        not missing, "missing from ci.yml: " + ", ".join(missing) if missing else
+                        "all four mutations present; a surviving mutation fails the job")
         with tempfile.TemporaryDirectory() as tmp:
             frames = {"__init__.py": b"",
                       "probe_common.py": b"MARK = 'common'\n",
@@ -919,18 +990,21 @@ def self_test() -> int:
                             f"exit {no_isolation.returncode}, plants that ran {ran_without_i!r}: "
                             f"{(no_isolation_err[-1] if no_isolation_err else 'no stderr')[:110]}")
 
-                # (b) `-S` removed, `-I` kept: `site` runs again at startup, so the interpreter is not site-free even
-                # though its path is clean. The child is REJECTED; `-I` still keeps the cwd hook out of reach.
-                no_site_flag = subprocess.run([sys.executable, "-I", "-c", transport.BOOTSTRAP],
-                                              input=transport.payload(probe_frames), env=dict(startup_env),
-                                              cwd=hostile, capture_output=True, timeout=120)
+                # (b) `-S` removed, `-I` kept, and NEITHER a plant nor `PYTHONPATH` in reach (V26-01). This is the honest
+                # case: `site` has already run by the time the bootstrap starts, so the only thing left to demonstrate is
+                # that the child DETECTS the missing flag and refuses to be measured. Nothing here claims to have
+                # prevented a system hook — that is the static invariant's job, checked above and in CI.
+                with tempfile.TemporaryDirectory() as neutral:
+                    neutral_env = {key: value for key, value in startup_env.items() if key != "PYTHONPATH"}
+                    no_site_flag = subprocess.run([sys.executable, "-I", "-c", transport.BOOTSTRAP],
+                                                  input=transport.payload(probe_frames), env=neutral_env,
+                                                  cwd=neutral, capture_output=True, timeout=120)
                 no_site_err = no_site_flag.stderr.decode().strip().splitlines()
-                ran_without_s = startup_ran()
-                report_case("-S removed, -I kept: the child is REJECTED and no cwd hook executes (V25-01)",
+                no_site_text = no_site_err[-1] if no_site_err else ""
+                report_case("-S removed: the child DETECTS the missing flag and refuses — prevention is static (V26-01)",
                             no_site_flag.returncode == transport.CHILD_REFUSED and no_site_flag.stdout == b""
-                            and ran_without_s == "",
-                            f"exit {no_site_flag.returncode}, plants that ran {ran_without_s!r}: "
-                            f"{(no_site_err[-1] if no_site_err else 'no stderr')[:110]}")
+                            and "DETECTION ONLY" in no_site_text,
+                            f"exit {no_site_flag.returncode}: {no_site_text[:130]}")
 
     with tempfile.TemporaryDirectory() as tmp:
         tree(tmp)
