@@ -175,6 +175,31 @@ jobs:
           set -euo pipefail
           PYTHONPATH=$PWD python -m tools.obs.probes.run_all --self-test 2>&1 | tee artifacts/probes/self-test.log
 
+      - name: "Mutation: dropping -I, -S or the guard call must FAIL the self-test (V25-01)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          pristine=artifacts/probes/probe_common.py.pristine
+          cp tools/obs/probes/probe_common.py "$pristine"
+          trap 'cp "$pristine" tools/obs/probes/probe_common.py' EXIT
+
+          mutate() {
+            local old="$1" new="$2" label="$3"
+            cp "$pristine" tools/obs/probes/probe_common.py
+            python3 -c 'import pathlib, sys; p = pathlib.Path("tools/obs/probes/probe_common.py"); t = p.read_text(encoding="utf-8"); old, new = sys.argv[1], sys.argv[2]; assert old in t, "mutation target missing: " + old; p.write_text(t.replace(old, new, 1), encoding="utf-8")' "$old" "$new"
+            if PYTHONPATH=$PWD python -m tools.obs.probes.run_all --self-test > "artifacts/probes/mutation-${label}.log" 2>&1; then
+              echo "MUTATION SURVIVED: ${label} did not fail the self-test" | tee -a artifacts/probes/mutation.log
+              return 1
+            fi
+            printf '%s: killed — %s\n' "$label" "$(grep -E '^(PASS|FAIL):' "artifacts/probes/mutation-${label}.log" | tail -1)" | tee -a artifacts/probes/mutation.log
+          }
+
+          : > artifacts/probes/mutation.log
+          mutate 'CHILD_FLAGS = ("-I", "-S")' 'CHILD_FLAGS = ("-I",)' no-I
+          mutate 'CHILD_FLAGS = ("-I", "-S")' 'CHILD_FLAGS = ("-S",)' no-S
+          mutate $'\nisolated()          # V25-01' $'\npass  # guard removed' no-guard
+          echo "all three mutations killed: the self-test failed for each" | tee -a artifacts/probes/mutation.log
+
       - name: Run the probe gate (fails on any mismatch, modified file, addition or deletion)
         id: gate
         shell: bash
@@ -200,6 +225,7 @@ jobs:
             artifacts/probes/manifest.json
             artifacts/probes/report.json
             artifacts/probes/self-test.log
+            artifacts/probes/mutation.log
             artifacts/probes/build.log
           if-no-files-found: error
       - name: Upload the built interposer alongside the evidence
